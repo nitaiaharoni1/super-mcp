@@ -128,20 +128,22 @@ A future global market (e.g., a scraped US chain) implements the same interface 
 
 - `GET /v1/products?q=&category=&brand=&gtin=` (search, Hebrew/English)
 - `GET /v1/products/{id}` (canonical product + per-chain listings)
-- `GET /v1/products/{id}/prices?city=&near=lat,lng&radius=` (cross-chain/branch comparison, promos applied, freshness ts)
+- `GET /v1/products/{id}/prices?city=&near=lat,lng&radius=&sort=price|unit_price` (default radius 10km; `unit_price` = cheaper per 100g/ml)
+- `GET /v1/products/{id}/substitutes?city=&near=&radius=` (cheaper similar products by unit price)
 - `GET /v1/products/{id}/history?store_id=&from=&to=`
-- `GET /v1/chains` · `GET /v1/stores?chain=&city=&near=`
+- `GET /v1/chains` · `GET /v1/stores?chain=&city=&near=&radius=` (default radius **10km** when `near` is set)
 - `GET /v1/promotions?store_id=&product_id=&active=true`
-- `POST /v1/basket/optimize` (body: `[{product_id|gtin|query, qty}]` plus location; returns per-store totals with promo math, missing-item handling, ranked result)
+- `POST /v1/basket/optimize` (body: `[{product_id|gtin|query, qty}]` **plus required** `city` and/or `near`; returns per-store totals with promo math, missing-item handling, ranked result + `cheapest`)
 - Auth: `Authorization: Bearer <api_key>` · per-key rate limits + metering · OpenAPI JSON served at `/openapi.json`
 
 ### MCP server (v1 tools, thin wrappers over the same services)
 
 - `search_products(query, filters?)`
 - `get_product(id | gtin)`
-- `compare_prices(product, location?)`
-- `optimize_basket(items[], location?)`
-- `list_stores(chain?, city?, near?)`
+- `compare_prices(product, location?, sort?)` — default 10km; `sort=unit_price` for per-100g
+- `suggest_substitutes(product, location?)` — cheaper similar products (location optional; nationwide if omitted)
+- `optimize_basket(items[], location)` — **location required** (`city` and/or `near`); returns `cheapest` recommendation
+- `list_stores(chain?, city?, near?, radius_km?)` — default 10km when `near` is set
 - `get_promotions(store?, product?)`
 
 Tool descriptions written for LLM consumption (when to use, what "location" accepts, freshness caveats). Remote MCP over Streamable HTTP on the same Cloud Run service, same API-key auth. This near-zero-marginal-cost dual surface is the core product bet: **one service layer, two protocols.**

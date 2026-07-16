@@ -15,6 +15,18 @@ describe("normalizePromoMechanic", () => {
     expect(m.params.percent).toBe(50);
   });
 
+  it("treats 1+1 as second unit free (100%), not 50%", () => {
+    const m = normalizePromoMechanic({ description: "1+1 קולה" });
+    expect(m.type).toBe("second_unit_pct");
+    expect(m.params.percent).toBe(100);
+  });
+
+  it("treats השני בחינם as second unit free", () => {
+    const m = normalizePromoMechanic({ description: "השני בחינם" });
+    expect(m.type).toBe("second_unit_pct");
+    expect(m.params.percent).toBe(100);
+  });
+
   it("keeps unknown as other", () => {
     const m = normalizePromoMechanic({ description: "מבצע מיוחד בסניף" });
     expect(m.type).toBe("other");

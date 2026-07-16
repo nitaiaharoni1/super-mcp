@@ -1,10 +1,12 @@
 import {
+  canonicalItemCode,
   computeUnitPrice,
   isGtinItem,
   normalizeGtin,
   type RawRecord,
 } from "@super-mcp/shared";
 import {
+  reapReclassifiedListing,
   resolveProduct,
   upsertChain,
   upsertListing,
@@ -12,6 +14,10 @@ import {
   upsertStore,
   upsertStorePrice,
 } from "@super-mcp/db";
+import { isStoreInIngestRegion, regionFilterEnabled } from "./regions.js";
+import { normalizeStoreCode } from "./storeCode.js";
+
+export { normalizeStoreCode } from "./storeCode.js";
 
 const CHAIN_NAMES: Record<string, { he: string; en: string }> = {
   "7290027600007": { he: "שופרסל", en: "Shufersal" },
@@ -22,22 +28,17 @@ const CHAIN_NAMES: Record<string, { he: string; en: string }> = {
   "7290700100008": { he: "חצי חינם", en: "Hazi Hinam" },
   "7290696200003": { he: "ויקטורי", en: "Victory" },
   "7290661400001": { he: "מחסני השוק", en: "Machsanei Hashuk" },
+  "7290055700007": { he: "קרפור", en: "Carrefour" },
+  "7290526500006": { he: "סלח דבאח", en: "Salach Dabach" },
+  "7290876100000": { he: "פרשמרקט", en: "Fresh Market" },
+  "7290639000004": { he: "סטופ מרקט", en: "Stop Market" },
+  "7290785400000": { he: "קשת טעמים", en: "Keshet Taamim" },
 };
 
 export interface NormalizeStats {
   rowsOk: number;
   rowsError: number;
   errors: string[];
-}
-
-/** Normalize chain-local store codes so "1" and "001" map to the same row. */
-export function normalizeStoreCode(code: string): string {
-  const trimmed = code.replace(/\u0000/g, "").trim();
-  if (!trimmed || trimmed === "unknown") return trimmed;
-  if (/^\d+$/.test(trimmed)) {
-    return String(parseInt(trimmed, 10)).padStart(3, "0");
-  }
-  return trimmed;
 }
 
 function scrub(value: string | undefined | null): string | undefined {
@@ -61,6 +62,7 @@ function scrubJson(value: unknown): unknown {
 
 export class Normalizer {
   private storeIds = new Map<string, string>(); // chainId:storeCode -> uuid
+  private chainsUpserted = new Set<string>();
   private sourceId: string;
 
   constructor(sourceId: string) {
@@ -88,23 +90,41 @@ export class Normalizer {
       en: record.chainId,
     };
 
-    await upsertChain({
-      id: record.chainId.replace(/\u0000/g, ""),
-      sourceId: this.sourceId,
-      market: "IL",
-      nameHe: names.he,
-      nameEn: names.en,
-    });
+    const cleanChainId = record.chainId.replace(/\u0000/g, "");
+    if (!this.chainsUpserted.has(cleanChainId)) {
+      await upsertChain({
+        id: cleanChainId,
+        sourceId: this.sourceId,
+        market: "IL",
+        nameHe: names.he,
+        nameEn: names.en,
+      });
+      this.chainsUpserted.add(cleanChainId);
+    }
 
     switch (record.kind) {
       case "store": {
         const storeCode = normalizeStoreCode(record.storeId);
+        const name = scrub(record.name) ?? `Store ${storeCode}`;
+        const city = scrub(record.city);
+        if (
+          regionFilterEnabled() &&
+          !isStoreInIngestRegion({
+            storeId: storeCode,
+            city,
+            lat: record.geo?.lat,
+            lng: record.geo?.lng,
+            name,
+          })
+        ) {
+          return; // Stores XML is nationwide; only keep coverage cities
+        }
         const id = await upsertStore({
           chainId: record.chainId.replace(/\u0000/g, ""),
           storeCode,
-          name: scrub(record.name) ?? `Store ${storeCode}`,
+          name,
           address: scrub(record.address),
-          city: scrub(record.city),
+          city,
           zip: scrub(record.zip),
           lat: record.geo?.lat,
           lng: record.geo?.lng,
@@ -120,6 +140,8 @@ export class Normalizer {
         const storeKey = `${record.chainId}:${storeCode}`;
         let storeUuid = this.storeIds.get(storeKey);
         if (!storeUuid) {
+          // Price files are already region-capped at discover time; stub is OK
+          // when Stores XML lacked this branch (e.g. PublishPrice HTML portals).
           storeUuid = await upsertStore({
             chainId: record.chainId.replace(/\u0000/g, ""),
             storeCode,
@@ -143,16 +165,26 @@ export class Normalizer {
 
         const productId = await resolveProduct({
           gtin,
+          // Chain-scoped identity for non-GTIN items so they aren't dropped entirely;
+          // never merged across chains (SPEC non-goal: no cross-chain match for non-GTIN).
+          sourceKey: gtin ? undefined : `${record.chainId}:${itemCode}`,
           name,
           brand,
           sizeQty: unit.measure.unparseable ? undefined : unit.measure.quantity,
           sizeUnit: unit.measure.unparseable ? undefined : unit.measure.unit,
         });
 
+        const chainId = record.chainId.replace(/\u0000/g, "");
+        const listingItemCode = canonicalItemCode(record.itemType, itemCode);
+        // Clean up the row this item would have used under the other GTIN
+        // classification, in case a borderline itemType/digit-length item
+        // flipped classification since it was last ingested.
+        await reapReclassifiedListing(chainId, listingItemCode, gtin ? itemCode : normalizeGtin(itemCode));
+
         const listingId = await upsertListing({
           productId,
-          chainId: record.chainId.replace(/\u0000/g, ""),
-          itemCode: gtin ?? itemCode,
+          chainId,
+          itemCode: listingItemCode,
           itemType: record.itemType,
           isGtin: gtinCapable,
           name,
@@ -200,7 +232,11 @@ export class Normalizer {
           startTs: record.startTs,
           endTs: record.endTs,
           sourceTs: record.ts,
-          itemCodes: record.itemCodes.map((c) => c.replace(/\u0000/g, "")),
+          itemCodes: record.itemCodes.map((c) =>
+            // Promo feeds don't carry ItemType; assume barcode-capable (type 1) so a
+            // padded GTIN maps to the same key the listing row is stored under.
+            canonicalItemCode(1, c.replace(/\u0000/g, "")),
+          ),
         });
         return;
       }

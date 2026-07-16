@@ -8,6 +8,7 @@ import {
   type RawRecord,
   type RawStoreRecord,
 } from "@super-mcp/shared";
+import { dateFromIlWallClock } from "./ilDate.js";
 
 export function decodeFeedBytes(bytes: Buffer): string {
   let buf = bytes;
@@ -45,16 +46,38 @@ function num(value: unknown): number | undefined {
 
 function parseIlDate(dateStr: string, hourStr?: string): Date {
   const d = dateStr.trim();
-  const h = (hourStr ?? "00:00:00").trim();
-  // YYYY-MM-DD or YYYY/MM/DD or DD/MM/YYYY
-  let iso: string | null = null;
+  // YYYY-MM-DD or YYYY/MM/DD or DD/MM/YYYY, optionally followed by a time.
+  let ymd: [number, number, number] | null = null;
   if (/^\d{4}[-/]\d{2}[-/]\d{2}/.test(d)) {
-    iso = `${d.replace(/\//g, "-")}T${h.length === 5 ? h + ":00" : h}`;
+    const [yyyy, mm, dd] = d.slice(0, 10).replace(/\//g, "-").split("-");
+    ymd = [Number(yyyy), Number(mm), Number(dd)];
   } else if (/^\d{2}\/\d{2}\/\d{4}/.test(d)) {
-    const [dd, mm, yyyy] = d.split("/");
-    iso = `${yyyy}-${mm}-${dd}T${h.length === 5 ? h + ":00" : h}`;
+    const [dd, mm, yyyy] = d.slice(0, 10).split("/");
+    ymd = [Number(yyyy), Number(mm), Number(dd)];
   }
-  const parsed = iso ? new Date(iso) : new Date(d);
+
+  if (ymd) {
+    // Prefer an explicit hour arg (promo start/end hour), else the time embedded
+    // in the date string itself (price feeds use "YYYY-MM-DD HH:MM:SS"), else midnight.
+    // Anchored to start/space/"T" (not a bare \b) so a "T"-separated ISO fallback
+    // (new Date().toISOString()) doesn't have its hour:minute skipped in favor of
+    // the following minute:second pair -- \b alone doesn't break between "T" and a digit.
+    const embedded = d.match(/(?:^|[ T])(\d{2}):(\d{2})(?::(\d{2}))?/);
+    const hSrc = hourStr?.trim() || (embedded ? `${embedded[1]}:${embedded[2]}:${embedded[3] ?? "00"}` : "00:00:00");
+    const hms = hSrc.length === 5 ? hSrc + ":00" : hSrc.length === 2 ? hSrc + ":00:00" : hSrc;
+    const [hh, min, sec] = hms.split(":");
+    const parsed = dateFromIlWallClock(
+      ymd[0],
+      ymd[1],
+      ymd[2],
+      Number(hh) || 0,
+      Number(min) || 0,
+      Number(sec) || 0,
+    );
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  }
+
+  const parsed = new Date(d);
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
@@ -74,6 +97,8 @@ export function parseStoresXml(xml: string, chainId: string): RawStoreRecord[] {
   const pushStore = (s: Record<string, unknown>) => {
     const storeId = text(s.StoreId ?? s.StoreID);
     if (!storeId) return;
+    const lat = num(s.Latitude ?? s.Lat ?? s.StoreLatitude);
+    const lng = num(s.Longitude ?? s.Lng ?? s.Lon ?? s.StoreLongitude);
     stores.push({
       kind: "store",
       chainId: text(s.ChainId ?? root.ChainId) || chainId,
@@ -82,6 +107,7 @@ export function parseStoresXml(xml: string, chainId: string): RawStoreRecord[] {
       address: text(s.Address) || undefined,
       city: text(s.City) || undefined,
       zip: text(s.ZipCode) || undefined,
+      geo: lat != null && lng != null ? { lat, lng } : undefined,
       raw: s,
     });
   };

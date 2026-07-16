@@ -15,14 +15,14 @@
     "ingest": "pnpm --filter @super-mcp/ingestion start",
     "ingest:fixture": "pnpm --filter @super-mcp/ingestion start -- --fixture",
     "create-key": "pnpm --filter @super-mcp/api create-key",
-    "typecheck": "pnpm -r run typecheck",
-    "test": "pnpm -r run test",
-    "lint": "pnpm -r run typecheck"
+    "typecheck": "pnpm build && pnpm -r run typecheck",
+    "test": "pnpm build && pnpm -r run test",
+    "lint": "pnpm typecheck"
   },
   "devDependencies": {
-    "typescript": "^5.8.3",
     "@types/node": "^22.15.21",
     "tsx": "^4.19.4",
+    "typescript": "^7.0.2",
     "vitest": "^3.1.4"
   }
 }

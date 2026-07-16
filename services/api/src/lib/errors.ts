@@ -9,9 +9,10 @@ export function toAppError(err: unknown): AppError {
     return new AppError("bad_request", "Invalid request parameters", 400, err.issues);
   }
   if (err instanceof Error) {
-    return new AppError("internal_error", err.message, 500);
+    // Do not leak internal error text (pg messages expose schema/SQL) to clients.
+    return new AppError("internal_error", "Internal server error", 500);
   }
-  return new AppError("internal_error", "Unknown error", 500);
+  return new AppError("internal_error", "Internal server error", 500);
 }
 
 export function sendError(reply: FastifyReply, err: unknown): void {

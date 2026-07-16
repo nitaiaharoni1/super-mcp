@@ -40,7 +40,7 @@ CREATE INDEX IF NOT EXISTS store_city_trgm ON store USING gin (city gin_trgm_ops
 
 CREATE TABLE IF NOT EXISTS product (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  gtin TEXT UNIQUE,                 -- null for non-GTIN (should be rare; prefer listing-only)
+  gtin TEXT UNIQUE,                 -- null for non-GTIN; see 002_non_gtin_products (source_key)
   name TEXT NOT NULL,
   brand TEXT,
   category_l1 TEXT,
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS ingestion_run (
   source_id TEXT NOT NULL,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   finished_at TIMESTAMPTZ,
-  status TEXT NOT NULL DEFAULT 'running', -- running|success|failed|empty
+  status TEXT NOT NULL DEFAULT 'running', -- running|success|degraded|failed|empty
   files_discovered INT NOT NULL DEFAULT 0,
   files_processed INT NOT NULL DEFAULT 0,
   rows_ok INT NOT NULL DEFAULT 0,

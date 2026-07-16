@@ -1,9 +1,17 @@
 import type { SourceAdapter } from "@super-mcp/shared";
 import { createCerberusAdapter } from "./cerberus.js";
 import { createShufersalAdapter } from "./shufersal.js";
+import { createCarrefourAdapter, createPublishPriceAdapter, PUBLISHPRICE_PORTALS } from "./publishprice.js";
 import { createFixtureAdapter } from "./fixture.js";
 
-export { createCerberusAdapter, createShufersalAdapter, createFixtureAdapter };
+export {
+  createCerberusAdapter,
+  createShufersalAdapter,
+  createCarrefourAdapter,
+  createPublishPriceAdapter,
+  createFixtureAdapter,
+  PUBLISHPRICE_PORTALS,
+};
 
 export function getAdapters(selection: string): SourceAdapter[] {
   switch (selection) {
@@ -13,10 +21,18 @@ export function getAdapters(selection: string): SourceAdapter[] {
       return [createCerberusAdapter()];
     case "il-shufersal":
       return [createShufersalAdapter()];
+    case "il-carrefour":
+      return [createCarrefourAdapter()];
     case "all":
-      return [createShufersalAdapter(), createCerberusAdapter()];
+      return [
+        createShufersalAdapter(),
+        createCerberusAdapter(),
+        ...PUBLISHPRICE_PORTALS.map((p) => createPublishPriceAdapter(p)),
+      ];
     default: {
-      throw new Error(`Unknown source '${selection}'. Use fixture|il-cerberus|il-shufersal|all`);
+      throw new Error(
+        `Unknown source '${selection}'. Use fixture|il-cerberus|il-shufersal|il-carrefour|all`,
+      );
     }
   }
 }

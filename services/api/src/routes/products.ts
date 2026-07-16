@@ -2,12 +2,14 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { AppError } from "@super-mcp/shared";
 import { parseNear } from "../lib/geo.js";
+import { DEFAULT_RADIUS_KM } from "../lib/defaults.js";
 import {
   getProductById,
   getProductHistory,
   getProductPrices,
   searchProducts,
 } from "../services/products.js";
+import { suggestSubstitutes } from "../services/substitutes.js";
 
 const idParamSchema = z.object({ id: z.string().uuid() });
 
@@ -22,8 +24,17 @@ const searchQuerySchema = z.object({
 const pricesQuerySchema = z.object({
   city: z.string().trim().optional(),
   near: z.string().trim().optional(),
-  radius_km: z.coerce.number().positive().max(200).optional().default(15),
+  radius_km: z.coerce.number().positive().max(200).optional().default(DEFAULT_RADIUS_KM),
   include_club: z.coerce.boolean().optional().default(true),
+  sort: z.enum(["price", "unit_price"]).optional().default("price"),
+});
+
+const substitutesQuerySchema = z.object({
+  city: z.string().trim().optional(),
+  near: z.string().trim().optional(),
+  radius_km: z.coerce.number().positive().max(200).optional().default(DEFAULT_RADIUS_KM),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(10),
+  cheaper_only: z.coerce.boolean().optional().default(true),
 });
 
 const historyQuerySchema = z.object({
@@ -57,6 +68,21 @@ export async function registerProductRoutes(app: FastifyInstance): Promise<void>
       near,
       radiusKm: q.radius_km,
       includeClub: q.include_club,
+      sortBy: q.sort,
+    });
+    return { data };
+  });
+
+  app.get("/v1/products/:id/substitutes", async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const q = substitutesQuerySchema.parse(request.query);
+    const near = parseNear(q.near);
+    const data = await suggestSubstitutes(id, {
+      city: q.city,
+      near,
+      radiusKm: q.radius_km,
+      limit: q.limit,
+      cheaperOnly: q.cheaper_only,
     });
     return { data };
   });

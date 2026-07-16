@@ -11,8 +11,9 @@ function createMcpServer(): McpServer {
       instructions:
         "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness " +
         "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. Start with search_products or " +
-        "get_product to resolve a product_id, then use compare_prices or optimize_basket for price questions, and " +
-        "get_promotions to explain discounted effective prices.",
+        "get_product to resolve a product_id, then use compare_prices / suggest_substitutes / optimize_basket. " +
+        "Location filters (city or near=lat,lng) default to a 10km radius when near is set. optimize_basket " +
+        "requires city and/or near. Use get_promotions to explain discounted effective prices.",
     },
   );
   registerTools(server);

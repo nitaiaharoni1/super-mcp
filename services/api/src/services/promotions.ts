@@ -77,7 +77,9 @@ export async function listPromotions(params: ListPromotionsParams): Promise<Prom
        AND (
          $2::uuid IS NULL OR EXISTS (
            SELECT 1 FROM promotion_item pi2
-           JOIN listing l2 ON l2.id = pi2.listing_id
+           JOIN listing l2 ON l2.chain_id = pr.chain_id
+             AND l2.item_code <> ''
+             AND (l2.item_code = pi2.item_code OR l2.item_code = regexp_replace(pi2.item_code, '\D', '', 'g'))
            WHERE pi2.promotion_id = pr.id AND l2.product_id = $2
          )
        )
@@ -120,11 +122,20 @@ export async function getActivePromotionsForListings(
     mechanic_type: PromoMechanicType;
     mechanic_params: Record<string, unknown>;
   }>(
-    `SELECT pi.listing_id, pr.store_id, pr.chain_id, pr.promo_code, pr.description,
+    // Join through listing.item_code at read time rather than trusting promotion_item.listing_id
+    // (which can be NULL forever if the promo file ingested before the price file, and can
+    // mismatch on raw-vs-normalized-GTIN item codes). Matches either the raw code or its
+    // digits-only form, since GTIN listings store item_code = normalizeGtin(itemCode).
+    // l.item_code <> '' guards against a promo item_code with zero digits (regexp_replace
+    // strips to '') fanning onto every listing that happens to have an empty item_code.
+    `SELECT l.id AS listing_id, pr.store_id, pr.chain_id, pr.promo_code, pr.description,
             pr.mechanic_type, pr.mechanic_params
      FROM promotion pr
      JOIN promotion_item pi ON pi.promotion_id = pr.id
-     WHERE pi.listing_id = ANY($1::uuid[])
+     JOIN listing l ON l.chain_id = pr.chain_id
+       AND l.item_code <> ''
+       AND (l.item_code = pi.item_code OR l.item_code = regexp_replace(pi.item_code, '\D', '', 'g'))
+     WHERE l.id = ANY($1::uuid[])
        AND pr.start_ts <= now() AND pr.end_ts >= now()
        AND ($2::boolean IS TRUE OR pr.club_only = false)`,
     [listingIds, includeClub],

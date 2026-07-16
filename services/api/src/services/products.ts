@@ -2,6 +2,7 @@ import { query } from "@super-mcp/db";
 import { applyPromoToUnitPrice, type FreshnessMeta } from "@super-mcp/shared";
 import { getActivePromotionsForListings, pickPromoForStore } from "./promotions.js";
 import { haversineKmSql, type GeoPoint } from "../lib/geo.js";
+import { resolveRadiusKm } from "../lib/defaults.js";
 
 export type Freshness = FreshnessMeta;
 
@@ -161,7 +162,9 @@ export interface ProductPriceRow {
   listingId: string;
   itemCode: string;
   listPrice: number;
+  /** ₪ per 100g, 100ml, or per unit (from ingestion). Null if package size was unparseable. */
   unitPrice: number | null;
+  unitBasis: "per_100g" | "per_100ml" | "per_unit" | "unknown";
   currency: string;
   effectivePrice: number;
   promoApplied: boolean;
@@ -186,13 +189,25 @@ interface PriceQueryRow {
   currency: string;
   source_ts: string;
   ingested_at: string;
+  size_unit: string | null;
 }
+
+export type PriceSortBy = "price" | "unit_price";
 
 export interface GetProductPricesParams {
   city?: string;
   near?: GeoPoint;
   radiusKm?: number;
   includeClub?: boolean;
+  /** `price` = cheapest shelf/effective total; `unit_price` = cheaper per 100g/100ml/unit. */
+  sortBy?: PriceSortBy;
+}
+
+function unitBasisFromSize(sizeUnit: string | null): ProductPriceRow["unitBasis"] {
+  if (sizeUnit === "g") return "per_100g";
+  if (sizeUnit === "ml") return "per_100ml";
+  if (sizeUnit === "unit") return "per_unit";
+  return "unknown";
 }
 
 export async function getProductPrices(
@@ -202,6 +217,7 @@ export async function getProductPrices(
   const params: unknown[] = [productId];
   let distanceSelect = "NULL::double precision AS distance_km";
   const conditions: string[] = [];
+  const sortBy: PriceSortBy = opts.sortBy === "unit_price" ? "unit_price" : "price";
 
   if (opts.city) {
     params.push(opts.city);
@@ -213,22 +229,28 @@ export async function getProductPrices(
     const lngIdx = params.length;
     const distanceExpr = haversineKmSql(latIdx, lngIdx, "st.lat", "st.lng");
     distanceSelect = `${distanceExpr} AS distance_km`;
-    if (opts.radiusKm != null) {
-      params.push(opts.radiusKm);
+    const radiusKm = resolveRadiusKm(opts.near, opts.radiusKm);
+    if (radiusKm != null) {
+      params.push(radiusKm);
       conditions.push(`st.lat IS NOT NULL AND st.lng IS NOT NULL AND ${distanceExpr} <= $${params.length}`);
     }
   }
 
   const whereClause = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
-  const orderBy = opts.near ? "distance_km ASC, sp.price ASC" : "sp.price ASC";
+  const orderBy =
+    sortBy === "unit_price"
+      ? "sp.unit_price ASC NULLS LAST, sp.price ASC"
+      : "sp.price ASC";
 
   const res = await query<PriceQueryRow>(
     `SELECT
        st.id AS store_id, st.name AS store_name, st.chain_id, c.name_he AS chain_name,
        st.city, st.address, st.lat, st.lng, ${distanceSelect},
        l.id AS listing_id, l.item_code,
-       sp.price, sp.unit_price, sp.currency, sp.source_ts, sp.ingested_at
+       sp.price, sp.unit_price, sp.currency, sp.source_ts, sp.ingested_at,
+       p.size_unit
      FROM listing l
+     JOIN product p ON p.id = l.product_id
      JOIN store_price sp ON sp.listing_id = l.id
      JOIN store st ON st.id = sp.store_id
      JOIN chain c ON c.id = st.chain_id
@@ -244,7 +266,7 @@ export async function getProductPrices(
   const listingIds = [...new Set(res.rows.map((r) => r.listing_id))];
   const promoMap = await getActivePromotionsForListings(listingIds, opts.includeClub ?? true);
 
-  return res.rows.map((r) => {
+  const mapped = res.rows.map((r) => {
     const listPrice = Number(r.price);
     const promo = pickPromoForStore(promoMap.get(r.listing_id), r.store_id, r.chain_id);
     let effectivePrice = listPrice;
@@ -275,6 +297,7 @@ export async function getProductPrices(
       itemCode: r.item_code,
       listPrice,
       unitPrice: r.unit_price != null ? Number(r.unit_price) : null,
+      unitBasis: unitBasisFromSize(r.size_unit),
       currency: r.currency,
       effectivePrice,
       promoApplied,
@@ -282,6 +305,23 @@ export async function getProductPrices(
       freshness: { sourceTs: r.source_ts, ingestedAt: r.ingested_at },
     };
   });
+
+  // SQL orders by list/unit price; promos are applied afterward. Re-rank so
+  // "cheapest first" is what the customer pays (or unit price when requested).
+  // Within a radius, price wins over distance (distance stays on each row).
+  mapped.sort((a, b) => {
+    if (sortBy === "unit_price") {
+      const ua = a.unitPrice ?? Infinity;
+      const ub = b.unitPrice ?? Infinity;
+      if (ua !== ub) return ua - ub;
+    }
+    if (a.effectivePrice !== b.effectivePrice) return a.effectivePrice - b.effectivePrice;
+    const da = a.distanceKm ?? Infinity;
+    const db = b.distanceKm ?? Infinity;
+    return da - db;
+  });
+
+  return mapped;
 }
 
 export interface ProductHistoryPoint {

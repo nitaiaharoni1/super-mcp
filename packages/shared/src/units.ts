@@ -150,5 +150,14 @@ export function isGtinItem(itemType: number, itemCode: string): boolean {
 }
 
 export function normalizeGtin(itemCode: string): string {
-  return itemCode.replace(/\D/g, "");
+  const digits = itemCode.replace(/\D/g, "");
+  // GS1 comparison ignores leading zeros (GTIN-14 is zero-padded; EAN-13 = 0 + UPC-A).
+  // Keep degenerate short codes as-is so we never return an empty/ambiguous key.
+  const stripped = digits.replace(/^0+/, "");
+  return stripped.length >= 8 ? stripped : digits;
+}
+
+/** The item_code a listing row is keyed on: normalized GTIN for barcode items, raw code otherwise. */
+export function canonicalItemCode(itemType: number, itemCode: string): string {
+  return isGtinItem(itemType, itemCode) ? normalizeGtin(itemCode) : itemCode;
 }

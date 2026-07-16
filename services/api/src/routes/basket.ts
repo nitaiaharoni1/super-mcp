@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { parseNear } from "../lib/geo.js";
+import { DEFAULT_RADIUS_KM } from "../lib/defaults.js";
 import { optimizeBasket } from "../services/basket.js";
 
 const itemSchema = z
@@ -18,7 +19,7 @@ const bodySchema = z.object({
   items: z.array(itemSchema).min(1).max(50),
   city: z.string().trim().optional(),
   near: z.string().trim().optional(),
-  radius_km: z.coerce.number().positive().max(200).optional().default(15),
+  radius_km: z.coerce.number().positive().max(200).optional().default(DEFAULT_RADIUS_KM),
   include_club: z.boolean().optional().default(true),
 });
 

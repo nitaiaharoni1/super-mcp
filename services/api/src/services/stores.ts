@@ -1,5 +1,6 @@
 import { query } from "@super-mcp/db";
 import { haversineKmSql, type GeoPoint } from "../lib/geo.js";
+import { resolveRadiusKm } from "../lib/defaults.js";
 
 export interface ChainSummary {
   id: string;
@@ -112,8 +113,9 @@ export async function listStores(params: ListStoresParams): Promise<StoreSummary
     const lngIdx = sqlParams.length;
     const distanceExpr = haversineKmSql(latIdx, lngIdx, "st.lat", "st.lng");
     distanceSelect = `${distanceExpr} AS distance_km`;
-    if (params.radiusKm != null) {
-      sqlParams.push(params.radiusKm);
+    const radiusKm = resolveRadiusKm(params.near, params.radiusKm);
+    if (radiusKm != null) {
+      sqlParams.push(radiusKm);
       conditions.push(`st.lat IS NOT NULL AND st.lng IS NOT NULL AND ${distanceExpr} <= $${sqlParams.length}`);
     }
   }

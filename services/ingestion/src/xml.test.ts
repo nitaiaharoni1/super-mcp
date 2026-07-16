@@ -33,4 +33,33 @@ describe("xml parsers", () => {
     expect(promos[0]?.mechanic.type).toBe("n_for_price");
     expect(promos[0]?.itemCodes).toContain("7290000173199");
   });
+
+  // Feed timestamps are Asia/Jerusalem wall-clock with no offset. These must map
+  // to the same UTC instant regardless of the runtime timezone (UTC on Cloud Run).
+  it("parses price timestamps as Israel local time (winter UTC+2)", () => {
+    const xml = pricesXml.replace(
+      "<PriceUpdateDate>2026-07-16</PriceUpdateDate>",
+      "<PriceUpdateDate>2024-01-15 08:00:00</PriceUpdateDate>",
+    );
+    const prices = parsePricesXml(xml, "7290027600007", "001");
+    expect(prices[0]?.ts.toISOString()).toBe("2024-01-15T06:00:00.000Z");
+  });
+
+  it("parses price timestamps as Israel local time (summer DST UTC+3)", () => {
+    const xml = pricesXml.replace(
+      "<PriceUpdateDate>2026-07-16</PriceUpdateDate>",
+      "<PriceUpdateDate>2024-07-15 08:00:00</PriceUpdateDate>",
+    );
+    const prices = parsePricesXml(xml, "7290027600007", "001");
+    expect(prices[0]?.ts.toISOString()).toBe("2024-07-15T05:00:00.000Z");
+  });
+
+  it("parses promo start/end hour as Israel local time", () => {
+    const xml = promosXml.replace(
+      "<PromotionStartDate>2026-07-01</PromotionStartDate>",
+      "<PromotionStartDate>2024-07-01</PromotionStartDate><PromotionStartHour>08:00</PromotionStartHour>",
+    );
+    const promos = parsePromosXml(xml, "7290058140886", "001");
+    expect(promos[0]?.startTs.toISOString()).toBe("2024-07-01T05:00:00.000Z");
+  });
 });

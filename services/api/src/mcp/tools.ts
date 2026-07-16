@@ -5,7 +5,9 @@ import { getProductById, getProductPrices, searchProducts } from "../services/pr
 import { listStores } from "../services/stores.js";
 import { listPromotions } from "../services/promotions.js";
 import { optimizeBasket } from "../services/basket.js";
+import { suggestSubstitutes } from "../services/substitutes.js";
 import { parseNear, type GeoPoint } from "../lib/geo.js";
+import { DEFAULT_RADIUS_KM, resolveRadiusKm } from "../lib/defaults.js";
 
 /** Shared location filter fields, reused across tools that scope results to a place. */
 const locationShape = {
@@ -22,7 +24,9 @@ const locationShape = {
     .positive()
     .max(200)
     .optional()
-    .describe("Search radius in km around 'near'. Defaults to 15km. Ignored without 'near'."),
+    .describe(
+      `Search radius in km around 'near'. Defaults to ${DEFAULT_RADIUS_KM}km when 'near' is set. Ignored without 'near'.`,
+    ),
 };
 
 function toGeo(near: string | undefined): GeoPoint | undefined {
@@ -34,7 +38,8 @@ function textResult(payload: unknown): { content: Array<{ type: "text"; text: st
 }
 
 function errorResult(err: unknown): { content: Array<{ type: "text"; text: string }>; isError: true } {
-  const message = err instanceof AppError ? err.message : err instanceof Error ? err.message : "Unknown error";
+  // Mirror REST: only AppError messages are safe for clients; never leak pg/SQL text.
+  const message = err instanceof AppError ? err.message : "Internal server error";
   return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
 }
 
@@ -55,8 +60,8 @@ export function registerTools(server: McpServer): void {
       description:
         "Search the canonical product catalog by free text (Hebrew or English), brand, category, or exact GTIN " +
         "barcode. Use this first when the user names a product loosely (e.g. 'milk' or 'חלב תנובה') to find its " +
-        "product_id before calling compare_prices or optimize_basket. Returns canonical products, not per-chain " +
-        "listings — call get_product for per-chain detail.",
+        "product_id before calling compare_prices, suggest_substitutes, or optimize_basket. Returns canonical " +
+        "products, not per-chain listings — call get_product for per-chain detail.",
       inputSchema: {
         query: z.string().optional().describe("Free text search, Hebrew or English, e.g. 'חלב תנובה' or 'olive oil'."),
         category: z.string().optional().describe("Filter by internal category slug (l1 or l2), e.g. 'dairy'."),
@@ -106,31 +111,79 @@ export function registerTools(server: McpServer): void {
     {
       title: "Compare prices across chains and branches",
       description:
-        "Compare one product's current price across chains and store branches, optionally scoped to a city or a " +
-        "'near' point + radius_km. Every price carries freshness: source_ts (when the chain published it) and " +
-        "ingested_at (when this service last ingested it) — treat source_ts older than ~48h as possibly stale and " +
-        "say so. Active promotions are applied to effective_price; list_price is always the unpromoted shelf price.",
+        "Compare one product's current price across chains and store branches within a city or near a point " +
+        `(default ${DEFAULT_RADIUS_KM}km). Results are sorted cheapest-first. Use sort='unit_price' to rank by ` +
+        "₪ per 100g / 100ml / unit (\"cheaper per 100g\") instead of pack price. Every price carries freshness: " +
+        "source_ts and ingested_at — treat source_ts older than ~48h as possibly stale. Active promotions are " +
+        "applied to effective_price; list_price is the unpromoted shelf price.",
       inputSchema: {
         product_id: z.string().uuid().optional().describe("Canonical product UUID, from search_products or get_product."),
         gtin: z.string().optional().describe("GTIN/barcode, used only if product_id is omitted."),
         ...locationShape,
+        sort: z
+          .enum(["price", "unit_price"])
+          .optional()
+          .describe(
+            "price = cheapest pack/effective total (default). unit_price = cheapest per 100g/100ml/unit.",
+          ),
         include_club: z
           .boolean()
           .optional()
           .describe("Whether to apply club-member-only promotions to effective_price. Defaults to true."),
       },
     },
-    async ({ product_id, gtin, city, near, radius_km, include_club }) => {
+    async ({ product_id, gtin, city, near, radius_km, sort, include_club }) => {
       try {
         const id = await resolveProductId(product_id, gtin);
         if (!id) return errorResult(new AppError("not_found", "Product not found", 404));
+        const geo = toGeo(near);
         const prices = await getProductPrices(id, {
           city,
-          near: toGeo(near),
-          radiusKm: radius_km,
+          near: geo,
+          radiusKm: resolveRadiusKm(geo, radius_km),
           includeClub: include_club,
+          sortBy: sort,
         });
-        return textResult({ product_id: id, prices });
+        return textResult({ product_id: id, sort: sort ?? "price", radius_km: resolveRadiusKm(geo, radius_km), prices });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "suggest_substitutes",
+    {
+      title: "Suggest cheaper similar products",
+      description:
+        "Given a product, suggest similar alternatives (same category and/or similar name) that are cheaper " +
+        "per 100g / 100ml / unit in nearby stores (default 10km when 'near' is set). Use when the user asks " +
+        "for a cheaper brand, private-label alternative, or \"cheaper per 100g\". Returns baseline unit price " +
+        "plus ranked substitutes with savings.",
+      inputSchema: {
+        product_id: z.string().uuid().optional().describe("Canonical product UUID."),
+        gtin: z.string().optional().describe("GTIN/barcode, used only if product_id is omitted."),
+        ...locationShape,
+        limit: z.number().int().min(1).max(50).optional().describe("Max substitutes, default 10."),
+        cheaper_only: z
+          .boolean()
+          .optional()
+          .describe("If true (default), only return substitutes with lower unit price than the baseline."),
+      },
+    },
+    async ({ product_id, gtin, city, near, radius_km, limit, cheaper_only }) => {
+      try {
+        const id = await resolveProductId(product_id, gtin);
+        if (!id) return errorResult(new AppError("not_found", "Product not found", 404));
+        const geo = toGeo(near);
+        const result = await suggestSubstitutes(id, {
+          city,
+          near: geo,
+          radiusKm: resolveRadiusKm(geo, radius_km),
+          limit,
+          cheaperOnly: cheaper_only,
+        });
+        return textResult(result);
       } catch (err) {
         return errorResult(err);
       }
@@ -140,13 +193,13 @@ export function registerTools(server: McpServer): void {
   server.registerTool(
     "optimize_basket",
     {
-      title: "Optimize a shopping basket across stores",
+      title: "Find the cheapest basket nearby",
       description:
         "Given a shopping list (each item identified by product_id, gtin, or a free-text query, plus qty), compute " +
         "the total cost per candidate store with active promotions applied, ranked cheapest and most-complete " +
-        "first. Items a store doesn't carry or has no current price for are listed under missing_items — never " +
-        "silently dropped — so check that list before recommending a store. Scope candidate stores with city " +
-        "and/or near + radius_km.",
+        `first within city or near+radius (default ${DEFAULT_RADIUS_KM}km). Response includes 'cheapest' — the ` +
+        "recommended store — plus full per-store breakdowns. Items a store doesn't carry are listed under " +
+        "missing_items — never silently dropped. Requires city and/or near.",
       inputSchema: {
         items: z
           .array(
@@ -169,6 +222,7 @@ export function registerTools(server: McpServer): void {
     },
     async ({ items, city, near, radius_km, include_club }) => {
       try {
+        const geo = toGeo(near);
         const result = await optimizeBasket({
           items: items.map((item) => ({
             productId: item.product_id,
@@ -177,8 +231,8 @@ export function registerTools(server: McpServer): void {
             qty: item.qty,
           })),
           city,
-          near: toGeo(near),
-          radiusKm: radius_km,
+          near: geo,
+          radiusKm: resolveRadiusKm(geo, radius_km),
           includeClub: include_club,
         });
         return textResult(result);
@@ -193,10 +247,9 @@ export function registerTools(server: McpServer): void {
     {
       title: "List store branches",
       description:
-        "List physical store branches, optionally filtered by chain id, city, or near a point + radius_km. Use to " +
-        "discover which branches exist in an area before scoping compare_prices/optimize_basket, or to show the " +
-        "user which branch a price applies to. Call get_promotions or the chains listing separately for chain names " +
-        "if needed.",
+        "List physical store branches, optionally filtered by chain id, city, or near a point + radius_km " +
+        `(default ${DEFAULT_RADIUS_KM}km). Use to discover which branches exist in an area before scoping ` +
+        "compare_prices/optimize_basket.",
       inputSchema: {
         chain: z.string().optional().describe("Chain id (the chain's legal barcode id) to filter by."),
         ...locationShape,
@@ -204,7 +257,13 @@ export function registerTools(server: McpServer): void {
     },
     async ({ chain, city, near, radius_km }) => {
       try {
-        const stores = await listStores({ chain, city, near: toGeo(near), radiusKm: radius_km });
+        const geo = toGeo(near);
+        const stores = await listStores({
+          chain,
+          city,
+          near: geo,
+          radiusKm: resolveRadiusKm(geo, radius_km),
+        });
         return textResult({ stores });
       } catch (err) {
         return errorResult(err);

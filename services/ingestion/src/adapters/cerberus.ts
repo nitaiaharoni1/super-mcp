@@ -6,53 +6,35 @@ import {
   type RawRecord,
   type SourceAdapter,
 } from "@super-mcp/shared";
-import { decodeFeedBytes, parseFeedXml } from "../xml.js";
+import { decodeFeedBytes, parseFeedXml, parseStoresXml } from "../xml.js";
+import { classifyFeedFile, parseFeedFileMeta } from "./feedMeta.js";
+import { selectRegionalFeedFiles } from "../selectRegionalFiles.js";
+import type { StoreLocationHint } from "../regions.js";
 
 export interface CerberusChainConfig {
   ftpUser: string;
   ftpPassword?: string;
   chainId: string;
   name: string;
+  /** Some Cerberus accounts require FTP over TLS. */
+  secure?: boolean;
 }
 
-/** Cerberus / publishedprices.co.il — multiple chains via FTP user config. */
+/**
+ * Cerberus / publishedprices.co.il — public FTP usernames (empty password).
+ * Config only; per-chain quirks stay out of the adapter logic.
+ */
 export const CERBERUS_CHAINS: CerberusChainConfig[] = [
   { ftpUser: "RamiLevi", chainId: "7290058140886", name: "Rami Levy" },
   { ftpUser: "yohananof", chainId: "7290803800003", name: "Yohananof" },
   { ftpUser: "osherad", chainId: "7290103152017", name: "Osher Ad" },
   { ftpUser: "TivTaam", chainId: "7290873255550", name: "Tiv Taam" },
   { ftpUser: "HaziHinam", chainId: "7290700100008", name: "Hazi Hinam" },
+  { ftpUser: "SalachD", chainId: "7290526500006", name: "Salach Dabach" },
+  { ftpUser: "freshmarket", chainId: "7290876100000", name: "Fresh Market" },
+  { ftpUser: "Stop_Market", chainId: "7290639000004", name: "Stop Market" },
+  { ftpUser: "Keshet", chainId: "7290785400000", name: "Keshet Taamim" },
 ];
-
-function classifyFile(name: string): FeedFile["kind"] {
-  const n = name.toLowerCase();
-  if (n.includes("pricefull")) return "pricesfull";
-  if (n.includes("promofull")) return "promosfull";
-  if (n.startsWith("promo") || n.includes("promo")) return "promos";
-  if (n.startsWith("price") || n.includes("price")) return "prices";
-  if (n.includes("store")) return "stores";
-  return "other";
-}
-
-function parseFileMeta(fileName: string): Pick<FeedFile, "storeId" | "publishedAt"> {
-  // PriceFull7290058140886-001-202403280000.xml.gz
-  const m = fileName.match(/(\d{13})-(\d+)-(\d{10,14})/i);
-  if (!m) return {};
-  const ts = m[3]!;
-  const y = ts.slice(0, 4);
-  const mo = ts.slice(4, 6);
-  const d = ts.slice(6, 8);
-  const hh = ts.slice(8, 10) || "00";
-  const mm = ts.slice(10, 12) || "00";
-  const storeRaw = m[2]!;
-  const storeId = /^\d+$/.test(storeRaw)
-    ? String(parseInt(storeRaw, 10)).padStart(3, "0")
-    : storeRaw;
-  return {
-    storeId,
-    publishedAt: new Date(`${y}-${mo}-${d}T${hh}:${mm}:00`),
-  };
-}
 
 async function downloadBuffer(client: Client, remotePath: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -64,6 +46,22 @@ async function downloadBuffer(client: Client, remotePath: string): Promise<Buffe
   });
   await client.downloadTo(writable, remotePath);
   return Buffer.concat(chunks);
+}
+
+async function connectCerberus(
+  client: Client,
+  host: string,
+  chain: CerberusChainConfig,
+): Promise<void> {
+  await client.access({
+    host,
+    user: chain.ftpUser,
+    password: chain.ftpPassword ?? "",
+    secure: chain.secure ?? false,
+    // Many Cerberus FTPS hosts present self-signed / incomplete chains; without this
+    // the daily ingest fails TLS handshake. Trade-off: MITM risk on the feed path.
+    secureOptions: chain.secure ? { rejectUnauthorized: false } : undefined,
+  });
 }
 
 export function createCerberusAdapter(
@@ -80,68 +78,80 @@ export function createCerberusAdapter(
     async discover(): Promise<FeedFile[]> {
       const discovered: FeedFile[] = [];
       const errors: string[] = [];
-      // Local default: first 2 configured chains unless SUPER_MCP_FULL=1
       const selected = full ? chains : chains.slice(0, 2);
 
       for (const chain of selected) {
         const client = new Client(45_000);
         client.ftp.verbose = false;
         try {
-          await client.access({
-            host,
-            user: chain.ftpUser,
-            password: chain.ftpPassword ?? "",
-            secure: false,
-          });
+          await connectCerberus(client, host, chain);
 
           const list = await client.list();
           const files = list.filter((f) => f.isFile || f.type === 1);
 
           const byKind = new Map<string, typeof files>();
           for (const f of files) {
-            const kind = classifyFile(f.name);
+            const kind = classifyFeedFile(f.name);
             if (kind === "other") continue;
             const arr = byKind.get(kind) ?? [];
             arr.push(f);
             byKind.set(kind, arr);
           }
 
+          const chainFiles: FeedFile[] = [];
           const storeFiles = (byKind.get("stores") ?? []).sort((a, b) =>
             b.name > a.name ? 1 : -1,
           );
+          let locations: StoreLocationHint[] = [];
+
           if (storeFiles[0]) {
-            discovered.push({
+            const storesFeed: FeedFile = {
               sourceId: "il-cerberus",
               kind: "stores",
               remotePath: storeFiles[0].name,
               fileName: storeFiles[0].name,
               chainId: chain.chainId,
               sizeBytes: storeFiles[0].size,
-            });
+            };
+            chainFiles.push(storesFeed);
+            try {
+              const bytes = await downloadBuffer(client, storeFiles[0].name);
+              const xml = decodeFeedBytes(bytes);
+              locations = parseStoresXml(xml, chain.chainId).map((s) => ({
+                storeId: s.storeId,
+                city: s.city,
+                lat: s.geo?.lat,
+                lng: s.geo?.lng,
+                name: s.name,
+              }));
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              errors.push(`${chain.ftpUser} stores: ${msg}`);
+            }
           }
 
           for (const kind of ["pricesfull", "promosfull"] as const) {
             const sorted = (byKind.get(kind) ?? []).sort((a, b) => (b.name > a.name ? 1 : -1));
             const seenStores = new Set<string>();
             for (const f of sorted) {
-              const meta = parseFileMeta(f.name);
+              const meta = parseFeedFileMeta(f.name);
               if (!meta.storeId) continue;
-              const storeId = meta.storeId;
-              if (seenStores.has(storeId)) continue;
-              seenStores.add(storeId);
-              discovered.push({
+              if (seenStores.has(meta.storeId)) continue;
+              seenStores.add(meta.storeId);
+              chainFiles.push({
                 sourceId: "il-cerberus",
                 kind,
                 remotePath: f.name,
                 fileName: f.name,
                 chainId: chain.chainId,
-                storeId,
+                storeId: meta.storeId,
                 publishedAt: meta.publishedAt,
                 sizeBytes: f.size,
               });
-              if (seenStores.size >= maxStores) break;
             }
           }
+
+          discovered.push(...selectRegionalFeedFiles(chainFiles, locations, maxStores));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`${chain.ftpUser}: ${msg}`);
@@ -166,12 +176,7 @@ export function createCerberusAdapter(
       if (!chain) throw new Error(`Unknown cerberus chain ${file.chainId}`);
       const client = new Client(120_000);
       try {
-        await client.access({
-          host,
-          user: chain.ftpUser,
-          password: chain.ftpPassword ?? "",
-          secure: false,
-        });
+        await connectCerberus(client, host, chain);
         const bytes = await downloadBuffer(client, file.remotePath);
         return {
           sourceId: "il-cerberus",

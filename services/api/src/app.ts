@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import { authenticate, recordUsage } from "./auth.js";
-import { sendError } from "./lib/errors.js";
+import { sendError, toAppError } from "./lib/errors.js";
 import { getOpenApiSpec } from "./openapi.js";
 import { registerProductRoutes } from "./routes/products.js";
 import { registerChainRoutes } from "./routes/chains.js";
@@ -18,7 +18,25 @@ function isPublicPath(url: string): boolean {
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+  const app = Fastify({
+    logger: {
+      level: process.env.LOG_LEVEL ?? "info",
+      // Keys can arrive via ?api_key=<key> (auth.ts). Strip the query string from the
+      // logged URL and redact the Authorization header so a raw key never reaches the logs.
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: (request.url.split("?")[0] ?? request.url),
+          };
+        },
+      },
+      redact: {
+        paths: ["req.headers.authorization", 'req.headers["authorization"]'],
+        remove: true,
+      },
+    },
+  });
 
   app.decorateRequest("auth", null);
   app.decorateRequest("startTime", 0);
@@ -45,7 +63,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
   });
 
-  app.setErrorHandler((err, _request, reply) => {
+  app.setErrorHandler((err, request, reply) => {
+    // Log the real error server-side; clients get an opaque internal_error (see errors.ts).
+    if (toAppError(err).statusCode >= 500) {
+      request.log.error({ err }, "request failed");
+    }
     sendError(reply, err);
   });
 

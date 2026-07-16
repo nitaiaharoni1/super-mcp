@@ -4,6 +4,7 @@ import { searchProducts, type Freshness } from "./products.js";
 import { listStores } from "./stores.js";
 import { getActivePromotionsForListings, pickPromoForStore } from "./promotions.js";
 import type { GeoPoint } from "../lib/geo.js";
+import { resolveRadiusKm } from "../lib/defaults.js";
 
 export interface BasketItemInput {
   productId?: string;
@@ -76,9 +77,26 @@ export interface BasketStoreResult {
   missingItems: BasketMissingItem[];
 }
 
+export interface BasketRecommendation {
+  storeId: string;
+  storeName: string;
+  chainId: string;
+  chainName: string;
+  total: number;
+  currency: string;
+  itemsFound: number;
+  itemsRequested: number;
+  distanceKm: number | null;
+  /** Why this store was picked as the cheapest practical option. */
+  reason: string;
+}
+
 export interface BasketOptimizeResult {
   items: BasketItemStatus[];
+  /** Candidate stores ranked cheapest / most-complete first. */
   stores: BasketStoreResult[];
+  /** Same as stores[0] when any store can fill at least one item; null otherwise. */
+  cheapest: BasketRecommendation | null;
 }
 
 async function resolveItems(items: BasketItemInput[]): Promise<ResolvedItem[]> {
@@ -158,6 +176,13 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
   if (input.items.length === 0) {
     throw new AppError("bad_request", "items must contain at least one entry", 400);
   }
+  if (!input.city && !input.near) {
+    throw new AppError(
+      "bad_request",
+      "a location is required: provide either 'city' or 'near' (lat,lng) to scope candidate stores",
+      400,
+    );
+  }
 
   const resolvedItems = await resolveItems(input.items);
   const itemStatuses: BasketItemStatus[] = resolvedItems.map((r) => ({
@@ -174,11 +199,11 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
   const candidateStores = await listStores({
     city: input.city,
     near: input.near,
-    radiusKm: input.radiusKm,
+    radiusKm: resolveRadiusKm(input.near, input.radiusKm),
   });
 
   if (productIds.length === 0 || candidateStores.length === 0) {
-    return { items: itemStatuses, stores: [] };
+    return { items: itemStatuses, stores: [], cheapest: null };
   }
 
   const storeIds = candidateStores.map((s) => s.id);
@@ -219,6 +244,7 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     const lines: BasketLine[] = [];
     const missingItems: BasketMissingItem[] = [];
     const byProduct = listingByChainAndProduct.get(store.chainId);
+    let storeCurrency: string | null = null;
 
     for (const item of resolvedItems) {
       if (!item.productId) {
@@ -254,6 +280,7 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
       }
 
       const listPrice = Number(priceRow.price);
+      if (storeCurrency === null) storeCurrency = priceRow.currency;
       const promo = pickPromoForStore(promoMap.get(listing.id), store.id, store.chainId);
       let lineTotal = listPrice * item.qty;
       let promoApplied = false;
@@ -288,7 +315,7 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     if (lines.length === 0) continue;
 
     const total = Math.round(lines.reduce((sum, l) => sum + l.lineTotal, 0) * 100) / 100;
-    const currency = priceRes.rows.find((r) => r.listing_id === lines[0]!.listingId)?.currency ?? "ILS";
+    const currency = storeCurrency ?? "ILS";
 
     storeResults.push({
       storeId: store.id,
@@ -313,5 +340,24 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     return a.total - b.total;
   });
 
-  return { items: itemStatuses, stores: storeResults };
+  const top = storeResults[0];
+  const cheapest: BasketRecommendation | null = top
+    ? {
+        storeId: top.storeId,
+        storeName: top.storeName,
+        chainId: top.chainId,
+        chainName: top.chainName,
+        total: top.total,
+        currency: top.currency,
+        itemsFound: top.itemsFound,
+        itemsRequested: top.itemsRequested,
+        distanceKm: top.distanceKm,
+        reason:
+          top.missingItems.length === 0
+            ? "Lowest total among nearby stores that carry the full basket (promos applied)."
+            : `Lowest total among nearby stores; missing ${top.missingItems.length} of ${top.itemsRequested} items.`,
+      }
+    : null;
+
+  return { items: itemStatuses, stores: storeResults, cheapest };
 }

@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts",
+    "check-integrity": "tsx src/check-integrity.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

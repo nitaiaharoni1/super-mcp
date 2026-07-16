@@ -54,9 +54,26 @@ export async function resolveApiKey(rawKey: string): Promise<AuthContext> {
 /** Sliding 60s window per key, held in memory (fine for a single local/dev instance). */
 const RATE_WINDOWS = new Map<string, number[]>();
 const WINDOW_MS = 60_000;
+let lastSweep = 0;
+
+/**
+ * Drops keys whose window has fully expired so the Map doesn't retain an entry for every
+ * key ever seen. Runs at most once per window to keep the hot path cheap.
+ */
+function sweepIdleWindows(now: number): void {
+  if (now - lastSweep < WINDOW_MS) return;
+  lastSweep = now;
+  const windowStart = now - WINDOW_MS;
+  for (const [key, timestamps] of RATE_WINDOWS) {
+    if (timestamps.length === 0 || timestamps[timestamps.length - 1]! <= windowStart) {
+      RATE_WINDOWS.delete(key);
+    }
+  }
+}
 
 export function checkRateLimit(apiKeyId: string, limitPerMinute: number): void {
   const now = Date.now();
+  sweepIdleWindows(now);
   const windowStart = now - WINDOW_MS;
   const timestamps = RATE_WINDOWS.get(apiKeyId) ?? [];
   const recent = timestamps.filter((t) => t > windowStart);

@@ -79,51 +79,70 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
 
 export interface ResolveProductInput {
   gtin: string | null;
+  /** Chain-scoped identity for non-GTIN items ("<chain_id>:<item_code>"), used only when gtin is null. */
+  sourceKey?: string;
   name: string;
   brand?: string;
   sizeQty?: number;
   sizeUnit?: string;
 }
 
-/** GTIN-first identity: same GTIN => one product. */
+/**
+ * GTIN-first identity: same GTIN => one product row, shared across chains/stores.
+ * Non-GTIN items get one chain-scoped product keyed by sourceKey
+ * ("<chain_id>:<item_code>"), never merged across chains.
+ *
+ * Uses INSERT … ON CONFLICT (atomic upsert) so parallel ingest jobs cannot
+ * create duplicate product rows for the same identity key.
+ */
 export async function resolveProduct(
   input: ResolveProductInput,
   client?: PoolClient,
 ): Promise<string | null> {
   const q = client ?? getPool();
-  if (!input.gtin) return null;
+  if (!input.gtin && !input.sourceKey) return null;
 
-  const existing = await q.query<{ id: string; name: string }>(
-    `SELECT id, name FROM product WHERE gtin = $1`,
-    [input.gtin],
-  );
-  if (existing.rows[0]) {
-    const current = existing.rows[0];
-    // Elect longer/more complete display name
-    const nextName =
-      (input.name?.length ?? 0) > current.name.length ? input.name : current.name;
-    await q.query(
-      `UPDATE product SET
-         name = $2,
-         brand = COALESCE($3, brand),
-         size_qty = COALESCE($4, size_qty),
-         size_unit = COALESCE($5, size_unit),
+  const name = input.name;
+  const brand = input.brand ?? null;
+  const sizeQty = input.sizeQty ?? null;
+  const sizeUnit = input.sizeUnit ?? null;
+
+  if (input.gtin) {
+    const res = await q.query<{ id: string }>(
+      `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit)
+       VALUES ($1, NULL, $2, $3, $4, $5)
+       ON CONFLICT (gtin) DO UPDATE SET
+         name = CASE
+           WHEN length(EXCLUDED.name) > length(product.name) THEN EXCLUDED.name
+           ELSE product.name
+         END,
+         brand = COALESCE(EXCLUDED.brand, product.brand),
+         size_qty = COALESCE(EXCLUDED.size_qty, product.size_qty),
+         size_unit = COALESCE(EXCLUDED.size_unit, product.size_unit),
          updated_at = now()
-       WHERE id = $1`,
-      [current.id, nextName, input.brand ?? null, input.sizeQty ?? null, input.sizeUnit ?? null],
+       RETURNING id`,
+      [input.gtin, name, brand, sizeQty, sizeUnit],
     );
-    return current.id;
+    return res.rows[0]!.id;
   }
 
-  const created = await q.query<{ id: string }>(
-    `INSERT INTO product (gtin, name, brand, size_qty, size_unit)
-     VALUES ($1,$2,$3,$4,$5)
+  const res = await q.query<{ id: string }>(
+    `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit)
+     VALUES (NULL, $1, $2, $3, $4, $5)
+     ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO UPDATE SET
+       name = CASE
+         WHEN length(EXCLUDED.name) > length(product.name) THEN EXCLUDED.name
+         ELSE product.name
+       END,
+       brand = COALESCE(EXCLUDED.brand, product.brand),
+       size_qty = COALESCE(EXCLUDED.size_qty, product.size_qty),
+       size_unit = COALESCE(EXCLUDED.size_unit, product.size_unit),
+       updated_at = now()
      RETURNING id`,
-    [input.gtin, input.name, input.brand ?? null, input.sizeQty ?? null, input.sizeUnit ?? null],
+    [input.sourceKey!, name, brand, sizeQty, sizeUnit],
   );
-  return created.rows[0]!.id;
+  return res.rows[0]!.id;
 }
-
 export interface UpsertListingInput {
   productId: string | null;
   chainId: string;
@@ -148,6 +167,8 @@ export async function upsertListing(input: UpsertListingInput, client?: PoolClie
      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (chain_id, item_code) DO UPDATE SET
        product_id = COALESCE(EXCLUDED.product_id, listing.product_id),
+       item_type = EXCLUDED.item_type,
+       is_gtin = EXCLUDED.is_gtin,
        name = EXCLUDED.name,
        brand = COALESCE(EXCLUDED.brand, listing.brand),
        qty = COALESCE(EXCLUDED.qty, listing.qty),
@@ -175,6 +196,39 @@ export async function upsertListing(input: UpsertListingInput, client?: PoolClie
   return res.rows[0]!.id;
 }
 
+/**
+ * Deletes a stale listing left behind when the same physical item flips GTIN
+ * classification across ingests (e.g. a borderline digit-length/itemType code
+ * that resolves differently one run to the next). Listing identity is keyed on
+ * (chain_id, item_code) where item_code = gtin ?? rawItemCode, so a flip makes
+ * ON CONFLICT miss and creates a second row instead of updating the first —
+ * orphaning the old one with stale price history and, once non-GTIN items got
+ * a persistent product identity, a stale product_id that duplicates search/
+ * basket results. Called with the *other* classification's key before every
+ * upsertListing; a no-op when the two keys are identical (the common case for
+ * clean feeds, since gtin == normalizeGtin(rawItemCode) already).
+ */
+export async function reapReclassifiedListing(
+  chainId: string,
+  currentItemCode: string,
+  otherItemCode: string,
+  client?: PoolClient,
+): Promise<void> {
+  if (currentItemCode === otherItemCode) return;
+  const q = client ?? getPool();
+  // promotion_item.listing_id references listing(id) with no ON DELETE clause (defaults to
+  // RESTRICT), so clear any dangling reference first or the DELETE throws a FK violation.
+  await q.query(
+    `UPDATE promotion_item SET listing_id = NULL
+     WHERE listing_id = (SELECT id FROM listing WHERE chain_id = $1 AND item_code = $2)`,
+    [chainId, otherItemCode],
+  );
+  await q.query(`DELETE FROM listing WHERE chain_id = $1 AND item_code = $2`, [
+    chainId,
+    otherItemCode,
+  ]);
+}
+
 export interface UpsertPriceInput {
   listingId: string;
   storeId: string;
@@ -194,7 +248,7 @@ export async function upsertStorePrice(input: UpsertPriceInput, client?: PoolCli
   const prevPrice = prev.rows[0] ? Number(prev.rows[0].price) : null;
   const changed = prevPrice == null || Math.abs(prevPrice - input.price) > 0.0005;
 
-  await q.query(
+  const upsertRes = await q.query(
     `INSERT INTO store_price (
        listing_id, store_id, price, unit_price, currency, allow_discount, source_ts, ingested_at
      ) VALUES ($1,$2,$3,$4,$5,$6,$7,now())
@@ -204,7 +258,8 @@ export async function upsertStorePrice(input: UpsertPriceInput, client?: PoolCli
        currency = EXCLUDED.currency,
        allow_discount = EXCLUDED.allow_discount,
        source_ts = EXCLUDED.source_ts,
-       ingested_at = now()`,
+       ingested_at = now()
+     WHERE store_price.source_ts <= EXCLUDED.source_ts`,
     [
       input.listingId,
       input.storeId,
@@ -215,8 +270,10 @@ export async function upsertStorePrice(input: UpsertPriceInput, client?: PoolCli
       input.sourceTs,
     ],
   );
+  // rowCount 0 => the conflict row was newer (stale replay); don't record history either.
+  const applied = (upsertRes.rowCount ?? 0) > 0;
 
-  if (changed) {
+  if (applied && changed) {
     await q.query(
       `INSERT INTO price_point (listing_id, store_id, price, unit_price, currency, source_ts)
        VALUES ($1,$2,$3,$4,$5,$6)`,

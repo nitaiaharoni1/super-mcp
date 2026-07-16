@@ -98,7 +98,12 @@ const priceRowSchema = {
     listingId: { type: "string", format: "uuid" },
     itemCode: { type: "string" },
     listPrice: { type: "number" },
-    unitPrice: { type: "number", nullable: true },
+    unitPrice: {
+      type: "number",
+      nullable: true,
+      description: "₪ per 100g, 100ml, or per unit (cheaper-per-100g comparison).",
+    },
+    unitBasis: { type: "string", enum: ["per_100g", "per_100ml", "per_unit", "unknown"] },
     currency: { type: "string" },
     effectivePrice: { type: "number", description: "listPrice with any applicable active promo applied." },
     promoApplied: { type: "boolean" },
@@ -150,7 +155,7 @@ const basketOptimizeRequestSchema = {
     items: { type: "array", items: basketItemInputSchema, minItems: 1, maxItems: 50 },
     city: { type: "string" },
     near: { type: "string", description: "'lat,lng', e.g. '32.078,34.774'." },
-    radius_km: { type: "number", default: 15 },
+    radius_km: { type: "number", default: 10, description: "Default 10km when 'near' is set." },
     include_club: { type: "boolean", default: true },
   },
 };
@@ -218,6 +223,23 @@ const basketOptimizeResponseSchema = {
           lines: { type: "array", items: basketLineSchema },
           missingItems: { type: "array", items: basketMissingItemSchema },
         },
+      },
+    },
+    cheapest: {
+      type: "object",
+      nullable: true,
+      description: "Recommended cheapest nearby store for this basket (same as stores[0] when present).",
+      properties: {
+        storeId: { type: "string", format: "uuid" },
+        storeName: { type: "string" },
+        chainId: { type: "string" },
+        chainName: { type: "string" },
+        total: { type: "number" },
+        currency: { type: "string" },
+        itemsFound: { type: "integer" },
+        itemsRequested: { type: "integer" },
+        distanceKm: { type: "number", nullable: true },
+        reason: { type: "string" },
       },
     },
   },
@@ -319,16 +341,89 @@ export function getOpenApiSpec(): Record<string, unknown> {
       },
       "/v1/products/{id}/prices": {
         get: {
-          summary: "Per-store prices, promos applied, with freshness",
+          summary: "Compare prices nearby (default 10km), promos applied",
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
             { name: "city", in: "query", schema: { type: "string" } },
             { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'" },
-            { name: "radius_km", in: "query", schema: { type: "number", default: 15 } },
+            { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
+            {
+              name: "sort",
+              in: "query",
+              schema: { type: "string", enum: ["price", "unit_price"], default: "price" },
+              description: "price = pack total; unit_price = cheaper per 100g/100ml/unit",
+            },
             { name: "include_club", in: "query", schema: { type: "boolean", default: true } },
           ],
           responses: {
             "200": { description: "OK", content: { "application/json": { schema: withData({ type: "array", items: priceRowSchema }) } } },
+            ...errorResponses,
+          },
+        },
+      },
+      "/v1/products/{id}/substitutes": {
+        get: {
+          summary: "Suggest cheaper similar products (by unit price)",
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+            { name: "city", in: "query", schema: { type: "string" } },
+            { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'" },
+            { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
+            { name: "limit", in: "query", schema: { type: "integer", default: 10, maximum: 50 } },
+            { name: "cheaper_only", in: "query", schema: { type: "boolean", default: true } },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: withData({
+                    type: "object",
+                    properties: {
+                      product: productSchema,
+                      baseline: {
+                        type: "object",
+                        properties: {
+                          bestUnitPrice: { type: "number", nullable: true },
+                          unitBasis: {
+                            type: "string",
+                            enum: ["per_100g", "per_100ml", "per_unit", "unknown"],
+                          },
+                          currency: { type: "string" },
+                          storeId: { type: "string", format: "uuid", nullable: true },
+                          storeName: { type: "string", nullable: true },
+                        },
+                      },
+                      substitutes: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            product: productSchema,
+                            bestUnitPrice: { type: "number" },
+                            unitBasis: {
+                              type: "string",
+                              enum: ["per_100g", "per_100ml", "per_unit", "unknown"],
+                            },
+                            currency: { type: "string" },
+                            storeId: { type: "string", format: "uuid" },
+                            storeName: { type: "string" },
+                            chainId: { type: "string" },
+                            chainName: { type: "string" },
+                            distanceKm: { type: "number", nullable: true },
+                            unitPriceSaving: { type: "number", nullable: true },
+                            matchReason: {
+                              type: "string",
+                              enum: ["same_category", "similar_name", "same_category_and_name"],
+                            },
+                          },
+                        },
+                      },
+                    },
+                  }),
+                },
+              },
+            },
             ...errorResponses,
           },
         },
@@ -385,7 +480,7 @@ export function getOpenApiSpec(): Record<string, unknown> {
             { name: "chain", in: "query", schema: { type: "string" } },
             { name: "city", in: "query", schema: { type: "string" } },
             { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'" },
-            { name: "radius_km", in: "query", schema: { type: "number" } },
+            { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
           ],
           responses: {
             "200": { description: "OK", content: { "application/json": { schema: withData({ type: "array", items: storeSchema }) } } },
@@ -409,7 +504,8 @@ export function getOpenApiSpec(): Record<string, unknown> {
       },
       "/v1/basket/optimize": {
         post: {
-          summary: "Optimize a shopping basket across candidate stores",
+          summary: "Find the cheapest basket nearby (default 10km)",
+          description: "Requires 'city' or 'near'. Returns ranked stores plus a 'cheapest' recommendation.",
           requestBody: {
             required: true,
             content: { "application/json": { schema: basketOptimizeRequestSchema } },

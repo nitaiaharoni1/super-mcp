@@ -73,10 +73,11 @@ export function normalizePromoMechanic(fields: PromoFields): RawPromoRecord["mec
     /second\s*(?:unit\s*)?\d+\s*%/i.test(desc)
   ) {
     const pct = desc.match(/(\d+)\s*%/);
+    const isBogo = /1\s*\+\s*1/i.test(desc) || /בחינם|free/i.test(desc);
     return {
       type: "second_unit_pct",
       params: {
-        percent: pct ? Number(pct[1]) : /בחינם|free/i.test(desc) ? 100 : 50,
+        percent: pct ? Number(pct[1]) : isBogo ? 100 : 50,
       },
       rawText: desc,
     };
