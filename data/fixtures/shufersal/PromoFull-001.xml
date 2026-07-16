@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Root>
+  <ChainId>7290027600007</ChainId>
+  <StoreId>001</StoreId>
+  <Promotion>
+    <PromotionId>SH-COTTAGE</PromotionId>
+    <PromotionDescription>2 ב-10 קוטג</PromotionDescription>
+    <PromotionStartDate>2026-07-01</PromotionStartDate>
+    <PromotionStartHour>00:00:00</PromotionStartHour>
+    <PromotionEndDate>2026-08-01</PromotionEndDate>
+    <PromotionEndHour>23:59:00</PromotionEndHour>
+    <MinQty>2</MinQty>
+    <ItemCode>7290110114853</ItemCode>
+  </Promotion>
+</Root>

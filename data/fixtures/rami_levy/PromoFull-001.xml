@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Root>
+  <ChainId>7290058140886</ChainId>
+  <StoreId>001</StoreId>
+  <Promotion>
+    <PromotionId>RL-MILK-2FOR20</PromotionId>
+    <PromotionDescription>2 ב-20 חלב תנובה</PromotionDescription>
+    <PromotionStartDate>2026-07-01</PromotionStartDate>
+    <PromotionStartHour>00:00:00</PromotionStartHour>
+    <PromotionEndDate>2026-08-15</PromotionEndDate>
+    <PromotionEndHour>23:59:00</PromotionEndHour>
+    <MinQty>2</MinQty>
+    <ItemCode>7290000173199</ItemCode>
+  </Promotion>
+</Root>

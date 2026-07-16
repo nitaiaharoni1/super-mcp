@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Root>
+  <ChainId>7290027600007</ChainId>
+  <ChainName>Shufersal</ChainName>
+  <Stores>
+    <Store>
+      <StoreId>001</StoreId>
+      <StoreName>שופרסל דיל תל אביב</StoreName>
+      <Address>דיזנגוף 50</Address>
+      <City>תל אביב</City>
+      <ZipCode>64332</ZipCode>
+    </Store>
+  </Stores>
+</Root>

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Root>
+  <ChainId>7290027600007</ChainId>
+  <StoreId>001</StoreId>
+  <Item>
+    <ItemCode>7290000173199</ItemCode><ItemType>1</ItemType><ItemName>חלב תנובה 3% 1 ליטר</ItemName>
+    <ManufacturerName>תנובה</ManufacturerName><Quantity>1</Quantity><UnitQty>ליטר</UnitQty>
+    <ItemPrice>8.10</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290110114853</ItemCode><ItemType>1</ItemType><ItemName>קוטג 5% תנובה 250 גרם</ItemName>
+    <ManufacturerName>תנובה</ManufacturerName><Quantity>250</Quantity><UnitQty>גרם</UnitQty>
+    <ItemPrice>5.70</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290003029776</ItemCode><ItemType>1</ItemType><ItemName>לחם אחיד פרוס 750 גרם</ItemName>
+    <ManufacturerName>אנגל</ManufacturerName><Quantity>750</Quantity><UnitQty>גרם</UnitQty>
+    <ItemPrice>9.20</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290112490463</ItemCode><ItemType>1</ItemType><ItemName>שמן זית יד מרדכי 750 מל</ItemName>
+    <ManufacturerName>יד מרדכי</ManufacturerName><Quantity>750</Quantity><UnitQty>מל</UnitQty>
+    <ItemPrice>34.90</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290000066323</ItemCode><ItemType>1</ItemType><ItemName>ביצים L ארוז 12 יח</ItemName>
+    <ManufacturerName>תנובה</ManufacturerName><Quantity>12</Quantity><UnitQty>יח</UnitQty>
+    <ItemPrice>15.50</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290119381234</ItemCode><ItemType>1</ItemType><ItemName>אורז בסמטי סוגת 1 קג</ItemName>
+    <ManufacturerName>סוגת</ManufacturerName><Quantity>1</Quantity><UnitQty>קג</UnitQty>
+    <ItemPrice>13.50</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290004135076</ItemCode><ItemType>1</ItemType><ItemName>פסטה ספגטי אסם 500 גרם</ItemName>
+    <ManufacturerName>אסם</ManufacturerName><Quantity>500</Quantity><UnitQty>גרם</UnitQty>
+    <ItemPrice>6.80</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290110571234</ItemCode><ItemType>1</ItemType><ItemName>קפה נמס עלית 200 גרם</ItemName>
+    <ManufacturerName>עלית</ManufacturerName><Quantity>200</Quantity><UnitQty>גרם</UnitQty>
+    <ItemPrice>29.90</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290019056123</ItemCode><ItemType>1</ItemType><ItemName>מיץ תפוזים פריגת 1.5 ליטר</ItemName>
+    <ManufacturerName>פריגת</ManufacturerName><Quantity>1.5</Quantity><UnitQty>ליטר</UnitQty>
+    <ItemPrice>12.50</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290112345678</ItemCode><ItemType>1</ItemType><ItemName>חומוס אחלה 750 גרם</ItemName>
+    <ManufacturerName>אחלה</ManufacturerName><Quantity>750</Quantity><UnitQty>גרם</UnitQty>
+    <ItemPrice>14.20</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+</Root>

@@ -1,0 +1,20 @@
+{
+  "name": "@super-mcp/ingestion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@super-mcp/db": "workspace:*",
+    "@super-mcp/shared": "workspace:*",
+    "basic-ftp": "^5.0.5",
+    "dotenv": "^16.5.0",
+    "fast-xml-parser": "^5.2.3",
+    "iconv-lite": "^0.6.3"
+  }
+}

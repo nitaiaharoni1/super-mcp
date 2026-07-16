@@ -1,0 +1,28 @@
+{
+  "name": "super-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Canonical supermarket data API + MCP for AI agents (Israel first)",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm --filter @super-mcp/api dev",
+    "db:migrate": "pnpm --filter @super-mcp/db migrate",
+    "db:seed": "pnpm --filter @super-mcp/db seed",
+    "ingest": "pnpm --filter @super-mcp/ingestion start",
+    "ingest:fixture": "pnpm --filter @super-mcp/ingestion start -- --fixture",
+    "create-key": "pnpm --filter @super-mcp/api create-key",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "@types/node": "^22.15.21",
+    "tsx": "^4.19.4",
+    "vitest": "^3.1.4"
+  }
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Root>
+  <ChainId>7290058140886</ChainId>
+  <ChainName>Rami Levy</ChainName>
+  <Stores>
+    <Store>
+      <StoreId>001</StoreId>
+      <StoreName>רמי לוי תל אביב</StoreName>
+      <Address>הארבעה 19</Address>
+      <City>תל אביב</City>
+      <ZipCode>64739</ZipCode>
+    </Store>
+  </Stores>
+</Root>
