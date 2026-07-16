@@ -51,6 +51,14 @@ describe("isStoreInIngestRegion", () => {
     // "יהודה" contains "יהוד" as a substring but is not the city Yehud:
     expect(isStoreInIngestRegion({ storeId: "3", name: "מרכז יהודה הלוי" })).toBe(false);
   });
+
+  it("matches the city field prefix only on whole-word boundaries", () => {
+    // "יהודה" (Yehuda) is not the covered town "יהוד" (Yehud) — same substring
+    // hazard as the name-hint path, but through the city field's prefix match.
+    expect(isStoreInIngestRegion({ storeId: "1", city: "יהודה" })).toBe(false);
+    // A real suffixed variant of a covered city keeps matching by whole words.
+    expect(isStoreInIngestRegion({ storeId: "2", city: "תל אביב יפו - מרכז" })).toBe(true);
+  });
 });
 
 describe("selectRegionalFeedFiles", () => {

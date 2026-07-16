@@ -141,15 +141,28 @@ export function normalizeCityKey(city: string): string {
     .toLowerCase();
 }
 
+/**
+ * True if `a` and `b` are equal, or the shorter is a whole-word prefix of the
+ * longer (next char after the shared prefix is a space) — never a bare
+ * substring/prefix match, so "יהוד" (Yehud) doesn't match "יהודה" (Yehuda).
+ */
+function isWholeWordPrefix(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+  return longer.startsWith(`${shorter} `);
+}
+
 function cityAllowed(city: string | undefined): boolean {
   if (!city) return false;
   const key = normalizeCityKey(city);
   if (COVERED_CITIES.has(key)) return true;
   if (key.length < 3) return false;
-  // Prefix match for variants like "תל אביב יפו - מרכז".
+  // Prefix match for variants like "תל אביב יפו - מרכז", but only on whole-word
+  // boundaries so a short covered town isn't a false-positive prefix of an
+  // unrelated place name (e.g. "יהוד" / Yehud vs "יהודה" / Yehuda).
   for (const allowed of COVERED_CITIES) {
     if (AMBIGUOUS_CITY_TOKENS.has(allowed)) continue;
-    if (key.startsWith(allowed) || allowed.startsWith(key)) return true;
+    if (isWholeWordPrefix(key, allowed)) return true;
   }
   return false;
 }

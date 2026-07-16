@@ -241,6 +241,10 @@ export interface UpsertPriceInput {
 
 export async function upsertStorePrice(input: UpsertPriceInput, client?: PoolClient): Promise<void> {
   const q = client ?? getPool();
+  // Known trade-off: `changed` is read before the guarded upsert, not in the same
+  // transaction, so a concurrent writer to the same (listing_id, store_id) could
+  // make it stale by commit time. Ingestion runs process rows serially today, so
+  // this is not currently reachable; revisit if concurrent same-source runs land.
   const prev = await q.query<{ price: string }>(
     `SELECT price::text FROM store_price WHERE listing_id = $1 AND store_id = $2`,
     [input.listingId, input.storeId],
