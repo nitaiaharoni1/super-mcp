@@ -70,26 +70,29 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
       }),
     );
 
-    let storesFeedFailed = false;
+    const failedStoreChains = new Set<string>();
     for (const file of storeFiles) {
       const stats = await processFeedFile(adapter, file, archiveRoot);
-      if (stats.fatal) storesFeedFailed = true;
+      if (stats.fatal) failedStoreChains.add(file.chainId);
       absorb(result, stats);
     }
 
-    if (storesFeedFailed) {
-      // Without the stores feed, region filtering and store identity are
-      // unreliable; ingesting prices would attach them to stub stores nationwide.
-      result.status = "failed";
+    // Skip price/promo files only for chains whose stores feed failed: their
+    // region filtering and store identity are unreliable, so ingesting prices
+    // would attach them to stub stores nationwide. Healthy chains still ingest.
+    // Skipped files leave filesProcessed < filesDiscovered, so classifyStatus
+    // marks the run degraded (or failed if every chain's stores feed failed).
+    const safePriceFiles = failedStoreChains.size
+      ? priceFiles.filter((f) => !failedStoreChains.has(f.chainId))
+      : priceFiles;
+    const skippedForBadStores = priceFiles.length - safePriceFiles.length;
+    if (skippedForBadStores > 0) {
       result.errorSummary =
         (result.errorSummary ? result.errorSummary + "; " : "") +
-        "stores feed failed; price/promo files skipped to avoid unfiltered ingest";
-      await finishRun(runId, result);
-      emitAlert(runId, result);
-      return result;
+        `${skippedForBadStores} price/promo file(s) skipped: stores feed failed for chain(s) ${[...failedStoreChains].join(", ")}`;
     }
 
-    const priceOutcomes = await mapPool(priceFiles, concurrency, async (file) => {
+    const priceOutcomes = await mapPool(safePriceFiles, concurrency, async (file) => {
       const stats = await processFeedFile(adapter, file, archiveRoot);
       console.log(
         JSON.stringify({

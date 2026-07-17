@@ -115,7 +115,12 @@ export class Normalizer {
           })
         ) {
           stats.regionFiltered++;
-          this.noteMiss("region_unmatched", city ?? name, { chainId: cleanChainId });
+          // Key on the city alone: an unmatched city is the actionable alias
+          // signal. A store with no city was dropped on geo/name grounds, not a
+          // city-alias gap, so it counts but isn't proposed. Keying on the store
+          // name would spam match_miss with a unique row per branch.
+          const c = city?.trim();
+          if (c) this.noteMiss("region_unmatched", c, { chainId: cleanChainId });
           return; // Stores XML is nationwide; only keep coverage cities
         }
         const id = await upsertStore({
@@ -163,9 +168,11 @@ export class Normalizer {
         );
         if (unit.measure.unparseable) {
           stats.unitUnparseable++;
-          this.noteMiss("unit_unparseable", `${unitLabel ?? ""}|${record.qty ?? ""}`, {
-            chainId: cleanChainId,
-          });
+          // Record the unit label alone (not qty): the growth loop dedupes by the
+          // unrecognized token to propose an alias. A missing label is a feed gap,
+          // not an alias gap, so it counts but isn't proposed.
+          const label = unitLabel?.trim();
+          if (label) this.noteMiss("unit_unparseable", label, { chainId: cleanChainId });
         }
 
         const productId = await resolveProduct({

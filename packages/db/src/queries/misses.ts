@@ -21,11 +21,12 @@ export async function recordMisses(misses: MatchMiss[]): Promise<void> {
     const term = m.term.trim().slice(0, 200);
     if (!term) continue;
     await pool.query(
+      // hit_count accumulates and last_seen tracks recency; context stays as the
+      // first-seen provenance (a single chainId can't represent all later hits).
       `INSERT INTO match_miss (kind, term, context, hit_count)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (kind, term) DO UPDATE SET
          hit_count = match_miss.hit_count + EXCLUDED.hit_count,
-         context = EXCLUDED.context,
          last_seen = now()`,
       [m.kind, term, JSON.stringify(m.context ?? {}), m.count ?? 1],
     );

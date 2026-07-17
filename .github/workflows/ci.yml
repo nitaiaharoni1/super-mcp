@@ -63,11 +63,17 @@ jobs:
       - name: Run benchmark (activation gate advisory)
         # Advisory for now: the activation gate (SUPER_MCP_BENCH_GATE=1) still
         # reports FAIL until the deterministic-first resolution work drives the
-        # unsafe-substitution and Herzliya forbidden-pick rates to target. It
-        # writes the report and prints the gate summary but does not fail the
-        # build. Flip to `SUPER_MCP_BENCH_GATE=1 pnpm db:benchmark-semantic`
-        # (drop the `|| true`) once the benchmark is green to enforce it.
-        run: SUPER_MCP_BENCH_REPORT="$GITHUB_WORKSPACE/benchmark-report.json" SUPER_MCP_BENCH_GATE=1 pnpm db:benchmark-semantic || true
+        # unsafe-substitution and Herzliya forbidden-pick rates to target. A
+        # gate FAIL does not fail the build, but a genuine crash still does:
+        # the script writes the report BEFORE the gate check, so a missing
+        # report means the benchmark itself broke. Once green, drop this
+        # tolerance to enforce the gate.
+        run: |
+          SUPER_MCP_BENCH_REPORT="$GITHUB_WORKSPACE/benchmark-report.json" \
+            SUPER_MCP_BENCH_GATE=1 pnpm db:benchmark-semantic \
+            || echo "activation gate not yet green (advisory; see report)"
+          test -s "$GITHUB_WORKSPACE/benchmark-report.json" \
+            || { echo "benchmark produced no report — it crashed"; exit 1; }
       - name: Fail on regression vs baseline (enforced)
         # Hard gate: prevents backsliding once a baseline is committed. No-ops
         # with a warning until packages/db/benchmarks/baseline.json exists.
