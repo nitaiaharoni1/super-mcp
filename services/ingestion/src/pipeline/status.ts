@@ -1,8 +1,4 @@
-import {
-  DEGRADED_ERROR_RATIO,
-  DEGRADED_FILE_FAILURE_RATIO,
-  type PipelineResult,
-} from "./types.js";
+import { DEGRADED_ERROR_RATIO, type PipelineResult } from "./types.js";
 
 /** True for any terminal status an operator should be alerted about. */
 export function isAlertable(status: PipelineResult["status"]): boolean {
@@ -19,11 +15,8 @@ export function classifyStatus(result: PipelineResult): PipelineResult["status"]
 
   if (result.priceFilesDiscovered === 0) return "degraded";
 
-  if (result.filesDiscovered > 0) {
-    const fileFailureRatio =
-      (result.filesDiscovered - result.filesProcessed) / result.filesDiscovered;
-    if (fileFailureRatio > DEGRADED_FILE_FAILURE_RATIO) return "degraded";
-  }
+  // A file we discovered but failed to process is lost data; never report success.
+  if (result.filesProcessed < result.filesDiscovered) return "degraded";
 
   const errorRatio = result.rowsError / (result.rowsOk + result.rowsError || 1);
   if (errorRatio > DEGRADED_ERROR_RATIO) return "degraded";

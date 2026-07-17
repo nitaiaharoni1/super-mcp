@@ -9,6 +9,9 @@ export function makePipelineResult(partial: Partial<PipelineResult> = {}): Pipel
     priceFilesDiscovered: 1,
     rowsOk: 0,
     rowsError: 0,
+    promoOtherRows: 0,
+    unitUnparseableRows: 0,
+    regionFilteredStores: 0,
     ...partial,
   };
 }

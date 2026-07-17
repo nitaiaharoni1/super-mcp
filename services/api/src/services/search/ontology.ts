@@ -84,6 +84,13 @@ export async function loadSemanticProfiles(
     if (!/product_semantic_profile|does not exist|relation|concept_terms|penalties/i.test(message)) {
       throw err;
     }
+    console.warn(
+      JSON.stringify({
+        event: "semantic_profiles_unavailable",
+        error: message,
+        fallback: "name_derived_profiles",
+      }),
+    );
   }
   return out;
 }

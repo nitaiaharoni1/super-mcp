@@ -71,6 +71,20 @@ describe("classifyStatus", () => {
       ),
     ).toBe("success");
   });
+
+  it("degrades when any discovered file goes unprocessed (10% loss is not success)", () => {
+    expect(
+      classifyStatus(
+        makePipelineResult({
+          filesDiscovered: 10,
+          priceFilesDiscovered: 9,
+          filesProcessed: 9,
+          rowsOk: 1000,
+          rowsError: 0,
+        }),
+      ),
+    ).toBe("degraded");
+  });
 });
 
 describe("isAlertable", () => {

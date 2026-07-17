@@ -12,12 +12,14 @@ import {
 } from "@super-mcp/shared";
 import {
   reapReclassifiedListing,
+  recordMisses,
   resolveProduct,
   upsertChain,
   upsertListing,
   upsertPromotion,
   upsertStore,
   upsertStorePrice,
+  type MatchMiss,
 } from "@super-mcp/db";
 import { isStoreInIngestRegion, regionFilterEnabled } from "./regions.js";
 import { normalizeStoreCode } from "./storeCode.js";
@@ -29,22 +31,40 @@ export interface NormalizeStats {
   rowsOk: number;
   rowsError: number;
   errors: string[];
+  promoOther: number;
+  unitUnparseable: number;
+  regionFiltered: number;
 }
 
 export class Normalizer {
   private storeIds = new Map<string, string>(); // chainId:storeCode -> uuid
   private chainsUpserted = new Set<string>();
   private sourceId: string;
+  private misses = new Map<string, MatchMiss>();
 
   constructor(sourceId: string) {
     this.sourceId = sourceId;
   }
 
+  private noteMiss(kind: MatchMiss["kind"], term: string, context?: Record<string, unknown>): void {
+    const key = `${kind} ${term}`;
+    const existing = this.misses.get(key);
+    if (existing) existing.count = (existing.count ?? 1) + 1;
+    else this.misses.set(key, { kind, term, count: 1, context });
+  }
+
   async apply(records: AsyncIterable<RawRecord> | Iterable<RawRecord>): Promise<NormalizeStats> {
-    const stats: NormalizeStats = { rowsOk: 0, rowsError: 0, errors: [] };
+    const stats: NormalizeStats = {
+      rowsOk: 0,
+      rowsError: 0,
+      errors: [],
+      promoOther: 0,
+      unitUnparseable: 0,
+      regionFiltered: 0,
+    };
     for await (const record of records as AsyncIterable<RawRecord>) {
       try {
-        await this.applyOne(record);
+        await this.applyOne(record, stats);
         stats.rowsOk++;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -55,10 +75,16 @@ export class Normalizer {
         if (stats.errors.length < 20) stats.errors.push(scrubNullChars(msg));
       }
     }
+    try {
+      await recordMisses([...this.misses.values()]);
+      this.misses.clear();
+    } catch {
+      // Miss telemetry must never fail an ingest run.
+    }
     return stats;
   }
 
-  private async applyOne(record: RawRecord): Promise<void> {
+  private async applyOne(record: RawRecord, stats: NormalizeStats): Promise<void> {
     const names = lookupChainNames(record.chainId);
 
     const cleanChainId = scrubNullChars(record.chainId);
@@ -88,6 +114,8 @@ export class Normalizer {
             name,
           })
         ) {
+          stats.regionFiltered++;
+          this.noteMiss("region_unmatched", city ?? name, { chainId: cleanChainId });
           return; // Stores XML is nationwide; only keep coverage cities
         }
         const id = await upsertStore({
@@ -133,6 +161,12 @@ export class Normalizer {
           unitLabel,
           record.isWeighted,
         );
+        if (unit.measure.unparseable) {
+          stats.unitUnparseable++;
+          this.noteMiss("unit_unparseable", `${unitLabel ?? ""}|${record.qty ?? ""}`, {
+            chainId: cleanChainId,
+          });
+        }
 
         const productId = await resolveProduct({
           gtin,
@@ -191,6 +225,14 @@ export class Normalizer {
             name: `Store ${storeCode}`,
           });
           this.storeIds.set(storeKey, storeUuid);
+        }
+        if (record.mechanic.type === "other") {
+          stats.promoOther++;
+          this.noteMiss(
+            "promo_other",
+            (record.mechanic.rawText ?? record.description ?? "").slice(0, 120),
+            { chainId: cleanChainId },
+          );
         }
         await upsertPromotion({
           chainId: scrubNullChars(record.chainId),

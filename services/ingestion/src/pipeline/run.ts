@@ -14,6 +14,9 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 function absorb(result: PipelineResult, stats: FileProcessStats): void {
   result.rowsOk += stats.ok;
   result.rowsError += stats.err;
+  result.promoOtherRows += stats.promoOther ?? 0;
+  result.unitUnparseableRows += stats.unitUnparseable ?? 0;
+  result.regionFilteredStores += stats.regionFiltered ?? 0;
   if (stats.processed) result.filesProcessed++;
   if (stats.fatal) {
     result.errorSummary = (result.errorSummary ? result.errorSummary + "; " : "") + stats.fatal;
@@ -36,6 +39,9 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
     filesProcessed: 0,
     rowsOk: 0,
     rowsError: 0,
+    promoOtherRows: 0,
+    unitUnparseableRows: 0,
+    regionFilteredStores: 0,
   };
 
   try {
@@ -64,8 +70,23 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
       }),
     );
 
+    let storesFeedFailed = false;
     for (const file of storeFiles) {
-      absorb(result, await processFeedFile(adapter, file, archiveRoot));
+      const stats = await processFeedFile(adapter, file, archiveRoot);
+      if (stats.fatal) storesFeedFailed = true;
+      absorb(result, stats);
+    }
+
+    if (storesFeedFailed) {
+      // Without the stores feed, region filtering and store identity are
+      // unreliable; ingesting prices would attach them to stub stores nationwide.
+      result.status = "failed";
+      result.errorSummary =
+        (result.errorSummary ? result.errorSummary + "; " : "") +
+        "stores feed failed; price/promo files skipped to avoid unfiltered ingest";
+      await finishRun(runId, result);
+      emitAlert(runId, result);
+      return result;
     }
 
     const priceOutcomes = await mapPool(priceFiles, concurrency, async (file) => {
@@ -88,6 +109,15 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
     for (const stats of priceOutcomes) absorb(result, stats);
 
     result.status = classifyStatus(result);
+    console.log(
+      JSON.stringify({
+        event: "ingestion_quality",
+        sourceId: adapter.sourceId,
+        promoOtherRows: result.promoOtherRows,
+        unitUnparseableRows: result.unitUnparseableRows,
+        regionFilteredStores: result.regionFilteredStores,
+      }),
+    );
     if (result.status === "degraded" && result.priceFilesDiscovered === 0) {
       result.errorSummary =
         (result.errorSummary ? result.errorSummary + "; " : "") +

@@ -9,6 +9,9 @@ export interface FileProcessStats {
   err: number;
   processed: boolean;
   fatal?: string;
+  promoOther?: number;
+  unitUnparseable?: number;
+  regionFiltered?: number;
 }
 
 function retryDelay(attempt: number): Promise<void> {
@@ -24,7 +27,14 @@ export async function processFeedFile(
     try {
       const parsed = await parseFeedFile(adapter, file, archiveRoot);
       const stats = await normalizeRecords(adapter.sourceId, parsed.records);
-      return { ok: stats.rowsOk, err: stats.rowsError, processed: true };
+      return {
+        ok: stats.rowsOk,
+        err: stats.rowsError,
+        processed: true,
+        promoOther: stats.promoOther,
+        unitUnparseable: stats.unitUnparseable,
+        regionFiltered: stats.regionFiltered,
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (attempt >= MAX_TRANSIENT_FILE_ATTEMPTS || !isTransientIngestionError(msg)) {
