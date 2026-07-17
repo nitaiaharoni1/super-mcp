@@ -14,15 +14,19 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "migrate": "tsx src/migrate.ts",
-    "seed": "tsx src/seed.ts",
-    "check-integrity": "tsx src/check-integrity.ts",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "seed": "tsx src/scripts/seed.ts",
+    "embed-products": "tsx src/scripts/embedProducts.ts",
+    "semantic-index": "tsx src/scripts/embedProducts.ts",
+    "benchmark-semantic": "tsx src/scripts/benchmarkSemantic.ts",
+    "check-integrity": "tsx src/scripts/check-integrity.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@super-mcp/shared": "workspace:*",
-    "pg": "^8.16.0",
-    "dotenv": "^16.5.0"
+    "dotenv": "^16.5.0",
+    "pg": "^8.16.0"
   },
   "devDependencies": {
     "@types/pg": "^8.15.2"

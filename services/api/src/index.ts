@@ -13,6 +13,9 @@ async function main(): Promise<void> {
   const app = await buildApp();
   await app.listen({ port: PORT, host: HOST });
   app.log.info(`super-mcp API + MCP listening on http://${HOST}:${PORT} (MCP at /mcp)`);
+  void import("./services/search/queryEmbedding.js").then((m) =>
+    m.getQueryEmbedding("warmup").catch(() => undefined),
+  );
 }
 
 main().catch((err: unknown) => {

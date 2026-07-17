@@ -1,8 +1,13 @@
 import {
   canonicalItemCode,
+  canonicalizeCity,
   computeUnitPrice,
   isGtinItem,
+  lookupChainNames,
   normalizeGtin,
+  scrubJson,
+  scrubNullChars,
+  scrubOptionalText,
   type RawRecord,
 } from "@super-mcp/shared";
 import {
@@ -16,48 +21,14 @@ import {
 } from "@super-mcp/db";
 import { isStoreInIngestRegion, regionFilterEnabled } from "./regions.js";
 import { normalizeStoreCode } from "./storeCode.js";
+import { isTransientIngestionError } from "./transient.js";
 
 export { normalizeStoreCode } from "./storeCode.js";
-
-const CHAIN_NAMES: Record<string, { he: string; en: string }> = {
-  "7290027600007": { he: "שופרסל", en: "Shufersal" },
-  "7290058140886": { he: "רמי לוי", en: "Rami Levy" },
-  "7290803800003": { he: "יוחננוף", en: "Yohananof" },
-  "7290103152017": { he: "אושר עד", en: "Osher Ad" },
-  "7290873255550": { he: "טיב טעם", en: "Tiv Taam" },
-  "7290700100008": { he: "חצי חינם", en: "Hazi Hinam" },
-  "7290696200003": { he: "ויקטורי", en: "Victory" },
-  "7290661400001": { he: "מחסני השוק", en: "Machsanei Hashuk" },
-  "7290055700007": { he: "קרפור", en: "Carrefour" },
-  "7290526500006": { he: "סלח דבאח", en: "Salach Dabach" },
-  "7290876100000": { he: "פרשמרקט", en: "Fresh Market" },
-  "7290639000004": { he: "סטופ מרקט", en: "Stop Market" },
-  "7290785400000": { he: "קשת טעמים", en: "Keshet Taamim" },
-};
 
 export interface NormalizeStats {
   rowsOk: number;
   rowsError: number;
   errors: string[];
-}
-
-function scrub(value: string | undefined | null): string | undefined {
-  if (value == null) return undefined;
-  const cleaned = value.replace(/\u0000/g, "").trim();
-  return cleaned.length ? cleaned : undefined;
-}
-
-function scrubJson(value: unknown): unknown {
-  if (typeof value === "string") return value.replace(/\u0000/g, "");
-  if (Array.isArray(value)) return value.map(scrubJson);
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k.replace(/\u0000/g, "")] = scrubJson(v);
-    }
-    return out;
-  }
-  return value;
 }
 
 export class Normalizer {
@@ -76,21 +47,21 @@ export class Normalizer {
         await this.applyOne(record);
         stats.rowsOk++;
       } catch (err) {
-        stats.rowsError++;
         const msg = err instanceof Error ? err.message : String(err);
-        if (stats.errors.length < 20) stats.errors.push(msg.replace(/\u0000/g, ""));
+        // Abort the file so the pipeline can retry it from the beginning.
+        // Upserts are idempotent, so rows committed before the disconnect are safe to replay.
+        if (isTransientIngestionError(msg)) throw err;
+        stats.rowsError++;
+        if (stats.errors.length < 20) stats.errors.push(scrubNullChars(msg));
       }
     }
     return stats;
   }
 
   private async applyOne(record: RawRecord): Promise<void> {
-    const names = CHAIN_NAMES[record.chainId] ?? {
-      he: record.chainId,
-      en: record.chainId,
-    };
+    const names = lookupChainNames(record.chainId);
 
-    const cleanChainId = record.chainId.replace(/\u0000/g, "");
+    const cleanChainId = scrubNullChars(record.chainId);
     if (!this.chainsUpserted.has(cleanChainId)) {
       await upsertChain({
         id: cleanChainId,
@@ -105,8 +76,8 @@ export class Normalizer {
     switch (record.kind) {
       case "store": {
         const storeCode = normalizeStoreCode(record.storeId);
-        const name = scrub(record.name) ?? `Store ${storeCode}`;
-        const city = scrub(record.city);
+        const name = scrubOptionalText(record.name) ?? `Store ${storeCode}`;
+        const city = canonicalizeCity(scrubOptionalText(record.city));
         if (
           regionFilterEnabled() &&
           !isStoreInIngestRegion({
@@ -120,12 +91,12 @@ export class Normalizer {
           return; // Stores XML is nationwide; only keep coverage cities
         }
         const id = await upsertStore({
-          chainId: record.chainId.replace(/\u0000/g, ""),
+          chainId: scrubNullChars(record.chainId),
           storeCode,
           name,
-          address: scrub(record.address),
+          address: scrubOptionalText(record.address),
           city,
-          zip: scrub(record.zip),
+          zip: scrubOptionalText(record.zip),
           lat: record.geo?.lat,
           lng: record.geo?.lng,
         });
@@ -143,17 +114,17 @@ export class Normalizer {
           // Price files are already region-capped at discover time; stub is OK
           // when Stores XML lacked this branch (e.g. PublishPrice HTML portals).
           storeUuid = await upsertStore({
-            chainId: record.chainId.replace(/\u0000/g, ""),
+            chainId: scrubNullChars(record.chainId),
             storeCode,
             name: `Store ${storeCode}`,
           });
           this.storeIds.set(storeKey, storeUuid);
         }
 
-        const name = scrub(record.name) ?? record.itemCode.replace(/\u0000/g, "");
-        const brand = scrub(record.brand);
-        const unitLabel = scrub(record.unit);
-        const itemCode = record.itemCode.replace(/\u0000/g, "");
+        const name = scrubOptionalText(record.name) ?? scrubNullChars(record.itemCode);
+        const brand = scrubOptionalText(record.brand);
+        const unitLabel = scrubOptionalText(record.unit);
+        const itemCode = scrubNullChars(record.itemCode);
         const gtinCapable = isGtinItem(record.itemType, itemCode);
         const gtin = gtinCapable ? normalizeGtin(itemCode) : null;
         const unit = computeUnitPrice(
@@ -174,7 +145,7 @@ export class Normalizer {
           sizeUnit: unit.measure.unparseable ? undefined : unit.measure.unit,
         });
 
-        const chainId = record.chainId.replace(/\u0000/g, "");
+        const chainId = scrubNullChars(record.chainId);
         const listingItemCode = canonicalItemCode(record.itemType, itemCode);
         // Clean up the row this item would have used under the other GTIN
         // classification, in case a borderline itemType/digit-length item
@@ -200,7 +171,9 @@ export class Normalizer {
           listingId,
           storeId: storeUuid,
           price: record.price,
-          unitPrice: unit.pricePerCanonical,
+          // Prefer our canonical unit math; fall back to the feed's UnitOfMeasurePrice
+          // when Hebrew unit labels don't parse (common for "יחידות" / missing qty).
+          unitPrice: unit.pricePerCanonical ?? record.unitPrice ?? null,
           currency: record.currency ?? "ILS",
           allowDiscount: record.allowDiscount,
           sourceTs: record.ts,
@@ -213,21 +186,21 @@ export class Normalizer {
         let storeUuid = this.storeIds.get(storeKey) ?? null;
         if (!storeUuid && storeCode && storeCode !== "unknown") {
           storeUuid = await upsertStore({
-            chainId: record.chainId.replace(/\u0000/g, ""),
+            chainId: scrubNullChars(record.chainId),
             storeCode,
             name: `Store ${storeCode}`,
           });
           this.storeIds.set(storeKey, storeUuid);
         }
         await upsertPromotion({
-          chainId: record.chainId.replace(/\u0000/g, ""),
+          chainId: scrubNullChars(record.chainId),
           storeId: storeUuid,
           storeCode,
-          promoCode: record.promoId.replace(/\u0000/g, ""),
-          description: scrub(record.description) ?? record.promoId.replace(/\u0000/g, ""),
+          promoCode: scrubNullChars(record.promoId),
+          description: scrubOptionalText(record.description) ?? scrubNullChars(record.promoId),
           mechanicType: record.mechanic.type,
           mechanicParams: scrubJson(record.mechanic.params) as Record<string, unknown>,
-          rawText: scrub(record.mechanic.rawText),
+          rawText: scrubOptionalText(record.mechanic.rawText),
           clubOnly: Boolean(record.clubOnly),
           startTs: record.startTs,
           endTs: record.endTs,
@@ -235,7 +208,7 @@ export class Normalizer {
           itemCodes: record.itemCodes.map((c) =>
             // Promo feeds don't carry ItemType; assume barcode-capable (type 1) so a
             // padded GTIN maps to the same key the listing row is stored under.
-            canonicalItemCode(1, c.replace(/\u0000/g, "")),
+            canonicalItemCode(1, scrubNullChars(c)),
           ),
         });
         return;

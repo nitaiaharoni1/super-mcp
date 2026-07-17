@@ -1,0 +1,343 @@
+{
+  "version": 1,
+  "description": "Labeled Hebrew grocery queries for semantic retrieval quality. Product IDs may be empty offline; when empty, acceptableNameSubstrings / forbiddenNameSubstrings resolve against live catalog names. Placeholder UUIDs exist for structure/wiring tests only.",
+  "k": 10,
+  "cases": [
+    {
+      "query": "פרגיות עוף טרי",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["פרגיות", "עוף", "טרי"],
+      "forbiddenNameSubstrings": ["קפוא", "הודו"],
+      "notes": "meat + species + freshness; local-stock city; unsafe frozen/turkey substitutions"
+    },
+    {
+      "query": "שניצל עוף",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["שניצל"],
+      "forbiddenNameSubstrings": ["הודו", "בקר"],
+      "notes": "meat cut + species constraint"
+    },
+    {
+      "query": "חלב תנובה 3%",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["חלב", "תנובה"],
+      "forbiddenNameSubstrings": ["סויה", "שקדים"],
+      "notes": "dairy + brand"
+    },
+    {
+      "query": "יוגורט 8% 200 מ״ל",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["יוגורט"],
+      "forbiddenNameSubstrings": [],
+      "notes": "dairy + pack size"
+    },
+    {
+      "query": "גבינה צהובה כשרה",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["גבינה"],
+      "forbiddenNameSubstrings": [],
+      "notes": "dairy + kosher dietary constraint"
+    },
+    {
+      "query": "עגבניות שרי",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["עגבני"],
+      "forbiddenNameSubstrings": ["רסק", "רוטב"],
+      "notes": "produce"
+    },
+    {
+      "query": "מלפפון טרי",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["מלפפון"],
+      "forbiddenNameSubstrings": ["חמוץ", "כבוש", "במלח"],
+      "notes": "produce + freshness"
+    },
+    {
+      "query": "שמן זית 750 מ״ל",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["שמן זית", "זית"],
+      "forbiddenNameSubstrings": ["קנולה", "חמניות"],
+      "notes": "pantry + pack size"
+    },
+    {
+      "query": "אורז בסמטי",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["אורז", "בסמטי"],
+      "forbiddenNameSubstrings": [],
+      "notes": "pantry"
+    },
+    {
+      "query": "קוטג׳ תנובה 5% 250 גרם",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["קוטג", "תנובה"],
+      "forbiddenNameSubstrings": [],
+      "notes": "dairy brand + pack size"
+    },
+    {
+      "query": "חלב טרה 1 ליטר",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["חלב", "טרה"],
+      "forbiddenNameSubstrings": ["תנובה"],
+      "notes": "brand preference vs competing dairy brand"
+    },
+    {
+      "query": "עוף כשר טרי",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["עוף"],
+      "forbiddenNameSubstrings": ["קפוא", "הודו"],
+      "notes": "species + kosher + freshness"
+    },
+    {
+      "query": "בשר בקר טחון",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["בקר", "טחון"],
+      "forbiddenNameSubstrings": ["עוף", "הודו"],
+      "notes": "meat species constraint"
+    },
+    {
+      "query": "ירכיים עוף",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["פרגיות", "ירכיים", "עוף"],
+      "forbiddenNameSubstrings": ["הודו"],
+      "notes": "unknown synonym for thighs/פרגיות"
+    },
+    {
+      "query": "חלל 3%",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["חלב"],
+      "forbiddenNameSubstrings": [],
+      "notes": "mild misspelling of חלב"
+    },
+    {
+      "query": "שניצאל עוף",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["שניצל"],
+      "forbiddenNameSubstrings": ["הודו"],
+      "notes": "mild misspelling of שניצל"
+    },
+    {
+      "query": "פרגיות עוף טרי",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": ["00000000-0000-4000-8000-000000000101"],
+      "forbiddenProductIds": [
+        "00000000-0000-4000-8000-000000000201",
+        "00000000-0000-4000-8000-000000000202"
+      ],
+      "acceptableNameSubstrings": ["פרגיות עוף טרי"],
+      "forbiddenNameSubstrings": ["קפוא", "הודו"],
+      "notes": "unsafe negative substitutions; placeholder UUIDs for structure tests (live DB prefers name substrings when IDs absent from catalog)"
+    },
+    {
+      "query": "פרגיות",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["פרגיות"],
+      "forbiddenNameSubstrings": ["קפוא", "נקניק", "פסטרמה"],
+      "notes": "local-stock style: prefer Herzliya-priced fresh thighs over global-only frozen"
+    },
+    {
+      "query": "חלב",
+      "location": {},
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["חלב"],
+      "forbiddenNameSubstrings": ["סויה"],
+      "notes": "no-local-stock style: city omitted; any priced milk is acceptable"
+    },
+    {
+      "query": "פסטה ברילה 500 גרם",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": ["00000000-0000-4000-8000-000000000301"],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["פסטה", "ברילה"],
+      "forbiddenNameSubstrings": [],
+      "notes": "pantry brand + pack; placeholder acceptable UUID for wiring"
+    },
+    {
+      "query": "קבבים",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["קבב"],
+      "forbiddenNameSubstrings": ["נקניק", "הודו"],
+      "notes": "BBQ meat — kebab, not sausage or turkey"
+    },
+    {
+      "query": "אנטרקוט",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["אנטרקוט"],
+      "forbiddenNameSubstrings": ["עוף", "הודו", "טחון"],
+      "notes": "BBQ beef cut"
+    },
+    {
+      "query": "פיתות",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["פית", "פיתה", "פיתות"],
+      "forbiddenNameSubstrings": ["לחם פרוס", "בגט"],
+      "notes": "BBQ pita bread"
+    },
+    {
+      "query": "חומוס",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["חומוס"],
+      "forbiddenNameSubstrings": ["טחינה", "סלט"],
+      "notes": "BBQ side — hummus not tahini"
+    },
+    {
+      "query": "טחינה",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["טחינה"],
+      "forbiddenNameSubstrings": ["חומוס", "סלט"],
+      "notes": "BBQ side — tahini not hummus"
+    },
+    {
+      "query": "מלח גס",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["מלח"],
+      "forbiddenNameSubstrings": ["פלפל", "תבלין"],
+      "notes": "BBQ coarse salt"
+    },
+    {
+      "query": "עגבניות",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["עגבני"],
+      "forbiddenNameSubstrings": ["רסק", "רוטב", "שימורים"],
+      "notes": "BBQ fresh tomatoes — not sauce or paste"
+    },
+    {
+      "query": "מלפפונים",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["מלפפון"],
+      "forbiddenNameSubstrings": ["במלח", "כבוש", "חמוץ"],
+      "notes": "BBQ fresh cucumbers — not pickled"
+    },
+    {
+      "query": "פלפלים",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["פלפל"],
+      "forbiddenNameSubstrings": ["רסק", "שימורים", "מלח"],
+      "notes": "BBQ fresh peppers"
+    },
+    {
+      "query": "בצלים",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["בצל"],
+      "forbiddenNameSubstrings": ["קפוא", "פרוס", "מטוגן"],
+      "notes": "BBQ fresh onions — not frozen sliced"
+    },
+    {
+      "query": "חסה",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["חסה"],
+      "forbiddenNameSubstrings": ["קפוא", "סלט מוכן"],
+      "notes": "BBQ lettuce"
+    },
+    {
+      "query": "לימונים",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["לימון"],
+      "forbiddenNameSubstrings": ["ליקר"],
+      "notes": "BBQ citrus — not limoncello"
+    },
+    {
+      "query": "אבטיח",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["אבטיח"],
+      "forbiddenNameSubstrings": ["גלידה", "מיץ"],
+      "notes": "BBQ watermelon"
+    },
+    {
+      "query": "קולה",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["קוקה", "קола", "cola"],
+      "forbiddenNameSubstrings": ["דיאט", "zero"],
+      "notes": "BBQ cola drinks"
+    },
+    {
+      "query": "יין",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["יין"],
+      "forbiddenNameSubstrings": ["בירה", "ליקר"],
+      "notes": "BBQ wine — not beer or liquor"
+    },
+    {
+      "query": "קפה טייסטרס צ׳ויס",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["טייסטרס", "taster"],
+      "forbiddenNameSubstrings": ["עלית", "נסקפה", "אילי"],
+      "notes": "BBQ brand intent — Taster's Choice coffee"
+    },
+    {
+      "query": "קרח",
+      "location": { "city": "Herzliya" },
+      "acceptableProductIds": [],
+      "forbiddenProductIds": [],
+      "acceptableNameSubstrings": ["קרח"],
+      "forbiddenNameSubstrings": ["קרחון", "גלידה"],
+      "notes": "BBQ bag of ice — not popsicles or ice cream"
+    }
+  ]
+}

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { authenticate, recordUsage } from "../auth.js";
-import { registerTools } from "./tools.js";
+import { registerTools } from "./tools/index.js";
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
@@ -10,10 +10,13 @@ function createMcpServer(): McpServer {
     {
       instructions:
         "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness " +
-        "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. Start with search_products or " +
-        "get_product to resolve a product_id, then use compare_prices / suggest_substitutes / optimize_basket. " +
-        "Location filters (city or near=lat,lng) default to a 10km radius when near is set. optimize_basket " +
-        "requires city and/or near. Use get_promotions to explain discounted effective prices.",
+        "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. " +
+        "For shopping lists: call optimize_basket ONCE with items[{query|gtin|product_id, qty|amount+unit}] " +
+        "and city (Hebrew/English) or near=lat,lng. Do NOT call search_products per line first. " +
+        "Use search_products / resolve_products only when an item is low_confidence or missing. " +
+        "Prefer amount+unit for weighed goods (e.g. amount=1.5 unit=kg). Response includes cheapest " +
+        "single-store plan plus multiStore (cheapest-per-item across stores). " +
+        "Location filters default to 10km when near is set. Use get_promotions to explain discounts.",
     },
   );
   registerTools(server);

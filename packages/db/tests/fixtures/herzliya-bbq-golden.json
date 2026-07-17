@@ -1,0 +1,120 @@
+{
+  "description": "Herzliya 18-line BBQ basket (17 people). Labeled forbidden/acceptable name substrings for deterministic-first safety regression.",
+  "cases": [
+    {
+      "query": "פרגיות",
+      "amount": 1.75,
+      "unit": "kg",
+      "forbiddenNameSubstrings": ["נקניק", "פסטרמה"],
+      "acceptableNameSubstrings": ["פרגיות", "ירכיים"]
+    },
+    {
+      "query": "קבבים",
+      "amount": 1.5,
+      "unit": "kg",
+      "forbiddenNameSubstrings": ["נקניק", "הודו"],
+      "acceptableNameSubstrings": ["קבב"]
+    },
+    {
+      "query": "אנטרקוט",
+      "amount": 0.75,
+      "unit": "kg",
+      "forbiddenNameSubstrings": ["עוף", "הודו", "טחון"],
+      "acceptableNameSubstrings": ["אנטרקוט"]
+    },
+    {
+      "query": "פיתות",
+      "qty": 20,
+      "forbiddenNameSubstrings": ["לחם פרוס", "בגט"],
+      "acceptableNameSubstrings": ["פית", "פיתה", "פיתות"]
+    },
+    {
+      "query": "חומוס",
+      "amount": 1.5,
+      "unit": "kg",
+      "forbiddenNameSubstrings": ["טחינה", "סלט"],
+      "acceptableNameSubstrings": ["חומוס"]
+    },
+    {
+      "query": "טחינה",
+      "amount": 500,
+      "unit": "g",
+      "forbiddenNameSubstrings": ["חומוס", "סלט"],
+      "acceptableNameSubstrings": ["טחינה"]
+    },
+    {
+      "query": "מלח גס",
+      "qty": 1,
+      "forbiddenNameSubstrings": ["פלפל", "תבלין"],
+      "acceptableNameSubstrings": ["מלח"]
+    },
+    {
+      "query": "עגבניות",
+      "amount": 1,
+      "unit": "kg",
+      "forbiddenNameSubstrings": ["רסק", "רוטב", "שימורים"],
+      "acceptableNameSubstrings": ["עגבני"]
+    },
+    {
+      "query": "מלפפונים",
+      "amount": 1,
+      "unit": "kg",
+      "forbiddenNameSubstrings": ["במלח", "כבוש", "חמוץ"],
+      "acceptableNameSubstrings": ["מלפפון"]
+    },
+    {
+      "query": "פלפלים",
+      "qty": 3,
+      "forbiddenNameSubstrings": ["רסק", "שימורים", "מלח"],
+      "acceptableNameSubstrings": ["פלפל"]
+    },
+    {
+      "query": "בצלים",
+      "qty": 3,
+      "forbiddenNameSubstrings": ["קפוא", "פרוס", "מטוגן"],
+      "acceptableNameSubstrings": ["בצל"]
+    },
+    {
+      "query": "חסה",
+      "qty": 1,
+      "forbiddenNameSubstrings": ["קפוא", "סלט מוכן"],
+      "acceptableNameSubstrings": ["חסה"]
+    },
+    {
+      "query": "לימונים",
+      "qty": 4,
+      "forbiddenNameSubstrings": ["ליקר"],
+      "acceptableNameSubstrings": ["לימון"]
+    },
+    {
+      "query": "אבטיח",
+      "qty": 1,
+      "forbiddenNameSubstrings": ["גלידה", "מיץ"],
+      "acceptableNameSubstrings": ["אבטיח"]
+    },
+    {
+      "query": "קולה",
+      "qty": 2,
+      "forbiddenNameSubstrings": ["דיאט", "zero"],
+      "acceptableNameSubstrings": ["קוקה", "קола", "cola"]
+    },
+    {
+      "query": "יין",
+      "qty": 3,
+      "forbiddenNameSubstrings": ["בירה", "ליקר"],
+      "acceptableNameSubstrings": ["יין"]
+    },
+    {
+      "query": "קפה טייסטרס צ׳ויס",
+      "qty": 1,
+      "forbiddenNameSubstrings": ["עלית", "נסקפה", "אילי"],
+      "acceptableNameSubstrings": ["טייסטרס", "taster"]
+    },
+    {
+      "query": "קרח",
+      "qty": 1,
+      "forbiddenNameSubstrings": ["קרחון", "גלידה"],
+      "acceptableNameSubstrings": ["קרח"]
+    }
+  ]
+}

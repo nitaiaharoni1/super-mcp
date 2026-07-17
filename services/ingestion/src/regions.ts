@@ -6,6 +6,8 @@
  * Disable with SUPER_MCP_REGION_FILTER=0 for debugging.
  */
 
+import { coveredLocalityCodes, normalizeCityKey, parseLocalityCode } from "@super-mcp/shared";
+
 export interface StoreLocationHint {
   storeId: string;
   city?: string;
@@ -117,8 +119,13 @@ const COVERED_CITIES = new Set(
     "עומר",
     "להבים",
     "מיתר",
+    "גבעת שמואל",
+    "גבעת-שמואל",
   ].map(normalizeCityKey),
 );
+
+/** CBS locality codes — single source of truth in @super-mcp/shared cities. */
+const COVERED_LOCALITY_CODES = coveredLocalityCodes();
 
 /**
  * Covered-city tokens that are also common Hebrew words, so they must only ever
@@ -127,18 +134,10 @@ const COVERED_CITIES = new Set(
  */
 const AMBIGUOUS_CITY_TOKENS = new Set(["אזור"].map(normalizeCityKey));
 
+export { normalizeCityKey };
+
 export function regionFilterEnabled(): boolean {
   return process.env.SUPER_MCP_REGION_FILTER !== "0";
-}
-
-export function normalizeCityKey(city: string): string {
-  return city
-    .replace(/\u0000/g, "")
-    .trim()
-    .replace(/['"״׳`]/g, "")
-    .replace(/[–—-]/g, "-")
-    .replace(/\s+/g, " ")
-    .toLowerCase();
 }
 
 /**
@@ -152,8 +151,14 @@ function isWholeWordPrefix(a: string, b: string): boolean {
   return longer.startsWith(`${shorter} `);
 }
 
+function localityCodeAllowed(city: string): boolean {
+  const digits = parseLocalityCode(city);
+  return digits != null && COVERED_LOCALITY_CODES.has(digits);
+}
+
 function cityAllowed(city: string | undefined): boolean {
   if (!city) return false;
+  if (localityCodeAllowed(city)) return true;
   const key = normalizeCityKey(city);
   if (COVERED_CITIES.has(key)) return true;
   if (key.length < 3) return false;

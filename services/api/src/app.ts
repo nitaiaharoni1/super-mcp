@@ -3,11 +3,13 @@ import cors from "@fastify/cors";
 import { authenticate, recordUsage } from "./auth.js";
 import { sendError, toAppError } from "./lib/errors.js";
 import { getOpenApiSpec } from "./openapi.js";
-import { registerProductRoutes } from "./routes/products.js";
-import { registerChainRoutes } from "./routes/chains.js";
-import { registerPromotionRoutes } from "./routes/promotions.js";
-import { registerBasketRoutes } from "./routes/basket.js";
-import { registerAdminRoutes } from "./routes/admin.js";
+import {
+  registerAdminRoutes,
+  registerBasketRoutes,
+  registerProductRoutes,
+  registerPromotionRoutes,
+  registerStoreRoutes,
+} from "./routes/index.js";
 import { registerMcpRoutes } from "./mcp/server.js";
 
 const PUBLIC_PATHS = new Set(["/health", "/openapi.json"]);
@@ -72,7 +74,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await registerProductRoutes(app);
-  await registerChainRoutes(app);
+  await registerStoreRoutes(app);
   await registerPromotionRoutes(app);
   await registerBasketRoutes(app);
   await registerAdminRoutes(app);

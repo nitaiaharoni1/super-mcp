@@ -1,10 +1,7 @@
 /** Location parsing + SQL distance helpers shared by store/price/basket queries. */
-import { AppError } from "@super-mcp/shared";
+import { AppError, type GeoPoint } from "@super-mcp/shared";
 
-export interface GeoPoint {
-  lat: number;
-  lng: number;
-}
+export type { GeoPoint };
 
 /** Parses a "lat,lng" query param string into a GeoPoint, or undefined if absent. */
 export function parseNear(raw: string | undefined): GeoPoint | undefined {
@@ -42,4 +39,25 @@ export function haversineKmSql(
     cos(radians($${latParamIdx})) * cos(radians(${latCol})) * cos(radians(${lngCol}) - radians($${lngParamIdx}))
     + sin(radians($${latParamIdx})) * sin(radians(${latCol}))
   ))))`;
+}
+
+/**
+ * Cheap rectangular prefilter before haversine (~111km per degree lat;
+ * lng degrees shrink by cos(lat)). radiusKm expands ~20% for corner coverage.
+ */
+export function geoBoundingBoxSql(
+  latParamIdx: number,
+  lngParamIdx: number,
+  radiusKmParamIdx: number,
+  latCol: string,
+  lngCol: string,
+): string {
+  return `(
+    ${latCol} IS NOT NULL AND ${lngCol} IS NOT NULL
+    AND ${latCol} <> 0 AND ${lngCol} <> 0
+    AND ${latCol} BETWEEN $${latParamIdx} - ($${radiusKmParamIdx} * 1.2) / 111.0
+                      AND $${latParamIdx} + ($${radiusKmParamIdx} * 1.2) / 111.0
+    AND ${lngCol} BETWEEN $${lngParamIdx} - ($${radiusKmParamIdx} * 1.2) / (111.0 * GREATEST(0.2, cos(radians($${latParamIdx}))))
+                      AND $${lngParamIdx} + ($${radiusKmParamIdx} * 1.2) / (111.0 * GREATEST(0.2, cos(radians($${latParamIdx}))))
+  )`;
 }
