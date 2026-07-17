@@ -19,10 +19,14 @@
     "embed-products": "tsx src/scripts/embedProducts.ts",
     "semantic-index": "tsx src/scripts/embedProducts.ts",
     "benchmark-semantic": "tsx src/scripts/benchmarkSemantic.ts",
+    "compare-benchmark": "tsx src/scripts/compareBenchmark.ts",
+    "report-misses": "tsx src/scripts/reportMisses.ts",
+    "propose-ontology-terms": "tsx src/scripts/proposeOntologyTerms.ts",
     "check-integrity": "tsx src/scripts/check-integrity.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.1",
     "@huggingface/transformers": "^4.2.0",
     "@super-mcp/shared": "workspace:*",
     "dotenv": "^16.5.0",

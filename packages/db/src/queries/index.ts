@@ -9,3 +9,10 @@ export {
 export { upsertStorePrice, type UpsertPriceInput } from "./prices.js";
 export { upsertPromotion, type UpsertPromoInput } from "./promotions.js";
 export { checkCatalogIntegrity, type CatalogIntegrityReport } from "./integrity.js";
+export {
+  recordMisses,
+  topMisses,
+  type MatchMiss,
+  type MissKind,
+  type TopMissRow,
+} from "./misses.js";

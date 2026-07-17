@@ -835,6 +835,29 @@ async function runBenchmark(): Promise<Record<string, unknown>> {
 async function main(): Promise<void> {
   const report = await runBenchmark();
   console.log(JSON.stringify(report, null, 2));
+
+  const reportPath = process.env.SUPER_MCP_BENCH_REPORT;
+  if (reportPath) {
+    const fs = await import("node:fs");
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  }
+
+  if (process.env.SUPER_MCP_BENCH_GATE === "1") {
+    const r = report as {
+      skipped?: boolean;
+      skippedReason?: string;
+      activationGate?: { pass?: boolean; summary?: string };
+    };
+    if (r.skipped) {
+      console.error(`benchmark gate: FAIL (skipped: ${r.skippedReason ?? "unknown"})`);
+      process.exitCode = 1;
+      return;
+    }
+    if (!r.activationGate?.pass) {
+      console.error(`benchmark gate: FAIL; ${r.activationGate?.summary ?? "no gate computed"}`);
+      process.exitCode = 1;
+    }
+  }
 }
 
 main()
