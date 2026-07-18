@@ -18,6 +18,29 @@ export function isLineSubstituted(
   );
 }
 
+/**
+ * True when the priced candidate is a member of the line's gated equivalence
+ * set (same-class/unit/pack) rather than the resolved primary SKU — the chain
+ * carries its own interchangeable SKU instead of the resolved one.
+ */
+export function isChainEquivalentSubstitution(
+  item: ResolvedItem,
+  candidateProductId: string,
+): boolean {
+  if (candidateProductId === item.productId) return false;
+  return Boolean(item.equivalents?.some((c) => c.productId === candidateProductId));
+}
+
+/**
+ * Human-readable reason for a chain-equivalent pricing substitution, naming both
+ * the resolved primary and the chain's actual SKU. Prefixed with the machine
+ * reason `chain_equivalent` so callers can key off it.
+ */
+export function chainEquivalentReason(primaryName: string | null, selectedName: string): string {
+  const primary = primaryName ?? "the resolved product";
+  return `chain_equivalent: priced this chain's "${selectedName}" as a same-class equivalent of "${primary}".`;
+}
+
 export function substitutionReasonForLine(
   item: ResolvedItem,
   substituted: boolean,

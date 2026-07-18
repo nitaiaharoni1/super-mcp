@@ -3,7 +3,9 @@ import { listStores } from "../stores/index.js";
 import { getActivePromotionsForListings, pickBestPromoForStore } from "../promotions/index.js";
 import { buildProductLink } from "../productLinks/index.js";
 import {
+  chainEquivalentReason,
   fallbackCandidate,
+  isChainEquivalentSubstitution,
   isLineSubstituted,
   substitutionReasonForLine,
 } from "./substitutions.js";
@@ -20,12 +22,12 @@ import type {
 
 function tryOrderForItem(item: ResolvedItem): BasketCandidate[] {
   if (!item.productId) return [];
-  // Resolution has already established the one safe SKU. Pricing must not
-  // substitute a merely plausible search candidate because a store lacks it.
-  return [
-    item.candidates.find((candidate) => candidate.productId === item.productId) ??
-      fallbackCandidate(item),
-  ];
+  const primary =
+    item.candidates.find((c) => c.productId === item.productId) ?? fallbackCandidate(item);
+  // Equivalents are the ONLY permitted fallback: same gated class/unit/pack.
+  // Un-gated shortlist members must NEVER appear here (that was the old wrong-
+  // substitution bug); resolution has already established the one safe SKU.
+  return [primary, ...(item.equivalents ?? []).filter((c) => c.productId !== item.productId)];
 }
 
 export function priceStoreBasket(
@@ -120,7 +122,18 @@ export function priceStoreBasket(
       promoDescription = promo.candidate.description;
     }
 
-    const substituted = isLineSubstituted(item, matched.candidate.productId);
+    const isChainEquivalent = isChainEquivalentSubstitution(item, matched.candidate.productId);
+    const substituted = isChainEquivalent || isLineSubstituted(item, matched.candidate.productId);
+    const primaryName =
+      item.candidates.find((c) => c.productId === item.productId)?.name ?? item.name;
+    const substitutionReason = isChainEquivalent
+      ? chainEquivalentReason(primaryName, matched.candidate.name || matched.listing.name)
+      : substitutionReasonForLine(item, substituted);
+    const originalProductId = isChainEquivalent
+      ? item.productId
+      : substituted
+        ? (item.primaryProductId ?? item.productId)
+        : null;
     lines.push({
       itemIndex: item.index,
       productId: matched.candidate.productId,
@@ -133,8 +146,8 @@ export function priceStoreBasket(
       promoApplied,
       promoDescription,
       substituted,
-      substitutionReason: substitutionReasonForLine(item, substituted),
-      originalProductId: substituted ? (item.primaryProductId ?? item.productId) : null,
+      substitutionReason,
+      originalProductId,
       link: buildProductLink({
         chainId: store.chainId,
         gtin: matched.listing.gtin,

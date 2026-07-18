@@ -105,6 +105,168 @@ describe("priceStoreBasket", () => {
     expect(result).toBeNull();
   });
 
+  it("prices a store from a gated equivalent SKU with chain_equivalent substitution metadata", () => {
+    // Line resolved to Store A's tomato SKU ("a-tomato"); the gated equivalence
+    // set also holds Store B's tomato SKU ("b-tomato"). Store B stocks only its
+    // own SKU, so it must price the line from the equivalent and mark it as a
+    // chain_equivalent substitution naming both products.
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 1,
+      qtyMode: "legacy_packs",
+      amount: null,
+      unit: null,
+      productId: "a-tomato",
+      name: "עגבניות",
+      resolvedBy: "query",
+      resolutionStatus: "resolved",
+      confidence: 0.9,
+      lowConfidence: false,
+      candidates: [
+        {
+          productId: "a-tomato",
+          name: "עגבניות חממה A",
+          score: 0.9,
+          matchedVia: "product",
+          sizeQty: null,
+          sizeUnit: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "produce_tomato",
+          intentTier: 1,
+        },
+      ],
+      primaryProductId: "a-tomato",
+      primaryName: "עגבניות חממה A",
+      substitution: null,
+      equivalents: [
+        {
+          productId: "a-tomato",
+          name: "עגבניות חממה A",
+          score: 0.9,
+          matchedVia: "product",
+          sizeQty: null,
+          sizeUnit: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "produce_tomato",
+          intentTier: 1,
+        },
+        {
+          productId: "b-tomato",
+          name: "עגבניות חממה B",
+          score: 0.88,
+          matchedVia: "product",
+          sizeQty: null,
+          sizeUnit: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "produce_tomato",
+          intentTier: 1,
+        },
+      ],
+    };
+
+    const storeA = { ...STORE, id: "storeA", chainId: "chainA", chainName: "Chain A" } as const;
+    const storeB = { ...STORE, id: "storeB", chainId: "chainB", chainName: "Chain B" } as const;
+
+    const listingByChainAndProduct = new Map<string, Map<string, ListingRow[]>>([
+      [
+        "chainA",
+        new Map([
+          [
+            "a-tomato",
+            [
+              {
+                id: "listA",
+                product_id: "a-tomato",
+                chain_id: "chainA",
+                item_code: "codeA",
+                name: "עגבניות חממה A",
+                gtin: null,
+              },
+            ],
+          ],
+        ]),
+      ],
+      [
+        "chainB",
+        new Map([
+          [
+            "b-tomato",
+            [
+              {
+                id: "listB",
+                product_id: "b-tomato",
+                chain_id: "chainB",
+                item_code: "codeB",
+                name: "עגבניות חממה B",
+                gtin: null,
+              },
+            ],
+          ],
+        ]),
+      ],
+    ]);
+
+    const priceByListingAndStore = new Map<string, StorePriceRow>([
+      [
+        "listA:storeA",
+        {
+          listing_id: "listA",
+          store_id: "storeA",
+          price: "5",
+          currency: "ILS",
+          source_ts: "2026-01-01T00:00:00Z",
+          ingested_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      [
+        "listB:storeB",
+        {
+          listing_id: "listB",
+          store_id: "storeB",
+          price: "6",
+          currency: "ILS",
+          source_ts: "2026-01-01T00:00:00Z",
+          ingested_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    ]);
+
+    const resultA = priceStoreBasket(
+      storeA,
+      [item],
+      listingByChainAndProduct,
+      priceByListingAndStore,
+      new Map(),
+    );
+    expect(resultA).not.toBeNull();
+    expect(resultA!.lines).toHaveLength(1);
+    expect(resultA!.lines[0]!.productId).toBe("a-tomato");
+    expect(resultA!.lines[0]!.substituted).toBe(false);
+    expect(resultA!.lines[0]!.substitutionReason).toBeNull();
+
+    const resultB = priceStoreBasket(
+      storeB,
+      [item],
+      listingByChainAndProduct,
+      priceByListingAndStore,
+      new Map(),
+    );
+    expect(resultB).not.toBeNull();
+    expect(resultB!.missingItems).toHaveLength(0);
+    expect(resultB!.lines).toHaveLength(1);
+    const lineB = resultB!.lines[0]!;
+    expect(lineB.productId).toBe("b-tomato");
+    expect(lineB.substituted).toBe(true);
+    expect(lineB.substitutionReason).toContain("chain_equivalent");
+    // Names both products: the resolved primary and the chain's actual SKU.
+    expect(lineB.substitutionReason).toContain("עגבניות חממה A");
+    expect(lineB.substitutionReason).toContain("עגבניות חממה B");
+    expect(lineB.originalProductId).toBe("a-tomato");
+  });
+
   it("prices from a later listing when the first listing has no price at the store", () => {
     const item: ResolvedItem = {
       index: 0,

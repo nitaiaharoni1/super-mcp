@@ -229,7 +229,12 @@ export function collectProductIdsForPricing(resolvedItems: ResolvedItem[]): stri
     ...new Set(
       resolvedItems
         .filter((r) => isSafelyResolvedForPricing(r))
-        .flatMap((r) => (r.productId != null ? [r.productId] : [])),
+        // Equivalents' ids too, so each chain's interchangeable SKU gets its
+        // listings/prices fetched for per-chain pricing.
+        .flatMap((r) => [
+          ...(r.productId != null ? [r.productId] : []),
+          ...(r.equivalents ?? []).map((c) => c.productId),
+        ]),
     ),
   ];
 }
