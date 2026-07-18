@@ -19,7 +19,18 @@ export function text(value: unknown): string {
 }
 
 export function num(value: unknown): number | undefined {
-  const n = Number(text(value).replace(",", "."));
+  let s = text(value).replace(/\s/g, "");
+  if (!s) return undefined;
+  // Feeds are inconsistent: ',' may be a decimal separator (IL/EU "32,08") or a
+  // thousands separator ("1,234.50"). Only a lone comma is treated as decimal;
+  // a comma alongside a dot, or multiple commas, is a thousands grouping.
+  const commas = (s.match(/,/g) ?? []).length;
+  if (commas > 1 || (commas === 1 && s.includes("."))) {
+    s = s.replace(/,/g, "");
+  } else if (commas === 1) {
+    s = s.replace(",", ".");
+  }
+  const n = Number(s);
   return Number.isFinite(n) ? n : undefined;
 }
 

@@ -20,22 +20,32 @@ export interface UnitPriceResult {
 const UNIT_ALIASES: Record<string, { unit: CanonicalUnit; factorToCanonical: number }> = {
   g: { unit: "g", factorToCanonical: 1 },
   גרם: { unit: "g", factorToCanonical: 1 },
+  גרמים: { unit: "g", factorToCanonical: 1 },
   gram: { unit: "g", factorToCanonical: 1 },
   grams: { unit: "g", factorToCanonical: 1 },
   kg: { unit: "g", factorToCanonical: 1000 },
   קג: { unit: "g", factorToCanonical: 1000 },
   "ק\"ג": { unit: "g", factorToCanonical: 1000 },
   קילו: { unit: "g", factorToCanonical: 1000 },
+  קילוגרם: { unit: "g", factorToCanonical: 1000 },
+  קילוגרמים: { unit: "g", factorToCanonical: 1000 },
+  "ק'ג": { unit: "g", factorToCanonical: 1000 },
   ml: { unit: "ml", factorToCanonical: 1 },
   מל: { unit: "ml", factorToCanonical: 1 },
   "מ\"ל": { unit: "ml", factorToCanonical: 1 },
+  "מ'ל": { unit: "ml", factorToCanonical: 1 },
+  מיליליטר: { unit: "ml", factorToCanonical: 1 },
+  מיליליטרים: { unit: "ml", factorToCanonical: 1 },
   l: { unit: "ml", factorToCanonical: 1000 },
   ליטר: { unit: "ml", factorToCanonical: 1000 },
+  ליטרים: { unit: "ml", factorToCanonical: 1000 },
   lit: { unit: "ml", factorToCanonical: 1000 },
   liter: { unit: "ml", factorToCanonical: 1000 },
   litre: { unit: "ml", factorToCanonical: 1000 },
   unit: { unit: "unit", factorToCanonical: 1 },
   יחידה: { unit: "unit", factorToCanonical: 1 },
+  יחידות: { unit: "unit", factorToCanonical: 1 },
+  פריט: { unit: "unit", factorToCanonical: 1 },
   יח: { unit: "unit", factorToCanonical: 1 },
   "יח'": { unit: "unit", factorToCanonical: 1 },
   units: { unit: "unit", factorToCanonical: 1 },
@@ -46,8 +56,14 @@ function cleanUnit(raw?: string): string {
   return (raw ?? "")
     .trim()
     .toLowerCase()
+    // Normalize Hebrew punctuation to ASCII so feed spellings match the alias
+    // table: geresh(U+05F3)/prime→', gershayim(U+05F4)/double-prime→".
+    .replace(/[׳′]/g, "'")
+    .replace(/[״″]/g, '"')
     .replace(/\s+/g, "")
-    .replace(/\./g, "");
+    // Strip dots that are NOT decimal separators (e.g. trailing "יח.") but keep
+    // digit-internal dots so embedded quantities like "1.5ל" stay 1.5, not 15.
+    .replace(/(?<!\d)\.|\.(?!\d)/g, "");
 }
 
 export function normalizeMeasure(
@@ -286,14 +302,23 @@ export function computeUnitPrice(
 }
 
 export function isGtinItem(itemType: number, itemCode: string): boolean {
-  // Israeli feeds: ItemType 1 usually means barcode/GTIN.
-  // Also accept 8/12/13/14 digit codes when type is ambiguous.
+  // Only ItemType 1 (ברקוד) carries a real barcode. ItemType 0 (פנימי) is a
+  // chain-internal code by the Israeli price-feed spec — never cross-chain
+  // product identity.
+  if (itemType !== 1) return false;
   const digits = itemCode.replace(/\D/g, "");
-  if (itemType === 1 && digits.length >= 8 && digits.length <= 14) return true;
-  if ((itemType === 0 || itemType === 1) && (digits.length === 13 || digits.length === 12 || digits.length === 8)) {
-    return true;
-  }
-  return false;
+  const isValidLen = (n: number) => n === 8 || n === 12 || n === 13 || n === 14;
+  // Accept a raw valid GTIN length as-is (a UPC-A may legitimately start with a
+  // zero, so don't strip first); only for over-padded codes fall back to the
+  // leading-zero-stripped length. Reject 9/10/11-digit codes — they aren't
+  // GTINs and were merging unrelated items across chains.
+  const stripped = digits.replace(/^0+/, "");
+  const len = isValidLen(digits.length) ? digits.length : stripped.length;
+  if (!isValidLen(len)) return false;
+  // GS1 prefix 2 (in-store number system / 02x range) is a Restricted
+  // Circulation Number: variable-weight, chain-local, never globally unique.
+  if (/^2/.test(stripped)) return false;
+  return true;
 }
 
 export function normalizeGtin(itemCode: string): string {

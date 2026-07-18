@@ -51,6 +51,13 @@ describe("normalizePromoMechanic", () => {
     });
     expect(m.type).toBe("other");
   });
+
+  it("treats structured MinQty+DiscountedPrice as a per-unit gated discount, not a pack total", () => {
+    // Real Shufersal shape: MinQty 3, DiscountedPrice 6.90 = the PER-UNIT price.
+    const m = normalizePromoMechanic({ description: "", minQty: 3, discountedPrice: 6.9 });
+    expect(m.type).toBe("simple_discount");
+    expect(m.params).toMatchObject({ discountedPrice: 6.9, minQty: 3 });
+  });
 });
 
 describe("applyPromoToUnitPrice", () => {
@@ -82,6 +89,18 @@ describe("applyPromoToUnitPrice", () => {
         params: { price: 0 },
       }),
     ).toMatchObject({ effectiveTotal: 30, applied: false });
+  });
+
+  it("prices a MinQty-gated per-unit discount correctly (was 3x understated)", () => {
+    // buy 3+, each at 6.90; regular 6.90 → 3 units cost 20.70, not 6.90.
+    const gated = { type: "simple_discount" as const, params: { discountedPrice: 6.9, minQty: 3 } };
+    const at = applyPromoToUnitPrice(6.9, 3, gated);
+    expect(at.effectiveTotal).toBeCloseTo(20.7);
+    expect(at.applied).toBe(true);
+    // below the threshold the shelf price applies, not the gated unit price.
+    const below = applyPromoToUnitPrice(6.9, 2, gated);
+    expect(below.effectiveTotal).toBeCloseTo(13.8);
+    expect(below.applied).toBe(false);
   });
 
   it("rejects invalid second-unit percentages", () => {

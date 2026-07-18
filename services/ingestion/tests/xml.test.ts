@@ -79,6 +79,19 @@ describe("xml parsers", () => {
     expect(prices[0]?.price).toBeCloseTo(7.9);
   });
 
+  it("keeps thousands-separated prices and does not coerce item codes to numbers", () => {
+    const xml = `<?xml version="1.0"?><Root><ChainId>7290027600007</ChainId><StoreId>001</StoreId>
+<Items><Item><ItemCode>012345</ItemCode><ItemName>יקר</ItemName><ItemPrice>1,234.50</ItemPrice></Item>
+<Item><ItemCode>7290000173199</ItemCode><ItemName>זול</ItemName><ItemPrice>32,08</ItemPrice></Item></Items></Root>`;
+    const prices = parsePricesXml(xml, "7290027600007", "001");
+    // A1: leading-zero internal code must survive as a string, not become 12345.
+    expect(prices[0]?.itemCode).toBe("012345");
+    // A4: "1,234.50" (thousands sep) must parse to 1234.5, not NaN/undefined.
+    expect(prices[0]?.price).toBeCloseTo(1234.5);
+    // A4: lone comma stays a decimal separator.
+    expect(prices[1]?.price).toBeCloseTo(32.08);
+  });
+
   it("parses promos with n_for_price", () => {
     const promos = parsePromosXml(promosXml, "7290058140886", "001");
     expect(promos[0]?.mechanic.type).toBe("n_for_price");

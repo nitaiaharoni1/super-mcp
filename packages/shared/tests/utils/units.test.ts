@@ -26,6 +26,29 @@ describe("normalizeMeasure", () => {
   it("flags unknown units", () => {
     expect(normalizeMeasure(2, "מארז").unparseable).toBe(true);
   });
+
+  it("parses spelled-out and plural Hebrew units (the 40% NULL unit_price cause)", () => {
+    expect(normalizeMeasure(500, "מיליליטר")).toMatchObject({ quantity: 500, unit: "ml", unparseable: false });
+    expect(normalizeMeasure(1, "קילוגרם")).toMatchObject({ quantity: 1000, unit: "g", unparseable: false });
+    expect(normalizeMeasure(6, "יחידות")).toMatchObject({ quantity: 6, unit: "unit", unparseable: false });
+    expect(normalizeMeasure(2, "ליטרים")).toMatchObject({ quantity: 2000, unit: "ml", unparseable: false });
+    expect(normalizeMeasure(1.5, "קילוגרמים")).toMatchObject({ quantity: 1500, unit: "g", unparseable: false });
+  });
+
+  it("normalizes geresh/gershayim unit punctuation to match aliases", () => {
+    expect(normalizeMeasure(500, "מ׳ל").unparseable).toBe(false); // geresh U+05F3
+    expect(normalizeMeasure(1, "ק״ג")).toMatchObject({ quantity: 1000, unit: "g" }); // gershayim U+05F4
+  });
+
+  it("keeps embedded decimal quantity intact (1.5 ליטר → 1500ml, not 15000ml)", () => {
+    // qty is present but the whole measure is embedded in the unit string; the
+    // decimal-safe dot strip must not turn 1.5 into 15.
+    expect(normalizeMeasure(1, "1.5 ליטר")).toMatchObject({ quantity: 1500, unit: "ml", unparseable: false });
+  });
+
+  it("parses embedded unit-only count (100 יחידות)", () => {
+    expect(normalizeMeasure(1, "100 יחידות")).toMatchObject({ quantity: 100, unit: "unit", unparseable: false });
+  });
 });
 
 describe("computeUnitPrice", () => {
@@ -47,6 +70,29 @@ describe("isGtinItem", () => {
 
   it("rejects short internal codes", () => {
     expect(isGtinItem(0, "123")).toBe(false);
+  });
+
+  it("accepts real EAN-13 / UPC-A / EAN-8 barcodes and zero-padded GTIN-14 (type 1)", () => {
+    expect(isGtinItem(1, "036000291452")).toBe(true); // UPC-A (12)
+    expect(isGtinItem(1, "96385074")).toBe(true); // EAN-8
+    expect(isGtinItem(1, "00007290000173199")).toBe(true); // zero-padded GTIN-14
+  });
+
+  it("rejects ItemType-0 internal codes even at GTIN lengths", () => {
+    expect(isGtinItem(0, "7290000173199")).toBe(false);
+    expect(isGtinItem(0, "1234567890123")).toBe(false);
+  });
+
+  it("rejects RCN restricted-circulation codes (GS1 prefix 2)", () => {
+    expect(isGtinItem(1, "2000000000001")).toBe(false); // in-store variable weight
+    expect(isGtinItem(1, "0200000000001")).toBe(false); // padded RCN
+    expect(isGtinItem(1, "29123456")).toBe(false); // RCN EAN-8
+  });
+
+  it("rejects non-GTIN lengths (9/10/11 digits) and alphanumeric internal codes", () => {
+    expect(isGtinItem(1, "123456789")).toBe(false);
+    expect(isGtinItem(1, "12345678901")).toBe(false);
+    expect(isGtinItem(1, "AB-42")).toBe(false);
   });
 });
 

@@ -56,6 +56,13 @@ export function normalizePromoMechanic(fields: PromoFields): RawPromoRecord["mec
     };
   }
 
+  // Structured quantity-gated price: Israeli feeds encode "buy MinQty+, each at
+  // DiscountedPrice" where DiscountedPrice is the PER-UNIT price (often equal to
+  // the shelf price when the real reward is elsewhere), NOT a pack total. Genuine
+  // "N for total" bundles arrive via the description branch above, which returns
+  // first. Treating this as n_for_price understated cost by ~minQty× (a 3-for
+  // deal priced the whole triple at one unit's price). Model it as a per-unit
+  // discount gated on minQty instead.
   if (
     fields.minQty != null &&
     fields.minQty >= 2 &&
@@ -63,10 +70,9 @@ export function normalizePromoMechanic(fields: PromoFields): RawPromoRecord["mec
     fields.discountedPrice > 0
   ) {
     return {
-      type: "n_for_price",
+      type: "simple_discount",
       params: {
-        n: fields.minQty,
-        price: fields.discountedPrice,
+        discountedPrice: fields.discountedPrice,
         minQty: fields.minQty,
       },
       rawText: desc,
@@ -161,6 +167,12 @@ export function applyPromoToUnitPrice(
     case "simple_discount": {
       const dp = mechanic.params.discountedPrice;
       if (typeof dp === "number" && Number.isFinite(dp) && dp > 0) {
+        // Quantity-gated per-unit price ("buy N+, each at dp"): below the
+        // threshold the shelf price applies; at/above it, dp is per unit.
+        const minQty = Number(mechanic.params.minQty ?? 0);
+        if (minQty >= 2 && qty < minQty) {
+          return { effectiveTotal: listPrice * qty, applied: false, note: "below_min_qty" };
+        }
         return { effectiveTotal: dp * qty, applied: true };
       }
       const rate = mechanic.params.discountRate;
