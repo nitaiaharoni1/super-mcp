@@ -199,6 +199,45 @@ describe("resolvePurchaseQty", () => {
       }),
     ).toMatchObject({ qty: 6, mode: "packs" });
   });
+
+  it("converts count to approx weight for weighted lemons with no unit pack (4 לימונים)", () => {
+    const r = resolvePurchaseQty({
+      amount: 4,
+      unit: "יח",
+      productName: "לימון",
+    });
+    expect(r.mode).toBe("weighted_kg_or_l");
+    expect(r.qty).toBeCloseTo(0.48, 5);
+  });
+
+  it("converts count to approx weight for weighted peppers (3 פלפלים)", () => {
+    const r = resolvePurchaseQty({
+      amount: 3,
+      unit: "יח",
+      productName: "פלפל אדום",
+    });
+    expect(r.mode).toBe("weighted_kg_or_l");
+    expect(r.qty).toBeCloseTo(0.48, 5);
+  });
+
+  it("falls back to the 0.15kg/piece default for unknown produce sold by count", () => {
+    const r = resolvePurchaseQty({
+      amount: 2,
+      unit: "יח",
+      productName: "ירק לא ידוע",
+    });
+    expect(r.mode).toBe("weighted_kg_or_l");
+    expect(r.qty).toBeCloseTo(0.3, 5);
+  });
+
+  it("still returns packs (unchanged) when a real unit-pack exists (20 פיתות @ 10/pack)", () => {
+    const r = resolvePurchaseQty({
+      amount: 20,
+      unit: "יח",
+      productName: "פיתות 10יח אנג'ל",
+    });
+    expect(r).toMatchObject({ qty: 2, mode: "packs" });
+  });
 });
 describe("canonicalItemCode", () => {
   it("returns the normalized GTIN for barcode-capable codes", () => {

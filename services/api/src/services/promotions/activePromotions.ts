@@ -33,19 +33,28 @@ export async function getActivePromotionsForListings(
     // normalizeGtin(item_code), since GTIN listings store item_code = normalizeGtin(...).
     // l.item_code <> '' guards against a promo item_code with zero digits fanning onto
     // every listing that happens to have an empty item_code.
-    `SELECT l.id AS listing_id, pr.store_id, pr.chain_id, pr.promo_code, pr.description,
+    //
+    // Start from the (small) target listing set and precompute its normalized codes,
+    // then join promotion_item by INDEXED equality on item_code / item_code_norm. The
+    // old form started at promotion (1M rows) and wrapped normalizeGtin() around
+    // pi.item_code, which defeated the promotion_item indexes and scanned all 12M
+    // promo items (~14s on the BBQ basket). Listing-first drops that to milliseconds.
+    `WITH target AS (
+       SELECT l.id AS listing_id, l.chain_id, l.item_code,
+              ${sqlNormalizeGtin("l.item_code")} AS item_code_norm
+       FROM listing l
+       WHERE l.id = ANY($1::uuid[]) AND l.item_code <> ''
+     )
+     SELECT t.listing_id, pr.store_id, pr.chain_id, pr.promo_code, pr.description,
             pr.mechanic_type, pr.mechanic_params
-     FROM promotion pr
-     JOIN promotion_item pi ON pi.promotion_id = pr.id
-     JOIN listing l ON l.chain_id = pr.chain_id
-       AND l.item_code <> ''
-       AND (
-         l.item_code = pi.item_code
-         OR (pi.item_code_norm IS NOT NULL AND pi.item_code_norm <> '' AND l.item_code = pi.item_code_norm)
-         OR l.item_code = ${sqlNormalizeGtin("pi.item_code")}
+     FROM target t
+     JOIN promotion_item pi ON (
+         pi.item_code = t.item_code
+         OR (pi.item_code_norm IS NOT NULL AND pi.item_code_norm <> '' AND pi.item_code_norm = t.item_code)
+         OR pi.item_code = t.item_code_norm
        )
-     WHERE l.id = ANY($1::uuid[])
-       AND pr.start_ts <= now() AND pr.end_ts >= now()
+     JOIN promotion pr ON pr.id = pi.promotion_id AND pr.chain_id = t.chain_id
+     WHERE pr.start_ts <= now() AND pr.end_ts >= now()
        AND ($2::boolean IS TRUE OR pr.club_only = false)
      -- Stable ordering so map insertion order is deterministic regardless of
      -- Postgres row order; pickBestPromoForStore still picks by price, this is

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildCommodityEquivalents, buildEquivalenceSet } from "../../../src/services/basket/equivalence.js";
+import {
+  buildAvailabilityEquivalents,
+  buildCommodityEquivalents,
+  buildEquivalenceSet,
+} from "../../../src/services/basket/equivalence.js";
 import type { BasketCandidate } from "../../../src/services/basket/types.js";
 
 const cand = (over: Partial<BasketCandidate>): BasketCandidate => ({
@@ -128,5 +132,123 @@ describe("buildCommodityEquivalents", () => {
     expect(buildCommodityEquivalents(top, [top, c({ productClass: null })], "עגבניות", 5)).toEqual([
       top,
     ]);
+  });
+});
+
+describe("buildAvailabilityEquivalents", () => {
+  // Unclassified commodity SKUs (the real-world default): productClass null,
+  // intentTier tier-1, locally available. Availability + query tokens must carry
+  // the resolution when there is NO class signal.
+  const h = (over: Partial<BasketCandidate>): BasketCandidate => ({
+    productId: crypto.randomUUID(),
+    name: "חומוס אסלי 700 גרם",
+    score: 0.9,
+    matchedVia: "product",
+    sizeQty: 700,
+    sizeUnit: "g",
+    hasPrice: true,
+    hasLocalPrice: true,
+    productClass: null,
+    intentTier: 1,
+    ...over,
+  });
+  const opts = {
+    maxEquivalents: 5,
+    packTolerance: 0.5,
+    penaltyBlock: 1,
+    penaltyOf: () => 0,
+  };
+
+  it("auto-resolves an unclassified staple: ≥2 local, query-safe, same-unit SKUs group", () => {
+    const set = buildAvailabilityEquivalents(
+      [h({ name: "חומוס אסלי 700 גרם" }), h({ name: "חומוס מסעדות צבר 700 גרם" })],
+      "חומוס",
+      opts,
+    );
+    expect(set).toHaveLength(2);
+  });
+
+  it("excludes candidates with no local price (availability is required)", () => {
+    const local = h({ name: "חומוס אסלי" });
+    const set = buildAvailabilityEquivalents(
+      [local, h({ name: "חומוס מסעדות", hasLocalPrice: false })],
+      "חומוס",
+      opts,
+    );
+    // only one locally-available member → below the ≥2 commodity signal → []
+    expect(set).toEqual([]);
+  });
+
+  it("excludes gate-penalized variants (diet cola never joins a bare-cola set)", () => {
+    const regularA = h({ productId: "reg-a", name: "קוקה קולה", sizeUnit: "ml", sizeQty: 1500 });
+    const regularB = h({ productId: "reg-b", name: "קוקה קולה 1.5 ליטר", sizeUnit: "ml", sizeQty: 1500 });
+    const diet = h({ productId: "diet", name: "קוקה קולה דיאט", sizeUnit: "ml", sizeQty: 1500 });
+    const set = buildAvailabilityEquivalents([diet, regularA, regularB], "קוקה קולה", {
+      ...opts,
+      penaltyOf: (id) => (id === "diet" ? 2 : 0),
+    });
+    expect(set.map((x) => x.productId)).not.toContain("diet");
+    expect(set).toHaveLength(2);
+  });
+
+  it("respects query specificity: a token not in the name excludes the candidate", () => {
+    // 'שקית קרח' must NOT group ice-snacks whose name lacks 'שקית'.
+    const bagA = h({ name: "שקית קרח 2 קג", sizeUnit: "g", sizeQty: 2000 });
+    const bagB = h({ name: "שקית קרח מהודר", sizeUnit: "g", sizeQty: 2000 });
+    const snack = h({ name: "חטיפי קרח ללא חומרים", sizeUnit: "g", sizeQty: 2000 });
+    const set = buildAvailabilityEquivalents([bagA, bagB, snack], "שקית קרח", opts);
+    expect(set.map((x) => x.name)).not.toContain("חטיפי קרח ללא חומרים");
+    expect(set).toHaveLength(2);
+  });
+
+  it("excludes a different unit from the group", () => {
+    const perKg = h({ name: "מלח גס 1 קג", sizeUnit: "g", sizeQty: 1000 });
+    const perKg2 = h({ name: "מלח גס אטלנטי", sizeUnit: "g", sizeQty: 1000 });
+    const perUnit = h({ name: "מלח גס יחידה", sizeUnit: "unit", sizeQty: 1 });
+    const set = buildAvailabilityEquivalents([perKg, perKg2, perUnit], "מלח גס", opts);
+    expect(set.map((x) => x.sizeUnit)).not.toContain("unit");
+    expect(set).toHaveLength(2);
+  });
+
+  it("does not disagree on product_class when both members are classified", () => {
+    const produce = h({ name: "פלפל אדום", productClass: "produce", sizeUnit: "g", sizeQty: 1000 });
+    const spice = h({ name: "פלפל שחור טחון", productClass: "spice", sizeUnit: "g", sizeQty: 1000 });
+    const produce2 = h({ name: "פלפל אדום קלוף", productClass: "produce", sizeUnit: "g", sizeQty: 1000 });
+    const set = buildAvailabilityEquivalents([produce, spice, produce2], "פלפל", opts);
+    expect(set.map((x) => x.productClass)).not.toContain("spice");
+    expect(set).toHaveLength(2);
+  });
+
+  it("excludes gate-rejected tier-0 candidates", () => {
+    const ok1 = h({ name: "אבטיח" });
+    const ok2 = h({ name: "אבטיח אדום" });
+    const rejected = h({ name: "אבטיח", intentTier: 0 });
+    const set = buildAvailabilityEquivalents([ok1, ok2, rejected], "אבטיח", opts);
+    expect(set).toHaveLength(2);
+  });
+
+  it("returns [] when fewer than two members qualify (no false commodity)", () => {
+    const one = h({ name: "חומוס אסלי" });
+    expect(buildAvailabilityEquivalents([one], "חומוס", opts)).toEqual([]);
+  });
+
+  it("returns [] on an empty query (no tokens to anchor specificity)", () => {
+    expect(buildAvailabilityEquivalents([h({}), h({})], "", opts)).toEqual([]);
+  });
+
+  it("excludes an unrequested pickled form (fresh cucumber never groups a pickled jar)", () => {
+    const freshA = h({ name: "מלפפונים", sizeUnit: "kg", sizeQty: 1000 });
+    const freshB = h({ name: "מלפפונים ארוזים", sizeUnit: "kg", sizeQty: 1000 });
+    const pickled = h({ name: "מלפפונים בייבי כבושי", sizeUnit: "kg", sizeQty: 1000 });
+    const set = buildAvailabilityEquivalents([freshA, freshB, pickled], "מלפפונים", opts);
+    expect(set.map((x) => x.name)).not.toContain("מלפפונים בייבי כבושי");
+    expect(set).toHaveLength(2);
+  });
+
+  it("keeps a preserved form when the query explicitly asks for it", () => {
+    const pickledA = h({ name: "מלפפונים חמוצים", sizeUnit: "kg", sizeQty: 1000 });
+    const pickledB = h({ name: "מלפפונים חמוצים בצנצנת", sizeUnit: "kg", sizeQty: 1000 });
+    const set = buildAvailabilityEquivalents([pickledA, pickledB], "מלפפונים חמוצים", opts);
+    expect(set).toHaveLength(2);
   });
 });

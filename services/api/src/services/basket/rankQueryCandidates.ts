@@ -20,7 +20,11 @@ import {
   DEFAULT_CANDIDATE_LIMIT,
   SEMANTIC_CANDIDATE_LIMIT,
 } from "./constants.js";
-import { buildCommodityEquivalents, buildEquivalenceSet } from "./equivalence.js";
+import {
+  buildAvailabilityEquivalents,
+  buildCommodityEquivalents,
+  buildEquivalenceSet,
+} from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
@@ -407,6 +411,44 @@ export function rankQueryCandidates(
     });
     if (equivalents.length >= 2) {
       const top = candidates[0];
+      return {
+        ...base,
+        productId: top.productId,
+        name: top.name,
+        resolvedBy: "query",
+        confidence: base.confidence ?? top.score,
+        lowConfidence: false,
+        resolutionStatus: "resolved",
+        equivalents,
+      };
+    }
+  }
+
+  // Availability commodity override: the class-gated branch above can't fire for
+  // the ~95% of the catalog with NO product_class (risk === "opaque"), so a
+  // generic staple every store stocks (חומוס, טחינה, מלח גס, אבטיח) was forced
+  // to a needless question. When ≥2 locally-available, query-safe, non-penalized
+  // products share a unit, auto-resolve to that group and let per-chain pricing
+  // pick the cheapest — availability + query specificity stand in for the missing
+  // class signal. Never fires for brand_pinned (respect the named brand) or
+  // cross_class (a genuine either/or the user must decide), nor for a vector-only
+  // top pick (the "vector-only never auto-prices" invariant).
+  if (
+    decision.status === "needs_confirmation" &&
+    risk.kind !== "brand_pinned" &&
+    risk.kind !== "cross_class" &&
+    candidates[0] != null &&
+    shortlist[0] != null &&
+    !isVectorOnlyHit(shortlist[0])
+  ) {
+    const equivalents = buildAvailabilityEquivalents(candidates, item.query ?? "", {
+      maxEquivalents: searchConfig?.maxEquivalents ?? 5,
+      packTolerance: searchConfig?.packTolerance ?? 0.5,
+      penaltyBlock: searchConfig?.penaltyBlockThreshold ?? 1,
+      penaltyOf: (id) => gateById.get(id)?.penaltyScore ?? 0,
+    });
+    if (equivalents.length >= 2) {
+      const top = equivalents[0]!;
       return {
         ...base,
         productId: top.productId,

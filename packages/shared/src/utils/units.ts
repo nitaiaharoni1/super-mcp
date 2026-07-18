@@ -190,6 +190,66 @@ export function inferPackSizeFromName(
 }
 
 /**
+ * Typical per-piece weight (kg) for produce commonly requested by count (e.g.
+ * "4 לימונים"). Used when the matched product has no usable unit-pack and is
+ * sold by weight (₪/kg), so a piece count must be converted to an approximate
+ * kg quantity instead of being multiplied directly against a per-kg price.
+ * Keys are matched as substrings of the normalized product name; when several
+ * match, the longest (most specific) key wins.
+ */
+const PRODUCE_PIECE_WEIGHT_KG: Record<string, number> = {
+  לימון: 0.12,
+  עגבניה: 0.12,
+  עגבניות: 0.12,
+  מלפפון: 0.11,
+  מלפפונים: 0.11,
+  פלפל: 0.16,
+  "בצל ירוק": 0.05,
+  בצל: 0.15,
+  תפוח: 0.18,
+  תפוז: 0.2,
+  שום: 0.05,
+  גזר: 0.08,
+  'תפו"א': 0.15,
+  "תפוח אדמה": 0.15,
+  בטטה: 0.2,
+  קישוא: 0.15,
+  חציל: 0.25,
+  אבוקדו: 0.2,
+  בננה: 0.15,
+  בננות: 0.15,
+  אגס: 0.2,
+  אפרסק: 0.15,
+  שזיף: 0.08,
+  קיווי: 0.09,
+  רימון: 0.3,
+  אבטיח: 4.0,
+  מלון: 1.5,
+};
+
+const DEFAULT_PIECE_WEIGHT_KG = 0.15;
+
+/**
+ * Estimate a typical per-piece weight (kg) for produce from its product name,
+ * for converting a requested piece count into an approximate kg quantity.
+ * Falls back to a conservative default when no known token matches.
+ */
+function estimatePieceWeightKg(productName: string | null | undefined): number {
+  const name = (productName ?? "").replace(/\s+/g, " ").trim();
+  if (!name) return DEFAULT_PIECE_WEIGHT_KG;
+
+  let bestToken = "";
+  let bestWeight = DEFAULT_PIECE_WEIGHT_KG;
+  for (const token of Object.keys(PRODUCE_PIECE_WEIGHT_KG)) {
+    if (name.includes(token) && token.length > bestToken.length) {
+      bestToken = token;
+      bestWeight = PRODUCE_PIECE_WEIGHT_KG[token]!;
+    }
+  }
+  return bestWeight;
+}
+
+/**
  * Convert a requested shopping amount into a purchase quantity for basket math.
  *
  * - Packaged goods with known size: number of packs (ceil).
@@ -248,6 +308,16 @@ export function resolvePurchaseQty(input: {
         qty: Math.max(1, Math.ceil(need.quantity / unitPack.quantity)),
         mode: "packs",
       };
+    }
+    // No unit-pack: if the matched product is weighted (has a g/ml size, or
+    // no size at all so the caller prices it per kg via the weighted
+    // fallback), a requested piece count must become an approximate kg
+    // quantity — multiplying the count directly against a ₪/kg price would
+    // silently treat pieces as kilograms.
+    const isWeightedProduct = !dbPack || dbPack.unparseable || dbPack.unit === "g" || dbPack.unit === "ml";
+    if (isWeightedProduct) {
+      const pieceWeightKg = estimatePieceWeightKg(input.productName);
+      return { qty: need.quantity * pieceWeightKg, mode: "weighted_kg_or_l" };
     }
     return { qty: need.quantity, mode: "units" };
   }
