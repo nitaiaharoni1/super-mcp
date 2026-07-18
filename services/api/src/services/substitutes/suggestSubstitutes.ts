@@ -138,31 +138,34 @@ export async function suggestSubstitutes(
   const limitIdx = params.length;
 
   const res = await query<CandidateRow>(
-    `SELECT DISTINCT ON (p.id)
-       p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2, p.size_qty, p.size_unit,
-       sp.unit_price, sp.currency, st.id AS store_id, st.name AS store_name,
-       st.chain_id, c.name_he AS chain_name, ${loc.distanceSelect},
-       similarity(p.name, $2) AS name_sim,
-       ( ($3::text IS NOT NULL AND p.category_l1 = $3)
-         OR ($4::text IS NOT NULL AND p.category_l2 = $4) ) AS same_category
-     FROM product p
-     JOIN listing l ON l.product_id = p.id
-     JOIN store_price sp ON sp.listing_id = l.id
-     JOIN store st ON st.id = sp.store_id
-     JOIN chain c ON c.id = st.chain_id
-     WHERE p.id <> $1
-       AND sp.price > 0
-       AND sp.unit_price IS NOT NULL
-       AND sp.unit_price > 0
-       AND (
-         ($3::text IS NOT NULL AND p.category_l1 = $3)
-         OR ($4::text IS NOT NULL AND p.category_l2 = $4)
-         OR p.name % $2
-         OR ($2 <> '' AND p.name ILIKE '%' || split_part($2, ' ', 1) || '%')
-       )
-       AND ($5::text IS NULL OR p.size_unit = $5)
-       ${storeLocationAndClause(loc)}
-     ORDER BY p.id, sp.unit_price ASC
+    `SELECT * FROM (
+       SELECT DISTINCT ON (p.id)
+         p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2, p.size_qty, p.size_unit,
+         sp.unit_price, sp.currency, st.id AS store_id, st.name AS store_name,
+         st.chain_id, c.name_he AS chain_name, ${loc.distanceSelect},
+         similarity(p.name, $2) AS name_sim,
+         ( ($3::text IS NOT NULL AND p.category_l1 = $3)
+           OR ($4::text IS NOT NULL AND p.category_l2 = $4) ) AS same_category
+       FROM product p
+       JOIN listing l ON l.product_id = p.id
+       JOIN store_price sp ON sp.listing_id = l.id
+       JOIN store st ON st.id = sp.store_id
+       JOIN chain c ON c.id = st.chain_id
+       WHERE p.id <> $1
+         AND sp.price > 0
+         AND sp.unit_price IS NOT NULL
+         AND sp.unit_price > 0
+         AND (
+           ($3::text IS NOT NULL AND p.category_l1 = $3)
+           OR ($4::text IS NOT NULL AND p.category_l2 = $4)
+           OR p.name % $2
+           OR ($2 <> '' AND p.name ILIKE '%' || split_part($2, ' ', 1) || '%')
+         )
+         AND ($5::text IS NULL OR p.size_unit = $5)
+         ${storeLocationAndClause(loc)}
+       ORDER BY p.id, sp.unit_price ASC
+     ) c
+     ORDER BY c.same_category DESC, c.name_sim DESC, c.unit_price ASC
      LIMIT $${limitIdx}`,
     params,
   );
