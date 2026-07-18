@@ -47,13 +47,29 @@ export function registerStoreTools(server: McpServer): void {
         store_id: z.string().uuid().optional().describe("Filter to promotions at this store."),
         product_id: z.string().uuid().optional().describe("Filter to promotions covering this canonical product."),
         active: z.boolean().optional().describe("If true, only currently-active promotions. Defaults to true."),
+        city: z
+          .string()
+          .optional()
+          .describe(
+            "City name in Hebrew or English (also accepts CBS locality codes). Restricts to promotions at " +
+              "stores in that city plus chain-wide promotions of chains present there.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .max(200)
+          .optional()
+          .describe("Max promotions to return, ordered by soonest end date. Defaults to 50, max 200."),
       },
     },
-    async ({ store_id, product_id, active }) => {
+    async ({ store_id, product_id, active, city, limit }) => {
       const promotions = await listPromotions({
         storeId: store_id,
         productId: product_id,
         activeOnly: active ?? true,
+        city,
+        limit,
       });
       return { promotions };
     },

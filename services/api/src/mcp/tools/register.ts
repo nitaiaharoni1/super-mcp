@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { z } from "zod";
+import { z } from "zod";
 import { errorResult, textResult } from "./shared/result.js";
 
 type ToolMeta<T extends z.ZodRawShape> = {
@@ -26,9 +26,16 @@ export function registerTool<T extends z.ZodRawShape>(
     }
   };
 
+  // Wrap the raw shape into a strict ZodObject so every tool rejects unknown/misspelled
+  // arguments with a validation error instead of silently dropping them. The SDK accepts a
+  // full ZodObject as inputSchema (not just a raw shape) and validates args against it before
+  // invoking the handler; a strict object also emits `additionalProperties: false` in the
+  // advertised JSON Schema.
+  const strictSchema = z.object(meta.inputSchema).strict();
+
   server.registerTool(
     name,
-    { title: meta.title, description: meta.description, inputSchema: meta.inputSchema },
+    { title: meta.title, description: meta.description, inputSchema: strictSchema },
     toolHandler as Parameters<McpServer["registerTool"]>[2],
   );
 }
