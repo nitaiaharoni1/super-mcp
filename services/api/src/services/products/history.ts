@@ -29,12 +29,13 @@ export async function getProductHistory(
      JOIN store st ON st.id = pp.store_id
      WHERE l.product_id = $1
        ${whereClause}
-     ORDER BY pp.source_ts ASC
+     ORDER BY pp.source_ts DESC
      LIMIT 5000`,
     params,
   );
 
-  return res.rows.map((r) => ({
+  // LIMIT keeps the newest window; reverse back to chronological for the API.
+  return [...res.rows].reverse().map((r) => ({
     storeId: r.store_id,
     storeName: r.store_name,
     chainId: r.chain_id,
