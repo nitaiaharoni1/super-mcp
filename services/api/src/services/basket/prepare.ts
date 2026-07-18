@@ -67,7 +67,11 @@ function serializePrepareItems(
   }));
 }
 
-function buildPrepareQuestions(
+/**
+ * Confirmation questions for needs_confirmation lines. Exported so optimize_basket
+ * builds questions with the exact same shape prepare_basket does.
+ */
+export function buildPrepareQuestions(
   inputItems: BasketItemInput[],
   items: BasketItemStatus[],
   optionsLimit: number,

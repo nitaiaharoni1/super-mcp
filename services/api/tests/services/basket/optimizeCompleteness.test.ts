@@ -114,20 +114,35 @@ describe("optimizeBasket completeness gate", () => {
     });
   });
 
-  it("does not return cheapest when fewer than 70% lines resolve", async () => {
+  it("prices the resolved subset and returns questions inline on a partial basket", async () => {
     const result = await optimizeBasket({
       items: Array.from({ length: 18 }, (_, index) => ({ query: `item ${index}`, qty: 1 })),
       city: "הרצליה",
     });
 
-    expect(result.cheapest).toBeNull();
-    expect(result.multiStore).toBeNull();
+    // The wasted-response bug: totals were nulled when partial. Now the safely
+    // resolved subset is always priced, so a recommendation exists.
+    expect(result.cheapest).not.toBeNull();
+    expect(result.multiStore).not.toBeNull();
+    // Still honestly flagged: only 1/18 lines resolved.
     expect(result.completeness.totalsArePartial).toBe(true);
     expect(result.completeness.requestedLines).toBe(18);
     expect(result.completeness.resolvedLines).toBe(1);
     expect(result.completeness.needsConfirmationLines).toBe(17);
     expect(result.completeness.unresolvedLines).toBe(0);
     expect(result.completeness.safeResolutionRatio).toBeCloseTo(1 / 18);
+    // One question per unconfirmed line, built with the exact prepare shape.
+    expect(result.questions).toHaveLength(17);
+    for (const q of result.questions) {
+      expect(q).toMatchObject({
+        itemIndex: expect.any(Number),
+        id: expect.stringContaining("product"),
+        prompt: expect.any(String),
+        reason: expect.any(String),
+        required: true,
+      });
+      expect(Array.isArray(q.options)).toBe(true);
+    }
     expect(result.items).toHaveLength(18);
     expect(result.stores.length).toBeGreaterThan(0);
     expect(loadBasketPricingData).toHaveBeenCalledOnce();

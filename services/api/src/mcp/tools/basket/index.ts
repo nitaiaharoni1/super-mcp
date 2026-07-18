@@ -113,14 +113,15 @@ export function registerBasketTools(server: McpServer): void {
     server,
     "optimize_basket",
     {
-      title: "Price a confirmed basket at nearby stores",
+      title: "Price a basket at nearby stores in one shot",
       description:
-        "PREFER calling prepare_basket first, then pass product_id for each confirmed line. " +
-        "Prices only safely resolved items at nearby stores; will not price unconfirmed shortlists. " +
-        "Returns cheapest (single-store), multiStore (cheapest-per-item), and top stores (default 5). " +
-        `Requires city and/or near (default ${DEFAULT_RADIUS_KM}km). Check items[].lowConfidence and use ` +
-        "prepare_basket or resolve_products for ambiguous lines. Missing items are listed — never silently " +
-        "dropped. Every priced line carries a `link` to open that product on the chain's online store.",
+        "One-shot: prices the safely-resolved lines immediately and returns any lines that still need " +
+        "confirmation as `questions` (same shape as prepare_basket) — no separate prepare call required. " +
+        "Totals cover the resolved subset (see completeness.totalsArePartial); re-call with `product_id` " +
+        "answers to the questions to finalize. Returns cheapest (single-store), multiStore (cheapest-per-item), " +
+        `top stores (default 5), and questions. Requires city and/or near (default ${DEFAULT_RADIUS_KM}km). ` +
+        "Missing items are listed — never silently dropped. Every priced line carries a `link` to open that " +
+        "product on the chain's online store.",
       inputSchema: {
         items: basketItemsSchema,
         ...locationShape,

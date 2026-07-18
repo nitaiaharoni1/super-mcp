@@ -9,6 +9,7 @@ import { getActiveOntology } from "../search/ontology.js";
 import type { StoreSummary } from "../stores/index.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
 import { loadBasketPricingData } from "./loadPricingData.js";
+import { DEFAULT_PREPARE_OPTIONS_LIMIT, buildPrepareQuestions } from "./prepare.js";
 import { buildCheapestRecommendation, priceStoreBasket } from "./priceStoreBasket.js";
 import { resolveItems } from "./resolve.js";
 import { applyCheapestStoreSubstitutions, buildMultiStorePlan } from "./substitutions.js";
@@ -113,7 +114,7 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
   const productIds = collectProductIdsForPricing(resolvedItems);
 
   if (productIds.length === 0 || candidateStores.length === 0) {
-    return emptyBasketResult(itemStatuses, completeness, location);
+    return emptyBasketResult(input.items, itemStatuses, completeness, location);
   }
 
   const includeClub = input.includeClub ?? true;
@@ -148,19 +149,9 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
       : Math.max(1, input.storesLimit ?? DEFAULT_STORES_LIMIT);
   const trimmed = storeResults.slice(0, storesLimit);
 
-  if (completeness.totalsArePartial) {
-    return {
-      items: itemStatuses,
-      stores: trimmed,
-      storesCompared: storeResults.length,
-      storesTruncated: storeResults.length > trimmed.length,
-      cheapest: null,
-      multiStore: null,
-      completeness,
-      location,
-    };
-  }
-
+  // One-shot: always price the safely-resolved subset. completeness.totalsArePartial
+  // stays as the honesty flag, but recommendations are no longer nulled — the lines
+  // that still need a human decision are returned inline as `questions`.
   const top = storeResults[0];
   const cheapest: BasketRecommendation | null = top ? buildCheapestRecommendation(top) : null;
 
@@ -170,6 +161,8 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
 
   const multiStore = buildMultiStorePlan(resolvedItems, storeResults);
 
+  const questions = buildPrepareQuestions(input.items, itemStatuses, DEFAULT_PREPARE_OPTIONS_LIMIT);
+
   return {
     items: itemStatuses,
     stores: trimmed,
@@ -178,6 +171,7 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     cheapest,
     multiStore,
     completeness,
+    questions,
     location,
   };
 }
@@ -244,6 +238,7 @@ function isSafelyResolvedForPricing(item: ResolvedItem): boolean {
 }
 
 function emptyBasketResult(
+  inputItems: BasketOptimizeInput["items"],
   itemStatuses: BasketItemStatus[],
   completeness: BasketCompleteness,
   location: StoreLocationMetadata,
@@ -256,6 +251,7 @@ function emptyBasketResult(
     cheapest: null,
     multiStore: null,
     completeness,
+    questions: buildPrepareQuestions(inputItems, itemStatuses, DEFAULT_PREPARE_OPTIONS_LIMIT),
     location,
   };
 }

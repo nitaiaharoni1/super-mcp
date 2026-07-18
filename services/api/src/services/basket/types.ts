@@ -234,8 +234,16 @@ export interface BasketOptimizeResult {
   cheapest: BasketRecommendation | null;
   /** Per-item cheapest across stores (may require multiple trips). */
   multiStore: MultiStorePlan | null;
-  /** Resolution coverage; when below minSafeResolutionRatio, cheapest/multiStore are null. */
+  /**
+   * Resolution coverage. When totalsArePartial is true, cheapest/multiStore
+   * cover only the resolved subset; the unconfirmed lines appear in questions.
+   */
   completeness: BasketCompleteness;
+  /**
+   * Confirmations for lines that still need a human decision (same shape as
+   * prepare_basket). Re-call optimize with product_id answers to finalize.
+   */
+  questions: BasketPrepareQuestion[];
   location: StoreLocationMetadata;
 }
 

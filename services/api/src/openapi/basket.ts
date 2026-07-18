@@ -153,7 +153,7 @@ export const basketMissingItemSchema = {
 export const basketCompletenessSchema = {
   type: "object",
   description:
-    "Resolution coverage for the basket. When safeResolutionRatio is below minSafeResolutionRatio (default 0.7), cheapest and multiStore are null and totalsArePartial is true.",
+    "Resolution coverage for the basket. When safeResolutionRatio is below minSafeResolutionRatio (default 0.7), totalsArePartial is true: cheapest/multiStore cover only the resolved subset and the remaining lines are returned as questions.",
   properties: {
     requestedLines: { type: "integer", description: "Total lines in the request." },
     resolvedLines: {
@@ -172,7 +172,7 @@ export const basketCompletenessSchema = {
     totalsArePartial: {
       type: "boolean",
       description:
-        "True when safeResolutionRatio is below the ontology minSafeResolutionRatio; basket totals must not be treated as full-list cheapest.",
+        "True when safeResolutionRatio is below the ontology minSafeResolutionRatio; cheapest/multiStore cover only the resolved subset (unconfirmed lines are in questions) and must not be treated as full-list cheapest.",
     },
   },
 };
@@ -257,6 +257,38 @@ export const basketOptimizeResponseSchema = {
         reason: { type: "string" },
       },
     },
+    questions: {
+      type: "array",
+      description:
+        "Confirmations for lines that still need a human decision (same shape as prepare_basket questions). " +
+        "Totals cover only the resolved subset (see completeness.totalsArePartial); re-call optimize with " +
+        "product_id answers to price these lines too.",
+      items: {
+        type: "object",
+        required: ["itemIndex", "id", "prompt", "reason", "required", "options"],
+        properties: {
+          itemIndex: { type: "integer" },
+          id: { type: "string", description: "Stable question identifier for this basket line." },
+          prompt: { type: "string" },
+          reason: { type: "string" },
+          required: { type: "boolean" },
+          options: {
+            type: "array",
+            maxItems: 5,
+            items: {
+              type: "object",
+              properties: {
+                productId: { type: "string", format: "uuid" },
+                name: { type: "string" },
+                sizeQty: { type: "number", nullable: true },
+                sizeUnit: { type: "string", nullable: true },
+                hasLocalPrice: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 };
 
@@ -333,11 +365,12 @@ export const basketPaths = {
     post: {
       summary: "Find the cheapest basket nearby (default 10km)",
       description:
-        "Prefer POST /v1/basket/prepare (or MCP prepare_basket) first, confirm every required question, then " +
-        "optimize with product_id on confirmed lines. Prefer pack_qty for packs (qty is a deprecated alias; " +
-        "do not supply both); use amount+unit for weighed goods and natural counts. Requires city or near. " +
-        "Returns cheapest, multiStore, trimmed store breakdowns, completeness, and location metadata. When " +
-        "safeResolutionRatio is below 0.7, cheapest/multiStore are null — verify items before trusting totals.",
+        "One-shot: prices the safely-resolved lines immediately and returns any lines that still need a human " +
+        "decision as `questions` (same shape as prepare_basket). Prefer pack_qty for packs (qty is a deprecated " +
+        "alias; do not supply both); use amount+unit for weighed goods and natural counts. Requires city or near. " +
+        "Returns cheapest, multiStore, trimmed store breakdowns, completeness, questions, and location metadata. " +
+        "When completeness.totalsArePartial is true, totals cover only the resolved subset — re-call with " +
+        "product_id answers to the questions to finalize.",
       requestBody: {
         required: true,
         content: { "application/json": { schema: basketOptimizeRequestSchema } },
