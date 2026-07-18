@@ -20,9 +20,30 @@ import {
   DEFAULT_CANDIDATE_LIMIT,
   SEMANTIC_CANDIDATE_LIMIT,
 } from "./constants.js";
+import { buildEquivalenceSet } from "./equivalence.js";
+import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
-import type { BasketSubstitutionMeta } from "./types.js";
+import type { BasketCandidate, BasketSubstitutionMeta } from "./types.js";
+
+/**
+ * A candidate that may participate in the commodity auto-resolve override.
+ * Mirrors `isVectorOnly` in resolutionDecision.ts EXACTLY: a hit with no lexical
+ * evidence (no lexicalScore > 0 and no exact/phrase/alias name evidence) that was
+ * recalled only via the vector index. The invariant "vector-only never auto-prices"
+ * MUST hold here, so we never widen/override such a top pick.
+ */
+function isVectorOnlyHit(hit: SearchProductHit): boolean {
+  const ev = hit.evidence;
+  const lex = hit.lexicalScore ?? ev?.lexicalScore ?? null;
+  const hasLexicalEvidence =
+    (lex != null && lex > 0) ||
+    Boolean(ev?.exactName || ev?.exactPhrase || ev?.aliasMatched);
+  return (
+    !hasLexicalEvidence &&
+    (hit.vectorDistance != null || hit.matchedVia === "vector")
+  );
+}
 
 export interface RankQueryOptions {
   /** Wall time spent loading profiles for this line (0 when shared batch). */
@@ -329,20 +350,100 @@ export function rankQueryCandidates(
     };
   }
 
-  return {
+  // Build the candidate list once so risk classification, equivalence, and the
+  // response all read the same product_class / intentTier the gate assigned.
+  const candidates: BasketCandidate[] = shortlist.map((hit) =>
+    hitToCandidate(hit, productClassFor(hit)),
+  );
+  // BasketCandidate drops brand; the risk classifier needs it, so keep the raw
+  // hit brand keyed by product id.
+  const shortlistBrandById = new Map<string, string | null>(
+    shortlist.map((hit) => [hit.id, hit.brand ?? null]),
+  );
+
+  const base = {
     qty: purchase.qty,
     qtyMode: purchase.mode,
     productId: decision.autoPrice ? chosen.id : null,
     name: chosen.name,
-    resolvedBy: decision.autoPrice ? "query" : "unresolved",
+    resolvedBy: (decision.autoPrice ? "query" : "unresolved") as "query" | "unresolved",
     confidence: decision.confidence,
     lowConfidence: decision.lowConfidence,
-    candidates: shortlist.map((hit) =>
-      hitToCandidate(hit, productClassFor(hit)),
-    ),
+    candidates,
     primaryProductId: lexicalPrimary?.id ?? chosen.id,
     primaryName: lexicalPrimary?.name ?? chosen.name,
     substitution,
     resolutionStatus: decision.status,
   };
+
+  // Risk-aware overrides. Same-class near-duplicate ambiguity (commodity) is
+  // pricing detail, not a user decision; brand-pinning / cross-class ambiguity
+  // genuinely changes WHAT the user gets and must still confirm.
+  const risk = classifyLineRisk(
+    item.query ?? "",
+    candidates.map(
+      (c): RiskCandidate => ({
+        productClass: c.productClass,
+        brand: shortlistBrandById.get(c.productId) ?? null,
+        intentTier: c.intentTier ?? null,
+      }),
+    ),
+  );
+
+  // Commodity override: a confirmation caused purely by same-class margin
+  // ambiguity auto-resolves to the top pick with an equivalence set attached.
+  // HARD GUARD: never override a vector-only top pick (invariant: vector-only
+  // can't auto-price), and only for commodity risk — never cross_class/opaque.
+  if (
+    decision.status === "needs_confirmation" &&
+    risk.kind === "commodity" &&
+    candidates[0] != null &&
+    shortlist[0] != null &&
+    !isVectorOnlyHit(shortlist[0])
+  ) {
+    const equivalents = buildEquivalenceSet(candidates[0], candidates, {
+      packTolerance: searchConfig?.packTolerance ?? 0.5,
+      maxEquivalents: searchConfig?.maxEquivalents ?? 5,
+    });
+    if (equivalents.length >= 2) {
+      const top = candidates[0];
+      return {
+        ...base,
+        productId: top.productId,
+        name: top.name,
+        resolvedBy: "query",
+        confidence: base.confidence ?? top.score,
+        lowConfidence: false,
+        resolutionStatus: "resolved",
+        equivalents,
+      };
+    }
+  }
+
+  // Brand-pin downgrade: a resolved line whose chosen product is NOT the pinned
+  // brand must confirm. Brand pinning can only DOWNGRADE, never upgrade. Prefer
+  // exact-brand candidates in the returned shortlist so the confirmation offers
+  // the brand the user actually asked for.
+  if (risk.kind === "brand_pinned" && decision.status === "resolved") {
+    const chosenBrand = shortlistBrandById.get(chosen.id) ?? null;
+    if (!brandMatches(chosenBrand, risk.pinnedBrand)) {
+      const exactBrand = candidates.filter((c) =>
+        brandMatches(shortlistBrandById.get(c.productId) ?? null, risk.pinnedBrand),
+      );
+      const reordered =
+        exactBrand.length > 0
+          ? [...exactBrand, ...candidates.filter((c) => !exactBrand.includes(c))]
+          : candidates;
+      return {
+        ...base,
+        productId: null,
+        resolvedBy: "unresolved",
+        lowConfidence: true,
+        candidates: reordered,
+        resolutionStatus: "needs_confirmation",
+      };
+    }
+  }
+
+  return base;
 }

@@ -43,6 +43,8 @@ export interface QueryResolveResult {
   primaryName: string | null;
   substitution: BasketSubstitutionMeta | null;
   resolutionStatus?: ResolutionStatus;
+  /** Gated same-class equivalents attached when a commodity line auto-resolves. */
+  equivalents?: ReturnType<typeof hitToCandidate>[];
 }
 
 /** Search-phase output for a free-text basket line (profiles not yet loaded). */

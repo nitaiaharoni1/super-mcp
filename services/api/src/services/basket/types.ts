@@ -78,6 +78,12 @@ export interface ResolvedItem {
   primaryProductId: string | null;
   primaryName: string | null;
   substitution: BasketSubstitutionMeta | null;
+  /**
+   * Gated same-class candidates a chain may price interchangeably. Present only
+   * on auto-resolved query lines whose confirmation was pure same-class margin
+   * ambiguity (commodity risk); never on brand-pinned or cross-class lines.
+   */
+  equivalents?: BasketCandidate[];
 }
 
 export interface BasketItemStatus {

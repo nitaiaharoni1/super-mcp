@@ -21,8 +21,22 @@ export type LineRisk =
 // marks locally before tokenizing both the query and the brand.
 const HEBREW_QUOTE_MARKS = /['’׳״`"]/g;
 
-function riskTokens(text: string): string[] {
+export function riskTokens(text: string): string[] {
   return tokenizeNormalized(normalizeEmbedInput(text.replace(HEBREW_QUOTE_MARKS, "")));
+}
+
+/**
+ * Two brand strings name the same brand when their normalized token sets are
+ * equal (order- and quote-mark-insensitive). Used to compare a chosen
+ * candidate's brand against a pinned brand from the query.
+ */
+export function brandMatches(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const at = riskTokens(a);
+  const bt = riskTokens(b);
+  if (at.length === 0 || bt.length === 0) return false;
+  const bSet = new Set(bt);
+  return at.length === bt.length && at.every((t) => bSet.has(t));
 }
 
 /**

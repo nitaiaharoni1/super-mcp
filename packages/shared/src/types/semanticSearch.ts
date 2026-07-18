@@ -21,6 +21,14 @@ export interface SemanticSearchConfig {
   requireDeterministicForAutoResolve: boolean;
   /** Gate penaltyScore at/above which a candidate may not auto-resolve. */
   penaltyBlockThreshold: number;
+  /**
+   * Relative pack-size divergence a chain may price interchangeably when a
+   * commodity line auto-resolves to an equivalence set (0.5 = ±50%). Optional;
+   * callers default to 0.5.
+   */
+  packTolerance?: number;
+  /** Max members in a commodity line's equivalence set. Optional; callers default to 5. */
+  maxEquivalents?: number;
 }
 
 export const DEFAULT_SEMANTIC_SEARCH_CONFIG: SemanticSearchConfig = {
