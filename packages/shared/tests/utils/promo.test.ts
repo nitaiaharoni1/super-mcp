@@ -27,6 +27,18 @@ describe("normalizePromoMechanic", () => {
     expect(m.params.percent).toBe(100);
   });
 
+  it("keeps 1+1 at 100% even when the description mentions a percentage (fat content)", () => {
+    const m = normalizePromoMechanic({ description: "1+1 חלב 3% שומן" });
+    expect(m.type).toBe("second_unit_pct");
+    expect(m.params.percent).toBe(100);
+  });
+
+  it("reads the second-unit percent from the deal phrase, not an earlier unrelated percent", () => {
+    const m = normalizePromoMechanic({ description: "חלב 3% שומן - השני ב-50%" });
+    expect(m.type).toBe("second_unit_pct");
+    expect(m.params.percent).toBe(50);
+  });
+
   it("keeps unknown as other", () => {
     const m = normalizePromoMechanic({ description: "מבצע מיוחד בסניף" });
     expect(m.type).toBe("other");

@@ -80,12 +80,18 @@ export function normalizePromoMechanic(fields: PromoFields): RawPromoRecord["mec
     /השני(?:יה)?\s*ב-?\s*\d+\s*%/.test(desc) ||
     /second\s*(?:unit\s*)?\d+\s*%/i.test(desc)
   ) {
-    const pct = desc.match(/(\d+)\s*%/);
     const isBogo = /1\s*\+\s*1/i.test(desc) || /בחינם|free/i.test(desc);
+    // Read the percent from the second-unit phrase itself, not a bare "\d+%"
+    // scan: an unrelated percentage in the text (e.g. "3% שומן" fat content)
+    // would otherwise hijack the discount, and a 1+1 deal is always 100% off
+    // the second unit regardless of any percentage mentioned in the name.
+    const secondUnitPct =
+      desc.match(/השני(?:יה)?\s*ב-?\s*(\d+)\s*%/) ??
+      desc.match(/second\s*(?:unit\s*)?(\d+)\s*%/i);
     return {
       type: "second_unit_pct",
       params: {
-        percent: pct ? Number(pct[1]) : isBogo ? 100 : 50,
+        percent: isBogo ? 100 : secondUnitPct ? Number(secondUnitPct[1]) : 50,
       },
       rawText: desc,
     };
