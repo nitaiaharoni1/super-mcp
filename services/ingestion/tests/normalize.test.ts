@@ -52,7 +52,7 @@ describe("Normalizer", () => {
     await expect(n.apply([priceRecord("001")])).rejects.toThrow("Server sent FIN");
   });
 
-  it("falls back to feed unitPrice when canonical unit math is unparseable", async () => {
+  it("writes null unit_price (not the feed's mixed-scale value) when canonical unit math is unparseable", async () => {
     const record: RawPriceRecord = {
       ...priceRecord("001"),
       unit: "יחידות",
@@ -62,7 +62,7 @@ describe("Normalizer", () => {
     const n = new Normalizer("test");
     await n.apply([record]);
     expect(upsertStorePrice).toHaveBeenCalledWith(
-      expect.objectContaining({ unitPrice: 12.34 }),
+      expect.objectContaining({ unitPrice: null }),
     );
   });
 

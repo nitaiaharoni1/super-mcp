@@ -11,8 +11,11 @@ vi.mock("@super-mcp/db", () => ({
   upsertStorePrice: vi.fn(),
 }));
 
+import * as db from "@super-mcp/db";
 import type { RawRecord } from "@super-mcp/shared";
 import { Normalizer } from "../src/normalize.js";
+
+const upsertStorePrice = vi.mocked(db.upsertStorePrice);
 
 describe("normalize telemetry counters", () => {
   it("counts promo mechanics that fall back to other", async () => {
@@ -35,7 +38,8 @@ describe("normalize telemetry counters", () => {
     expect(stats.promoOther).toBe(1);
   });
 
-  it("counts unparseable units on price rows", async () => {
+  it("counts unparseable units on price rows and writes null unit_price (no feed fallback)", async () => {
+    upsertStorePrice.mockClear();
     const n = new Normalizer("test");
     const records: RawRecord[] = [
       {
@@ -47,11 +51,16 @@ describe("normalize telemetry counters", () => {
         name: "מוצר",
         qty: 1,
         unit: "zzz",
+        // Feed's raw per-1kg/1L value; must NOT be written into the
+        // per-100g/100ml unit_price column when our own math can't parse.
+        unitPrice: 51.6,
         price: 10,
         ts: new Date(),
       },
     ];
     const stats = await n.apply(records);
     expect(stats.unitUnparseable).toBe(1);
+    expect(upsertStorePrice).toHaveBeenCalledTimes(1);
+    expect(upsertStorePrice.mock.calls[0]![0]).toMatchObject({ unitPrice: null });
   });
 });

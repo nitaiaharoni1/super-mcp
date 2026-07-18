@@ -212,9 +212,12 @@ export class Normalizer {
           listingId,
           storeId: storeUuid,
           price: record.price,
-          // Prefer our canonical unit math; fall back to the feed's UnitOfMeasurePrice
-          // when Hebrew unit labels don't parse (common for "יחידות" / missing qty).
-          unitPrice: unit.pricePerCanonical ?? record.unitPrice ?? null,
+          // Only our canonical per-100g/100ml/unit math goes in unit_price.
+          // The feed's UnitOfMeasurePrice is per-1kg/1L for some chains and
+          // per-100g for others — mixing scales corrupted unit-price sorts
+          // (₪51.6 "lemons"). Unparseable-unit rows keep price only; the miss
+          // is already counted via unit_unparseable telemetry.
+          unitPrice: unit.pricePerCanonical ?? null,
           currency: record.currency ?? "ILS",
           allowDiscount: record.allowDiscount,
           sourceTs: record.ts,
