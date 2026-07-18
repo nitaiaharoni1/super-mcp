@@ -24,6 +24,7 @@
     "propose-ontology-terms": "tsx src/scripts/proposeOntologyTerms.ts",
     "check-integrity": "tsx src/scripts/check-integrity.ts",
     "gtin-audit": "tsx src/scripts/gtinAudit.ts",
+    "geocode-stores": "tsx src/scripts/geocodeStores.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
