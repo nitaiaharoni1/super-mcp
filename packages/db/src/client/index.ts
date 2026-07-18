@@ -26,6 +26,12 @@ export function getPool(): pg.Pool {
     pool = new Pool({
       connectionString: getDatabaseUrl(),
       max,
+      connectionTimeoutMillis: 10_000,
+      idleTimeoutMillis: 30_000,
+      // Bound runaway scans on the request path. Migrations exempt themselves
+      // via `SET LOCAL statement_timeout = 0` (schema/migrate.ts) because DDL
+      // like a large CREATE INDEX is intentionally long-running.
+      options: "-c statement_timeout=30000",
     });
   }
   return pool;
@@ -48,7 +54,11 @@ export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<
       await client.query("COMMIT");
       return result;
     } catch (err) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Connection already dead; the original error is the one that matters.
+      }
       throw err;
     }
   });

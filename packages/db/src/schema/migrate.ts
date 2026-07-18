@@ -49,13 +49,21 @@ export async function runMigrations(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      // DDL (CREATE INDEX on large tables, ALTER) is admin-initiated and can
+      // legitimately run for minutes; exempt migrations from the pool's
+      // API-oriented statement_timeout so a big index build isn't killed.
+      await client.query("SET LOCAL statement_timeout = 0");
       await client.query(sql);
       await client.query(`INSERT INTO schema_migrations (id) VALUES ($1)`, [id]);
       await client.query("COMMIT");
       applied.push(id);
       opts.onProgress?.({ type: "applied", id });
     } catch (err) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Connection already dead; the original error is the one that matters.
+      }
       throw err;
     } finally {
       client.release();
