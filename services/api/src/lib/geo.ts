@@ -1,5 +1,10 @@
 /** Location parsing + SQL distance helpers shared by store/price/basket queries. */
-import { AppError, type GeoPoint } from "@super-mcp/shared";
+import {
+  AppError,
+  ISRAEL_STORE_COORDINATE_BOUNDS,
+  normalizeStoreCoordinates,
+  type GeoPoint,
+} from "@super-mcp/shared";
 
 export type { GeoPoint };
 
@@ -21,7 +26,13 @@ export function parseNear(raw: string | undefined): GeoPoint | undefined {
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
     throw new AppError("bad_request", "near is out of valid lat/lng range", 400, { near: raw });
   }
-  return { lat, lng };
+  const point = normalizeStoreCoordinates(lat, lng);
+  if (!point) {
+    throw new AppError("bad_request", "near must be within the supported Israel region", 400, {
+      near: raw,
+    });
+  }
+  return point;
 }
 
 /**
@@ -52,9 +63,12 @@ export function geoBoundingBoxSql(
   latCol: string,
   lngCol: string,
 ): string {
+  const bounds = ISRAEL_STORE_COORDINATE_BOUNDS;
   return `(
     ${latCol} IS NOT NULL AND ${lngCol} IS NOT NULL
     AND ${latCol} <> 0 AND ${lngCol} <> 0
+    AND ${latCol} BETWEEN ${bounds.minLat} AND ${bounds.maxLat}
+    AND ${lngCol} BETWEEN ${bounds.minLng} AND ${bounds.maxLng}
     AND ${latCol} BETWEEN $${latParamIdx} - ($${radiusKmParamIdx} * 1.2) / 111.0
                       AND $${latParamIdx} + ($${radiusKmParamIdx} * 1.2) / 111.0
     AND ${lngCol} BETWEEN $${lngParamIdx} - ($${radiusKmParamIdx} * 1.2) / (111.0 * GREATEST(0.2, cos(radians($${latParamIdx}))))

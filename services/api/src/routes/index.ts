@@ -3,3 +3,4 @@ export { registerBasketRoutes } from "./basket/index.js";
 export { registerStoreRoutes, registerChainRoutes } from "./stores/index.js";
 export { registerPromotionRoutes } from "./promotions/index.js";
 export { registerAdminRoutes } from "./admin/index.js";
+export { registerReadinessRoute } from "./readiness/index.js";

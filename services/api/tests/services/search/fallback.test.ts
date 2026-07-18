@@ -101,6 +101,7 @@ describe("semantic V2 fallback / observability", () => {
     getActiveOntology.mockResolvedValue(heRetailOntologyFixture());
     semanticV2PolicyEnabled.mockReturnValue(false);
     semanticV2Shadow.mockReturnValue(false);
+    loadSemanticProfiles.mockResolvedValue(new Map());
 
     await resolveQueryItem(
       { query: HE_RETAIL.query.paragiyot },
@@ -110,7 +111,56 @@ describe("semantic V2 fallback / observability", () => {
     );
 
     expect(rankHitsForIntentMock).not.toHaveBeenCalled();
-    expect(searchQueriesForIntentMock).toHaveBeenCalled();
+    expect(searchProductsScored).toHaveBeenCalledTimes(1);
+    expect(searchQueriesForIntentMock).not.toHaveBeenCalled();
+    expect(loadSemanticProfiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("delegates alias expansion to searchProductsScored instead of searching aliases twice", async () => {
+    getActiveOntology.mockResolvedValue(heRetailOntologyFixture());
+    searchQueriesForIntentMock.mockReturnValue([
+      HE_RETAIL.query.paragiyot,
+      "פרגית",
+      "ירכיים עוף",
+    ]);
+    loadSemanticProfiles.mockResolvedValue(new Map());
+
+    await resolveQueryItem(
+      { query: HE_RETAIL.query.paragiyot },
+      { index: 0, amount: null, unit: null },
+      { city: "הרצליה" },
+      false,
+    );
+
+    expect(searchProductsScored).toHaveBeenCalledTimes(1);
+    expect(searchProductsScored).toHaveBeenCalledWith(
+      expect.objectContaining({ q: HE_RETAIL.query.paragiyot }),
+    );
+    expect(searchQueriesForIntentMock).not.toHaveBeenCalled();
+  });
+
+  it("omits city from search when storeIds are already resolved", async () => {
+    getActiveOntology.mockResolvedValue(heRetailOntologyFixture());
+    loadSemanticProfiles.mockResolvedValue(new Map());
+
+    await resolveQueryItem(
+      { query: HE_RETAIL.query.paragiyot },
+      { index: 0, amount: null, unit: null },
+      {
+        city: "הרצליה",
+        near: { lat: 32.16, lng: 34.84 },
+        radiusKm: 5,
+        storeIds: ["11111111-1111-4111-8111-111111111111"],
+      },
+      false,
+    );
+
+    expect(searchProductsScored).toHaveBeenCalledTimes(1);
+    const searchArgs = searchProductsScored.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(searchArgs.storeIds).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    expect(searchArgs).not.toHaveProperty("city");
+    expect(searchArgs).not.toHaveProperty("near");
+    expect(searchArgs).not.toHaveProperty("radiusKm");
   });
 
   it("resolveQuery sets semanticExpand false when V2 recall is off", async () => {

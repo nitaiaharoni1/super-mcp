@@ -1,4 +1,4 @@
-import type { RawStoreRecord } from "@super-mcp/shared";
+import { normalizeStoreCoordinates, type RawStoreRecord } from "@super-mcp/shared";
 import { asArray, num, text } from "./helpers.js";
 import { feedParser } from "./parser.js";
 
@@ -16,6 +16,7 @@ export function parseStoresXml(xml: string, chainId: string): RawStoreRecord[] {
     if (!storeId) return;
     const lat = num(s.Latitude ?? s.Lat ?? s.StoreLatitude);
     const lng = num(s.Longitude ?? s.Lng ?? s.Lon ?? s.StoreLongitude);
+    const geo = normalizeStoreCoordinates(lat, lng);
     stores.push({
       kind: "store",
       chainId: text(s.ChainId ?? s.ChainID ?? root.ChainId ?? root.ChainID) || chainId,
@@ -24,7 +25,7 @@ export function parseStoresXml(xml: string, chainId: string): RawStoreRecord[] {
       address: text(s.Address) || undefined,
       city: text(s.City) || undefined,
       zip: text(s.ZipCode ?? s.ZIPCode) || undefined,
-      geo: lat != null && lng != null ? { lat, lng } : undefined,
+      geo: geo ?? undefined,
       raw: s,
     });
   };

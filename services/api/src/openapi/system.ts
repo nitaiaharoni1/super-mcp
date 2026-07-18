@@ -1,5 +1,30 @@
 import { errorResponses, withData } from "./common.js";
 
+export const readinessReportSchema = {
+  type: "object",
+  properties: {
+    status: { type: "string", enum: ["ready", "degraded"] },
+    checkedAt: { type: "string", format: "date-time" },
+    storeCoordinates: {
+      type: "object",
+      properties: {
+        total: { type: "integer" },
+        valid: { type: "integer" },
+        coverage: { type: "number", description: "valid / total (0 when total is 0)." },
+      },
+    },
+    localPrices: {
+      type: "object",
+      properties: {
+        currentRows: { type: "integer" },
+        storesWithCurrentPrices: { type: "integer" },
+        newestSourceTs: { type: "string", format: "date-time", nullable: true },
+        freshnessHours: { type: "integer" },
+      },
+    },
+  },
+};
+
 export function systemPaths(mcpToolList: string): Record<string, unknown> {
   return {
     "/health": {
@@ -17,6 +42,25 @@ export function systemPaths(mcpToolList: string): Record<string, unknown> {
                 },
               },
             },
+          },
+        },
+      },
+    },
+    "/ready": {
+      get: {
+        summary: "Readiness check",
+        description:
+          "Dependency-aware readiness probe (store coordinate coverage and current local prices). " +
+          "Distinct from /health, which remains a dependency-free liveness check.",
+        security: [],
+        responses: {
+          "200": {
+            description: "Ready — stores and current prices are available",
+            content: { "application/json": { schema: readinessReportSchema } },
+          },
+          "503": {
+            description: "Degraded — missing stores or current price rows",
+            content: { "application/json": { schema: readinessReportSchema } },
           },
         },
       },
@@ -75,8 +119,10 @@ export function systemPaths(mcpToolList: string): Record<string, unknown> {
       post: {
         summary: "MCP Streamable HTTP endpoint (JSON-RPC 2.0)",
         description:
-          `Remote MCP server exposing ${mcpToolList}. Prefer one optimize_basket call for shopping lists. ` +
-          "Accepts the same Bearer key, or ?api_key= for clients that can't set headers.",
+          `Remote MCP server exposing ${mcpToolList}. For shopping lists: call prepare_basket first, ` +
+          "confirm every required question, then call optimize_basket once with product_id on confirmed " +
+          "lines (prefer pack_qty; qty is a deprecated alias). Auth is Bearer by default; query-string " +
+          "?api_key= is accepted only on /mcp when SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 (legacy escape hatch).",
         responses: { "200": { description: "JSON-RPC response or SSE stream" } },
       },
     },

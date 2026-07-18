@@ -5,6 +5,14 @@ export type {
   RetrievalCandidate,
 } from "./types.js";
 export { searchProducts, searchProductsScored, orderByLocationStock } from "./scoredSearch.js";
+export {
+  searchExactProducts,
+  buildExactProductRankedCte,
+  isExactProbeStrong,
+  EXACT_PROBE_CANDIDATE_LIMIT,
+} from "./exactProductSearch.js";
+export { toSearchLocationParams } from "./locationScope.js";
+export type { SearchLocationScope } from "./locationScope.js";
 export { getQueryEmbedding, QueryEmbeddingError } from "./queryEmbedding.js";
 export type { QueryEmbeddingResult } from "./queryEmbedding.js";
 export { fuseRankedCandidates } from "./rankFusion.js";

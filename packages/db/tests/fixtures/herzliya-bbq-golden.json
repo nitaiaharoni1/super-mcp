@@ -24,7 +24,8 @@
     },
     {
       "query": "פיתות",
-      "qty": 20,
+      "amount": 20,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["לחם פרוס", "בגט"],
       "acceptableNameSubstrings": ["פית", "פיתה", "פיתות"]
     },

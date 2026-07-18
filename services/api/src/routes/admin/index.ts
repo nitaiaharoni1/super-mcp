@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { AppError } from "@super-mcp/shared";
 import { query } from "@super-mcp/db";
+import { z } from "zod";
+import { createApiKey, listApiKeys, revokeApiKey, rotateApiKey } from "../../services/apiKeys.js";
 import { createHandler } from "../shared/handlers.js";
 
 interface TotalsRow {
@@ -16,7 +18,68 @@ interface RouteBreakdownRow {
   last_used: string;
 }
 
+const createKeyBody = z.object({
+  name: z.string().trim().min(1).max(120),
+  role: z.enum(["standard", "master"]).default("standard"),
+  rateLimitPerMinute: z.number().int().positive().max(1_000_000).default(60),
+  expiresAt: z.string().datetime().nullable().optional(),
+});
+
+const keyParams = z.object({ id: z.string().uuid() });
+
 export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
+  app.get(
+    "/v1/admin/keys",
+    createHandler({}, async () => listApiKeys()),
+  );
+
+  app.post(
+    "/v1/admin/keys",
+    createHandler({ body: createKeyBody }, async ({ body }, request) => {
+      const auth = request.auth;
+      if (!auth) throw new AppError("unauthorized", "Missing API key", 401);
+      return createApiKey(body, auth.apiKeyId);
+    }),
+  );
+
+  app.post(
+    "/v1/admin/keys/:id/rotate",
+    createHandler({ params: keyParams }, async ({ params }, request) => {
+      const auth = request.auth;
+      if (!auth) throw new AppError("unauthorized", "Missing API key", 401);
+      return rotateApiKey(params.id, auth.apiKeyId);
+    }),
+  );
+
+  app.post(
+    "/v1/admin/keys/:id/revoke",
+    createHandler({ params: keyParams }, async ({ params }, request) => {
+      const auth = request.auth;
+      if (!auth) throw new AppError("unauthorized", "Missing API key", 401);
+      await revokeApiKey(params.id, auth.apiKeyId);
+      return { revoked: true };
+    }),
+  );
+
+  app.get(
+    "/v1/admin/usage",
+    createHandler({}, async () => {
+      const totalsRes = await query<TotalsRow>(
+        `SELECT
+           count(*)::text AS total,
+           count(*) FILTER (WHERE created_at > now() - interval '1 day')::text AS last_24h,
+           count(*) FILTER (WHERE created_at > now() - interval '1 minute')::text AS last_minute
+         FROM usage_event`,
+      );
+      const totals = totalsRes.rows[0];
+      return {
+        totalRequests: Number(totals?.total ?? 0),
+        requestsLast24h: Number(totals?.last_24h ?? 0),
+        requestsLastMinute: Number(totals?.last_minute ?? 0),
+      };
+    }),
+  );
+
   app.get(
     "/v1/usage",
     createHandler({}, async (_input, request) => {

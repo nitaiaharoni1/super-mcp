@@ -29,6 +29,28 @@ export const storeSchema = {
   },
 };
 
+export const storeLocationMetadataSchema = {
+  type: "object",
+  properties: {
+    scope: { type: "string", enum: ["unscoped", "city", "near", "city_near"] },
+    precision: { type: "string", enum: ["none", "city", "radius"] },
+    fallbackApplied: { type: "boolean" },
+    warning: { type: "string", nullable: true },
+    requested: {
+      type: "object",
+      properties: {
+        city: { type: "string", nullable: true },
+        near: {
+          type: "object",
+          nullable: true,
+          properties: { lat: { type: "number" }, lng: { type: "number" } },
+        },
+        radiusKm: { type: "number", nullable: true },
+      },
+    },
+  },
+};
+
 export const promotionSchema = {
   type: "object",
   properties: {
@@ -56,6 +78,7 @@ export const promotionSchema = {
 export const storeComponentSchemas = {
   Chain: chainSchema,
   Store: storeSchema,
+  StoreLocationMetadata: storeLocationMetadataSchema,
   Promotion: promotionSchema,
 };
 
@@ -79,7 +102,20 @@ export const storePaths = {
         { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
       ],
       responses: {
-        "200": { description: "OK", content: { "application/json": { schema: withData({ type: "array", items: storeSchema }) } } },
+        "200": {
+          description: "OK",
+          content: {
+            "application/json": {
+              schema: withData({
+                type: "object",
+                properties: {
+                  stores: { type: "array", items: storeSchema },
+                  location: storeLocationMetadataSchema,
+                },
+              }),
+            },
+          },
+        },
         ...errorResponses,
       },
     },

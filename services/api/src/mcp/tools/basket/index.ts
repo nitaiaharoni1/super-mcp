@@ -1,51 +1,128 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AppError } from "@super-mcp/shared";
-import { optimizeBasket } from "../../../services/basket/index.js";
+import { optimizeBasket, prepareBasket } from "../../../services/basket/index.js";
 import { resolveRadiusKm, DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
 import { locationShape, toGeo } from "../shared/location.js";
 
+const basketItemSchema = z
+  .object({
+    product_id: z.string().uuid().optional().describe("Canonical product UUID, if known."),
+    gtin: z.string().optional().describe("GTIN/barcode, if known."),
+    query: z.string().optional().describe("Free-text product name, used if product_id/gtin are unknown."),
+    pack_qty: z
+      .number()
+      .positive()
+      .optional()
+      .describe("Number of product packs to buy."),
+    qty: z
+      .number()
+      .positive()
+      .optional()
+      .describe("Deprecated alias for pack_qty. Do not supply both."),
+    amount: z
+      .number()
+      .positive()
+      .optional()
+      .describe("Physical amount, e.g. 1.5 with unit=kg. Converted to packs or weighted qty."),
+    unit: z
+      .string()
+      .optional()
+      .describe("Unit for amount: kg, g, L, ml, unit, יח, קג, etc. For 20 pitas use amount=20, unit=יח."),
+  })
+  .refine((item) => !(item.pack_qty != null && item.qty != null), {
+    message: "pack_qty and deprecated qty are mutually exclusive; supply only one",
+  })
+  .describe("Shopping list line: product_id|gtin|query plus pack_qty (deprecated: qty) or amount+unit.");
+
+const basketItemsSchema = z
+  .array(basketItemSchema)
+  .min(1)
+  .max(50)
+  .describe(
+    "Shopping list. Each item needs product_id|gtin|query and pack_qty (deprecated: qty) or amount+unit.",
+  );
+
+function assertBasketItems(items: z.infer<typeof basketItemsSchema>): void {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    if (!item.product_id && !item.gtin && !item.query) {
+      throw new AppError("bad_request", `items[${i}] requires product_id, gtin, or query`, 400);
+    }
+    if (item.pack_qty == null && item.qty == null && item.amount == null) {
+      throw new AppError("bad_request", `items[${i}] requires pack_qty or amount`, 400);
+    }
+    if (item.pack_qty != null && item.qty != null) {
+      throw new AppError(
+        "bad_request",
+        `items[${i}] cannot supply both pack_qty and deprecated qty`,
+        400,
+      );
+    }
+    if (item.amount != null && !(item.unit && item.unit.trim())) {
+      throw new AppError(
+        "bad_request",
+        `items[${i}] amount requires unit (kg, g, L, ml, unit, יח, …)`,
+        400,
+      );
+    }
+  }
+}
+
+function mapBasketItems(items: z.infer<typeof basketItemsSchema>) {
+  return items.map((item) => ({
+    productId: item.product_id,
+    gtin: item.gtin,
+    query: item.query,
+    qty: item.pack_qty ?? item.qty,
+    amount: item.amount,
+    unit: item.unit,
+  }));
+}
+
 export function registerBasketTools(server: McpServer): void {
+  registerTool(
+    server,
+    "prepare_basket",
+    {
+      title: "Resolve a shopping list near a location",
+      description:
+        "FIRST step for shopping lists: resolve free-text lines to product candidates near city/near " +
+        "(default radius). Returns resolutionStatus, safe assumptions, and required questions with at most " +
+        "five compact product/pack options for needs_confirmation lines. Does not load store prices. " +
+        "After the user answers every required question, call optimize_basket with product_id for confirmed lines.",
+      inputSchema: {
+        items: basketItemsSchema,
+        ...locationShape,
+      },
+    },
+    async ({ items, city, near, radius_km }) => {
+      assertBasketItems(items);
+      const geo = toGeo(near);
+      return prepareBasket({
+        items: mapBasketItems(items),
+        city,
+        near: geo,
+        radiusKm: resolveRadiusKm(geo, radius_km),
+      });
+    },
+  );
+
   registerTool(
     server,
     "optimize_basket",
     {
-      title: "Find the cheapest basket nearby",
+      title: "Price a confirmed basket at nearby stores",
       description:
-        "PREFERRED for shopping lists: pass all items in one call (query/gtin/product_id + qty OR amount+unit). " +
-        "Resolves products, applies promos, ranks stores by completeness then total. Returns cheapest " +
-        `(single-store), multiStore (cheapest-per-item), and top stores (default 5). Requires city and/or near ` +
-        `(default ${DEFAULT_RADIUS_KM}km). Check items[].lowConfidence and use resolve_products/search_products ` +
-        "only for those lines. Missing items are listed — never silently dropped. Every line carries a " +
-        "`link` to open that product on the chain's online store (null if the chain has no online store), " +
-        "so the user can click through and add each item.",
+        "PREFER calling prepare_basket first, then pass product_id for each confirmed line. " +
+        "Prices only safely resolved items at nearby stores; will not price unconfirmed shortlists. " +
+        "Returns cheapest (single-store), multiStore (cheapest-per-item), and top stores (default 5). " +
+        `Requires city and/or near (default ${DEFAULT_RADIUS_KM}km). Check items[].lowConfidence and use ` +
+        "prepare_basket or resolve_products for ambiguous lines. Missing items are listed — never silently " +
+        "dropped. Every priced line carries a `link` to open that product on the chain's online store.",
       inputSchema: {
-        items: z
-          .array(
-            z.object({
-              product_id: z.string().uuid().optional().describe("Canonical product UUID, if known."),
-              gtin: z.string().optional().describe("GTIN/barcode, if known."),
-              query: z.string().optional().describe("Free-text product name, used if product_id/gtin are unknown."),
-              qty: z
-                .number()
-                .positive()
-                .optional()
-                .describe("Pack count. Use amount+unit instead for weighed goods (kg/L)."),
-              amount: z
-                .number()
-                .positive()
-                .optional()
-                .describe("Physical amount, e.g. 1.5 with unit=kg. Converted to packs or weighted qty."),
-              unit: z
-                .string()
-                .optional()
-                .describe("Unit for amount: kg, g, L, ml, unit, יח, קג, etc."),
-            }),
-          )
-          .min(1)
-          .max(50)
-          .describe("Shopping list. Each item needs product_id|gtin|query and qty or amount."),
+        items: basketItemsSchema,
         ...locationShape,
         include_club: z
           .boolean()
@@ -61,32 +138,10 @@ export function registerBasketTools(server: McpServer): void {
       },
     },
     async ({ items, city, near, radius_km, include_club, stores_limit }) => {
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i]!;
-        if (!item.product_id && !item.gtin && !item.query) {
-          throw new AppError("bad_request", `items[${i}] requires product_id, gtin, or query`, 400);
-        }
-        if (item.qty == null && item.amount == null) {
-          throw new AppError("bad_request", `items[${i}] requires qty or amount`, 400);
-        }
-        if (item.amount != null && !(item.unit && item.unit.trim())) {
-          throw new AppError(
-            "bad_request",
-            `items[${i}] amount requires unit (kg, g, L, ml, unit, יח, …)`,
-            400,
-          );
-        }
-      }
+      assertBasketItems(items);
       const geo = toGeo(near);
       return optimizeBasket({
-        items: items.map((item) => ({
-          productId: item.product_id,
-          gtin: item.gtin,
-          query: item.query,
-          qty: item.qty,
-          amount: item.amount,
-          unit: item.unit,
-        })),
+        items: mapBasketItems(items),
         city,
         near: geo,
         radiusKm: resolveRadiusKm(geo, radius_km),

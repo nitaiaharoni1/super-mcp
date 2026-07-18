@@ -1,32 +1,92 @@
 /** Shared lexical ranking CTE used by hybrid and fallback search. */
-export function buildLexicalRankedCte(
-  includeAliasHit: boolean,
-  trigramThreshold = 0.4,
-): string {
-  const aliasHitCte = includeAliasHit
-    ? `
-    alias_hit AS (
-      SELECT DISTINCT pa.product_id
-      FROM product_alias pa
-      WHERE pa.product_id IS NOT NULL
-        AND $1 <> ''
-        AND (
-          pa.alias ILIKE '%' || $6 || '%' ESCAPE '\\'
-          OR similarity(pa.alias, $1) > ${trigramThreshold}
-        )
-    ),`
-    : "";
 
-  const aliasScore = includeAliasHit ? `CASE WHEN ah.product_id IS NOT NULL THEN 0.7 ELSE 0 END` : "0";
-  const aliasJoin = includeAliasHit ? "LEFT JOIN alias_hit ah ON ah.product_id = p.id" : "";
-  const aliasWhere = includeAliasHit ? "OR ah.product_id IS NOT NULL" : "";
-  const aliasMatchedVia = includeAliasHit
-    ? `WHEN ah.product_id IS NOT NULL
-                    AND NOT (p.name ILIKE '%' || $6 || '%' ESCAPE '\\')
-                    AND lh.product_id IS NULL
-                 THEN 'alias'`
-    : "";
+export type LexicalRankedCteOptions = {
+  /** Include product_alias candidate + score branch. Default false. */
+  includeAliasHit?: boolean;
+  /**
+   * Include trigram fuzzy candidate branch (`p.name % $1`).
+   * Default false — first-pass indexed retrieval; enable only on fallback.
+   */
+  includeFuzzy?: boolean;
+  /**
+   * Include listing_hit evidence CTE + candidate UNION branch + listing score arms.
+   * Default true for backward compat. Set false on first-pass to skip listing ILIKE scan.
+   */
+  includeListing?: boolean;
+  /** Threshold for alias trigram similarity when includeFuzzy is on. */
+  trigramThreshold?: number;
+};
 
+/**
+ * Indexed product-side candidate branches (UNION'd) before join/score.
+ * Listing/alias IDs are union'd separately from their evidence CTEs.
+ */
+export function buildLexicalCandidateUnionSql(options: LexicalRankedCteOptions = {}): string {
+  const includeAliasHit = options.includeAliasHit === true;
+  const includeFuzzy = options.includeFuzzy === true;
+  const includeListing = options.includeListing !== false;
+
+  // Note: avoid `lower(p.name) = lower($1)` as a retrieval branch — it
+  // parallel-seq-scans the product table. Exact names are retrieved via
+  // FTS / trigram ILIKE and still scored as 1.0 in ranked.
+  const branches = [
+    // Empty-query browse (category/brand/gtin filters applied later on product join).
+    `
+    SELECT p.id AS product_id
+    FROM product p
+    WHERE $1 = ''`,
+    // Full-text search (GIN on search_vector).
+    `
+    SELECT p.id AS product_id
+    FROM product p
+    WHERE $1 <> ''
+      AND p.search_vector @@ websearch_to_tsquery('simple', $1)`,
+    // Prefix via trigram GIN.
+    `
+    SELECT p.id AS product_id
+    FROM product p
+    WHERE $1 <> ''
+      AND p.name ILIKE $6 || '%' ESCAPE '\\'`,
+    // Containment via trigram GIN.
+    `
+    SELECT p.id AS product_id
+    FROM product p
+    WHERE $1 <> ''
+      AND p.name ILIKE '%' || $6 || '%' ESCAPE '\\'`,
+    // GTIN probe (works with empty or non-empty query text).
+    `
+    SELECT p.id AS product_id
+    FROM product p
+    WHERE $4::text IS NOT NULL
+      AND p.gtin = $4`,
+  ];
+
+  if (includeListing) {
+    // Listing hits (evidence CTE already filtered with indexed ILIKE).
+    branches.push(`
+    SELECT lh.product_id
+    FROM listing_hit lh`);
+  }
+
+  if (includeFuzzy) {
+    branches.push(`
+    SELECT p.id AS product_id
+    FROM product p
+    WHERE $1 <> ''
+      AND p.name % $1`);
+  }
+
+  if (includeAliasHit) {
+    branches.push(`
+    SELECT ah.product_id
+    FROM alias_hit ah`);
+  }
+
+  return branches.map((b) => b.trim()).join("\n    UNION\n    ");
+}
+
+/** Listing evidence CTE (sim + prefix flags) for scoring joined candidates. */
+export function buildListingHitCte(): string {
   return `
     listing_hit AS (
       SELECT l.product_id,
@@ -37,7 +97,91 @@ export function buildLexicalRankedCte(
       WHERE char_length($1) >= 3
         AND l.name ILIKE '%' || $6 || '%' ESCAPE '\\'
       GROUP BY l.product_id
-    ),${aliasHitCte}
+    )`;
+}
+
+/** Optional alias evidence CTE for candidates + scoring. */
+export function buildAliasHitCte(
+  includeFuzzy: boolean,
+  trigramThreshold: number,
+): string {
+  return `
+    alias_hit AS (
+      SELECT DISTINCT pa.product_id
+      FROM product_alias pa
+      WHERE pa.product_id IS NOT NULL
+        AND $1 <> ''
+        AND (
+          pa.alias ILIKE '%' || $6 || '%' ESCAPE '\\'
+          ${includeFuzzy ? `OR similarity(pa.alias, $1) > ${trigramThreshold}` : ""}
+        )
+    )`;
+}
+
+/**
+ * Candidate-first lexical CTE: indexed UNION → join product → score.
+ * Default `includeFuzzy=false` omits `p.name % $1` from candidate retrieval.
+ * Default `includeListing=true`; set false to skip listing ILIKE scan on first pass.
+ */
+export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): string {
+  const includeAliasHit = options.includeAliasHit === true;
+  const includeFuzzy = options.includeFuzzy === true;
+  const includeListing = options.includeListing !== false;
+  const trigramThreshold = options.trigramThreshold ?? 0.4;
+
+  const evidenceCtes: string[] = [];
+  if (includeListing) {
+    evidenceCtes.push(buildListingHitCte().trim());
+  }
+  if (includeAliasHit) {
+    evidenceCtes.push(buildAliasHitCte(includeFuzzy, trigramThreshold).trim());
+  }
+  const evidencePrefix =
+    evidenceCtes.length > 0 ? `${evidenceCtes.join(",\n    ")},\n    ` : "";
+
+  const aliasScore = includeAliasHit
+    ? `CASE WHEN ah.product_id IS NOT NULL THEN 0.7 ELSE 0 END`
+    : "0";
+  const aliasJoin = includeAliasHit ? "LEFT JOIN alias_hit ah ON ah.product_id = p.id" : "";
+  const aliasMatchedVia = includeAliasHit
+    ? includeListing
+      ? `WHEN ah.product_id IS NOT NULL
+                    AND NOT (p.name ILIKE '%' || $6 || '%' ESCAPE '\\')
+                    AND lh.product_id IS NULL
+                 THEN 'alias'`
+      : `WHEN ah.product_id IS NOT NULL
+                    AND NOT (p.name ILIKE '%' || $6 || '%' ESCAPE '\\')
+                 THEN 'alias'`
+    : "";
+
+  const listingScoreArms = includeListing
+    ? `CASE
+                 WHEN lh.listing_prefix THEN 0.92
+                 WHEN lh.listing_contains THEN 0.72
+                 ELSE 0
+               END,
+               -- Never let a chain listing trigram tie/beat an exact product name (1.0).
+               LEAST(COALESCE(lh.listing_sim, 0), 0.88)`
+    : `0,
+               0`;
+  const listingJoin = includeListing
+    ? "LEFT JOIN listing_hit lh ON lh.product_id = p.id"
+    : "";
+  const listingMatchedVia = includeListing
+    ? `WHEN lh.product_id IS NOT NULL
+                    AND COALESCE(lh.listing_sim, 0) >= similarity(p.name, $1)
+                    AND NOT (p.name ILIKE '%' || $6 || '%' ESCAPE '\\')
+                 THEN 'listing'`
+    : "";
+
+  // Score similarity among the bounded candidate set (cheap); fuzzy *retrieval*
+  // via `p.name % $1` remains gated by includeFuzzy.
+  const nameSimilarityScore = `CASE WHEN $1 = '' THEN 0 ELSE similarity(p.name, $1) END`;
+
+  return `
+    ${evidencePrefix}candidates AS (
+      ${buildLexicalCandidateUnionSql(options)}
+    ),
     ranked AS (
       SELECT p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2, p.size_qty, p.size_unit,
              GREATEST(
@@ -53,38 +197,22 @@ export function buildLexicalRankedCte(
                  WHEN $1 <> '' AND p.name ILIKE '%' || $6 || '%' ESCAPE '\\' THEN 0.78
                  ELSE 0
                END,
-               CASE WHEN $1 = '' THEN 0 ELSE similarity(p.name, $1) END,
-               CASE
-                 WHEN lh.listing_prefix THEN 0.92
-                 WHEN lh.listing_contains THEN 0.72
-                 ELSE 0
-               END,
-               -- Never let a chain listing trigram tie/beat an exact product name (1.0).
-               LEAST(COALESCE(lh.listing_sim, 0), 0.88),
+               ${nameSimilarityScore},
+               ${listingScoreArms},
                ${aliasScore}
              )
              AS score,
              CASE
                WHEN $4::text IS NOT NULL AND p.gtin = $4 THEN 'gtin'
                ${aliasMatchedVia}
-               WHEN lh.product_id IS NOT NULL
-                    AND COALESCE(lh.listing_sim, 0) >= similarity(p.name, $1)
-                    AND NOT (p.name ILIKE '%' || $6 || '%' ESCAPE '\\')
-                 THEN 'listing'
+               ${listingMatchedVia}
                ELSE 'product'
              END AS matched_via
-      FROM product p
-      LEFT JOIN listing_hit lh ON lh.product_id = p.id
+      FROM candidates c
+      JOIN product p ON p.id = c.product_id
+      ${listingJoin}
       ${aliasJoin}
-      WHERE (
-              $1 = ''
-              OR p.search_vector @@ websearch_to_tsquery('simple', $1)
-              OR p.name % $1
-              OR p.name ILIKE '%' || $6 || '%' ESCAPE '\\'
-              OR lh.product_id IS NOT NULL
-              ${aliasWhere}
-            )
-        AND ($2::text IS NULL OR p.category_l1 = $2 OR p.category_l2 = $2)
+      WHERE ($2::text IS NULL OR p.category_l1 = $2 OR p.category_l2 = $2)
         AND ($3::text IS NULL OR p.brand ILIKE '%' || $3 || '%' ESCAPE '\\')
         AND ($4::text IS NULL OR p.gtin = $4)
       ORDER BY score DESC, p.name ASC

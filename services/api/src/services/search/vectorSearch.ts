@@ -2,6 +2,7 @@ import { query } from "@super-mcp/db";
 import { cityMatchKeys, formatVectorLiteral, normalizeGtin } from "@super-mcp/shared";
 import { resolveRadiusKm } from "../../lib/defaults.js";
 import { mapProduct } from "../products/mapProduct.js";
+import { toSearchLocationParams } from "./locationScope.js";
 import { buildPriceExistsSql, escapeIlike } from "./sqlUtils.js";
 import type { SearchHitRow, SearchProductHit, SearchProductsParams } from "./types.js";
 
@@ -30,11 +31,14 @@ export async function searchByQueryVector(
 ): Promise<SearchProductHit[]> {
   const limit = Math.max(1, Math.min(input.limit, 200));
   const literal = formatVectorLiteral(input.vector);
-  const p = input.params ?? {};
-  const gtin = p.gtin?.trim() ? normalizeGtin(p.gtin.trim()) : null;
-  const brandLike = p.brand ? escapeIlike(p.brand) : null;
-  const radius = resolveRadiusKm(p.near, p.radiusKm);
-  const scoped = Boolean(p.city || p.near || (p.storeIds && p.storeIds.length > 0));
+  const raw = input.params ?? {};
+  const location = toSearchLocationParams(raw);
+  const gtin = raw.gtin?.trim() ? normalizeGtin(raw.gtin.trim()) : null;
+  const brandLike = raw.brand ? escapeIlike(raw.brand) : null;
+  const radius = resolveRadiusKm(location.near, location.radiusKm);
+  const scoped = Boolean(
+    location.city || location.near || (location.storeIds && location.storeIds.length > 0),
+  );
 
   // Fixed params: $1 vector, $2 model, $3 maxDistance, $4 limit, $5 category, $6 brand, $7 gtin
   const sqlParams: unknown[] = [
@@ -42,7 +46,7 @@ export async function searchByQueryVector(
     input.model,
     input.maxDistance,
     limit,
-    p.category ?? null,
+    raw.category ?? null,
     brandLike,
     gtin,
   ];
@@ -53,16 +57,16 @@ export async function searchByQueryVector(
   let radiusParam: number | undefined;
   let storeIdsParam: number | undefined;
 
-  if (p.storeIds && p.storeIds.length > 0) {
-    sqlParams.push(p.storeIds);
+  if (location.storeIds && location.storeIds.length > 0) {
+    sqlParams.push(location.storeIds);
     storeIdsParam = sqlParams.length;
   }
-  if (p.city) {
-    sqlParams.push(cityMatchKeys(p.city));
+  if (location.city) {
+    sqlParams.push(cityMatchKeys(location.city));
     cityParam = sqlParams.length;
   }
-  if (p.near && radius != null) {
-    sqlParams.push(p.near.lat, p.near.lng, radius);
+  if (location.near && radius != null) {
+    sqlParams.push(location.near.lat, location.near.lng, radius);
     nearLatParam = sqlParams.length - 2;
     nearLngParam = sqlParams.length - 1;
     radiusParam = sqlParams.length;
@@ -77,7 +81,7 @@ export async function searchByQueryVector(
     storeIdsParam,
   });
   const globalExists = buildPriceExistsSql("p.id", { scoped: false });
-  const stockFilter = p.inStockOnly && scoped ? `AND ${localExists}` : "";
+  const stockFilter = raw.inStockOnly && scoped ? `AND ${localExists}` : "";
 
   const sql = `
     SELECT p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2, p.size_qty, p.size_unit,

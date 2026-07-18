@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { normalizeStoreCoordinates } from "@super-mcp/shared";
 import { getPool } from "../client/index.js";
 
 export interface UpsertChainInput {
@@ -44,6 +45,7 @@ export interface UpsertStoreInput {
 
 export async function upsertStore(input: UpsertStoreInput, client?: PoolClient): Promise<string> {
   const q = client ?? getPool();
+  const geo = normalizeStoreCoordinates(input.lat, input.lng);
   // Price/promo files may stub a branch before (or after) Stores XML lands.
   // Never let a "Store NNN" placeholder clobber a real branch name.
   const res = await q.query<{ id: string }>(
@@ -57,8 +59,14 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
        address = COALESCE(EXCLUDED.address, store.address),
        city = COALESCE(EXCLUDED.city, store.city),
        zip = COALESCE(EXCLUDED.zip, store.zip),
-       lat = COALESCE(EXCLUDED.lat, store.lat),
-       lng = COALESCE(EXCLUDED.lng, store.lng),
+       lat = CASE
+         WHEN EXCLUDED.lat IS NOT NULL AND EXCLUDED.lng IS NOT NULL THEN EXCLUDED.lat
+         ELSE store.lat
+       END,
+       lng = CASE
+         WHEN EXCLUDED.lat IS NOT NULL AND EXCLUDED.lng IS NOT NULL THEN EXCLUDED.lng
+         ELSE store.lng
+       END,
        updated_at = now()
      RETURNING id`,
     [
@@ -68,8 +76,8 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
       input.address ?? null,
       input.city ?? null,
       input.zip ?? null,
-      input.lat ?? null,
-      input.lng ?? null,
+      geo?.lat ?? null,
+      geo?.lng ?? null,
     ],
   );
   return res.rows[0]!.id;

@@ -6,13 +6,19 @@ import { query } from "@super-mcp/db";
 export interface AuthContext {
   apiKeyId: string;
   name: string;
+  role: ApiKeyRole;
   rateLimitPerMinute: number;
 }
+
+export type ApiKeyRole = "standard" | "master";
+export type Capability = "shopping" | "key_admin" | "global_usage";
 
 declare module "fastify" {
   interface FastifyRequest {
     auth: AuthContext | null;
     startTime: number;
+    privilegedAuditId: string | null;
+    privilegedAuditErrorCode: string | null;
   }
 }
 
@@ -20,38 +26,60 @@ export function sha256Hex(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
 
-/** Accepts the key via `Authorization: Bearer <key>` or `?api_key=<key>` (for MCP clients that need it). */
+/** Accepts Bearer auth. Query auth is an opt-in MCP-only compatibility escape hatch. */
 export function extractApiKey(request: FastifyRequest): string | null {
   const header = request.headers.authorization;
   if (header?.startsWith("Bearer ")) {
     const token = header.slice("Bearer ".length).trim();
     if (token) return token;
   }
-  const q = (request.query as Record<string, unknown> | undefined)?.["api_key"];
-  if (typeof q === "string" && q.trim().length > 0) return q.trim();
+  const path = request.url.split("?")[0];
+  if (path === "/mcp" && process.env.SUPER_MCP_ALLOW_MCP_QUERY_API_KEY === "1") {
+    const q = (request.query as Record<string, unknown> | undefined)?.["api_key"];
+    if (typeof q === "string" && q.trim().length > 0) return q.trim();
+  }
   return null;
 }
 
 interface ApiKeyRow {
   id: string;
   name: string;
+  role: ApiKeyRole;
   rate_limit_per_minute: number;
 }
 
 export async function resolveApiKey(rawKey: string): Promise<AuthContext> {
   const hash = sha256Hex(rawKey);
   const res = await query<ApiKeyRow>(
-    `SELECT id, name, rate_limit_per_minute FROM api_key WHERE key_hash = $1 AND revoked_at IS NULL`,
+    `SELECT id, name, role, rate_limit_per_minute
+     FROM api_key
+     WHERE key_hash = $1
+       AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > now())`,
     [hash],
   );
   const row = res.rows[0];
   if (!row) {
     throw new AppError("unauthorized", "Invalid or revoked API key", 401);
   }
-  return { apiKeyId: row.id, name: row.name, rateLimitPerMinute: row.rate_limit_per_minute };
+  return {
+    apiKeyId: row.id,
+    name: row.name,
+    role: row.role,
+    rateLimitPerMinute: row.rate_limit_per_minute,
+  };
 }
 
-/** Sliding 60s window per key, held in memory (fine for a single local/dev instance). */
+export function authorize(auth: AuthContext, capability: Capability): void {
+  if (capability === "shopping" || auth.role === "master") return;
+  throw new AppError("forbidden", "Master API key required", 403);
+}
+
+/**
+ * Sliding 60s window per standard key, held in memory.
+ * Follow-up: replace this with a DB-atomic limiter before horizontally scaling standard-key traffic.
+ * Master keys bypass this function explicitly, so their behavior is consistent across instances.
+ */
 const RATE_WINDOWS = new Map<string, number[]>();
 const WINDOW_MS = 60_000;
 let lastSweep = 0;
@@ -98,7 +126,9 @@ export async function authenticate(request: FastifyRequest): Promise<AuthContext
     throw new AppError("unauthorized", "Missing API key. Use Authorization: Bearer <key>", 401);
   }
   const ctx = await resolveApiKey(raw);
-  checkRateLimit(ctx.apiKeyId, ctx.rateLimitPerMinute);
+  if (ctx.role === "standard") {
+    checkRateLimit(ctx.apiKeyId, ctx.rateLimitPerMinute);
+  }
   request.auth = ctx;
   return ctx;
 }

@@ -1,12 +1,26 @@
 import { errorResponses, freshnessSchema, withData } from "./common.js";
+import { storeLocationMetadataSchema } from "./stores.js";
 
 export const basketItemInputSchema = {
   type: "object",
+  allOf: [{ not: { required: ["pack_qty", "qty"] } }],
   properties: {
     product_id: { type: "string", format: "uuid" },
     gtin: { type: "string" },
     query: { type: "string" },
-    qty: { type: "number", minimum: 0, exclusiveMinimum: true, description: "Pack count." },
+    pack_qty: {
+      type: "number",
+      minimum: 0,
+      exclusiveMinimum: true,
+      description: "Number of product packs to buy. Mutually exclusive with deprecated qty.",
+    },
+    qty: {
+      type: "number",
+      minimum: 0,
+      exclusiveMinimum: true,
+      deprecated: true,
+      description: "Deprecated alias for pack_qty. Do not supply both.",
+    },
     amount: {
       type: "number",
       minimum: 0,
@@ -15,10 +29,31 @@ export const basketItemInputSchema = {
     },
     unit: {
       type: "string",
-      description: "Required with amount: kg, g, L, ml, unit, יח, etc.",
+      description:
+        "Required with amount: kg, g, L, ml, unit, יח, etc. Natural counts use amount+unit (20 pitas: amount=20, unit=יח or unit).",
     },
   },
-  description: "One of product_id, gtin, or query; and qty or amount+unit.",
+  description:
+    "One of product_id, gtin, or query; and pack_qty (deprecated: qty) or amount+unit. pack_qty and qty are mutually exclusive.",
+};
+
+const basketLocationRequestProperties = {
+  city: {
+    type: "string",
+    description:
+      "Hebrew or English city (or CBS locality code). Aliases match one place — e.g. הרצליה / Herzliya / 6400.",
+  },
+  near: { type: "string", description: "'lat,lng', e.g. '32.078,34.774'." },
+  radius_km: { type: "number", default: 10, description: "Default 10km when 'near' is set." },
+};
+
+export const basketPrepareRequestSchema = {
+  type: "object",
+  required: ["items"],
+  properties: {
+    items: { type: "array", items: basketItemInputSchema, minItems: 1, maxItems: 50 },
+    ...basketLocationRequestProperties,
+  },
 };
 
 export const basketOptimizeRequestSchema = {
@@ -26,13 +61,7 @@ export const basketOptimizeRequestSchema = {
   required: ["items"],
   properties: {
     items: { type: "array", items: basketItemInputSchema, minItems: 1, maxItems: 50 },
-    city: {
-      type: "string",
-      description:
-        "Hebrew or English city (or CBS locality code). Aliases match one place — e.g. הרצליה / Herzliya / 6400.",
-    },
-    near: { type: "string", description: "'lat,lng', e.g. '32.078,34.774'." },
-    radius_km: { type: "number", default: 10, description: "Default 10km when 'near' is set." },
+    ...basketLocationRequestProperties,
     include_club: { type: "boolean", default: true },
     stores_limit: {
       type: "integer",
@@ -152,6 +181,7 @@ export const basketOptimizeResponseSchema = {
   type: "object",
   properties: {
     completeness: basketCompletenessSchema,
+    location: storeLocationMetadataSchema,
     items: {
       type: "array",
       items: {
@@ -230,17 +260,84 @@ export const basketOptimizeResponseSchema = {
   },
 };
 
+export const basketPrepareResponseSchema = {
+  type: "object",
+  properties: {
+    completeness: basketCompletenessSchema,
+    location: storeLocationMetadataSchema,
+    items: basketOptimizeResponseSchema.properties.items,
+    assumptions: {
+      type: "array",
+      items: { type: "string" },
+      description: "Safe automatic query-to-product selections made during preparation.",
+    },
+    questions: {
+      type: "array",
+      description: "Required confirmations derived from needs_confirmation lines.",
+      items: {
+        type: "object",
+        required: ["itemIndex", "id", "prompt", "reason", "required", "options"],
+        properties: {
+          itemIndex: { type: "integer" },
+          id: { type: "string", description: "Stable question identifier for this basket line." },
+          prompt: { type: "string" },
+          reason: { type: "string" },
+          required: { type: "boolean" },
+          options: {
+            type: "array",
+            maxItems: 5,
+            items: {
+              type: "object",
+              properties: {
+                productId: { type: "string", format: "uuid" },
+                name: { type: "string" },
+                sizeQty: { type: "number", nullable: true },
+                sizeUnit: { type: "string", nullable: true },
+                hasLocalPrice: { type: "boolean" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 export const basketComponentSchemas = {
+  BasketPrepareRequest: basketPrepareRequestSchema,
+  BasketPrepareResponse: basketPrepareResponseSchema,
   BasketOptimizeRequest: basketOptimizeRequestSchema,
   BasketOptimizeResponse: basketOptimizeResponseSchema,
 };
 
 export const basketPaths = {
+  "/v1/basket/prepare": {
+    post: {
+      summary: "Resolve a basket and return required confirmations",
+      description:
+        "First step for shopping lists. Resolves product candidates near the requested location without loading basket prices. Answer every required question, then optimize with confirmed product_id values.",
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema: basketPrepareRequestSchema } },
+      },
+      responses: {
+        "200": {
+          description: "Prepared basket",
+          content: { "application/json": { schema: withData(basketPrepareResponseSchema) } },
+        },
+        ...errorResponses,
+      },
+    },
+  },
   "/v1/basket/optimize": {
     post: {
       summary: "Find the cheapest basket nearby (default 10km)",
       description:
-        "Requires city or near. Pass query items with qty or amount+unit in one call. Returns cheapest, multiStore, trimmed store breakdowns, and completeness (deterministic-first resolution coverage). When safeResolutionRatio is below 0.7, cheapest/multiStore are null — verify items before trusting totals.",
+        "Prefer POST /v1/basket/prepare (or MCP prepare_basket) first, confirm every required question, then " +
+        "optimize with product_id on confirmed lines. Prefer pack_qty for packs (qty is a deprecated alias; " +
+        "do not supply both); use amount+unit for weighed goods and natural counts. Requires city or near. " +
+        "Returns cheapest, multiStore, trimmed store breakdowns, completeness, and location metadata. When " +
+        "safeResolutionRatio is below 0.7, cheapest/multiStore are null — verify items before trusting totals.",
       requestBody: {
         required: true,
         content: { "application/json": { schema: basketOptimizeRequestSchema } },
@@ -254,4 +351,4 @@ export const basketPaths = {
 };
 
 /** MCP tools backed by the basket service layer. */
-export const basketMcpTools = ["optimize_basket"] as const;
+export const basketMcpTools = ["prepare_basket", "optimize_basket"] as const;

@@ -1,5 +1,7 @@
 import {
   isDominantPhraseMatch,
+  normalizeEmbedInput,
+  tokenizeNormalized,
   type RetrievalEvidence,
   type SemanticProfile,
   type SemanticSearchConfig,
@@ -53,6 +55,14 @@ function hasDominantPhrase(candidate: ResolutionCandidate): boolean {
   return isDominantPhraseMatch(candidate.name, ev);
 }
 
+/** Prefer evidence-based dominance; fall back to short product names (≤3 tokens). */
+function nameIsQuerySafe(candidate: ResolutionCandidate): boolean {
+  if (hasDominantPhrase(candidate)) return true;
+  const nameTokens = tokenizeNormalized(normalizeEmbedInput(candidate.name));
+  // Blocks incidental host names like "לחם מחמצת עם בצלים" (4+ tokens).
+  return nameTokens.length > 0 && nameTokens.length <= 3;
+}
+
 function hasDeterministicEvidence(
   candidate: ResolutionCandidate,
   config: SemanticSearchConfig,
@@ -61,25 +71,25 @@ function hasDeterministicEvidence(
 
   const lex = effectiveLexicalScore(candidate);
   const ev = candidate.evidence;
-  // Boundary/contains scores of 0.9 are not enough alone — "לחם…בצלים" for
-  // query "בצלים" must not auto-price. Require a name-dominant phrase match.
+  const threshold = config.strongLexicalThreshold ?? 0.9;
+  // Boundary/contains scores are not enough alone — "לחם…בצלים" for query
+  // "בצלים" must not auto-price. Require a name-safe / dominant match.
   const exact =
-    Boolean(ev?.exactName) || (Boolean(ev?.exactPhrase) && hasDominantPhrase(candidate));
+    Boolean(ev?.exactName) || (Boolean(ev?.exactPhrase) && nameIsQuerySafe(candidate));
   const aliasStrong =
     Boolean(ev?.aliasMatched) &&
     lex != null &&
-    lex >= 0.9 &&
-    isDominantPhraseMatch(candidate.name, {
-      exactName: false,
-      exactPhrase: true,
-      queryTokenCount: Math.max(1, ev?.queryTokenCount ?? 1),
-    });
-  const strongLexical = lex != null && lex >= 0.9 && hasDominantPhrase(candidate);
+    lex >= threshold &&
+    nameIsQuerySafe(candidate);
+  const strongLexical = lex != null && lex >= threshold && nameIsQuerySafe(candidate);
 
   if (config.requireDeterministicForAutoResolve) {
     return exact || strongLexical || aliasStrong;
   }
-  return exact || strongLexical || aliasStrong || (lex != null && lex >= 0.9);
+  // Rollback lever: allow fused score auto-accept when deterministic-first is off.
+  const fused = candidate.score ?? 0;
+  if (fused >= config.autoAcceptScore) return true;
+  return exact || strongLexical || aliasStrong;
 }
 
 function gateTierAllowsAutoResolve(candidate: ResolutionCandidate): boolean {
@@ -119,11 +129,13 @@ function hasLexicalMargin(
 
 function confidenceLabelFor(
   candidate: ResolutionCandidate,
+  config?: SemanticSearchConfig,
 ): "high" | "medium" | null {
   if (candidate.evidence?.exactName) return "high";
-  if (candidate.evidence?.exactPhrase && hasDominantPhrase(candidate)) return "medium";
+  if (candidate.evidence?.exactPhrase && nameIsQuerySafe(candidate)) return "medium";
   const lex = effectiveLexicalScore(candidate);
-  if (lex != null && lex >= 0.9 && hasDominantPhrase(candidate)) return "medium";
+  const threshold = config?.strongLexicalThreshold ?? 0.9;
+  if (lex != null && lex >= threshold && nameIsQuerySafe(candidate)) return "medium";
   return null;
 }
 
@@ -179,7 +191,7 @@ export function decideResolution(
     status: "resolved",
     productId: chosen.id,
     name: chosen.name,
-    confidenceLabel: confidenceLabelFor(chosen),
+    confidenceLabel: confidenceLabelFor(chosen, config),
     confidence: effectiveLexicalScore(chosen),
     lowConfidence: false,
     autoPrice: true,

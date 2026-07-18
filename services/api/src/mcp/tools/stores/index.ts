@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { listStores } from "../../../services/stores/index.js";
+import { resolveStoreLocation } from "../../../lib/resolveStoreLocation.js";
 import { listPromotions } from "../../../services/promotions/index.js";
 import { resolveRadiusKm } from "../../../lib/defaults.js";
 import { DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
@@ -24,13 +24,13 @@ export function registerStoreTools(server: McpServer): void {
     },
     async ({ chain, city, near, radius_km }) => {
       const geo = toGeo(near);
-      const stores = await listStores({
+      const result = await resolveStoreLocation({
         chain,
         city,
         near: geo,
         radiusKm: resolveRadiusKm(geo, radius_km),
       });
-      return { stores };
+      return result;
     },
   );
 

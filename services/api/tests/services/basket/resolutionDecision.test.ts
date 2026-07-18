@@ -255,3 +255,42 @@ describe("decideResolution", () => {
     expect(d.productId).toBeNull();
   });
 });
+
+describe("strongLexicalThreshold config", () => {
+  it("uses the configured threshold instead of a hardcoded 0.9", () => {
+    const candidate = hit({ id: "p1", name: "מלפפון", lexicalScore: 0.85 });
+    const strict = decideResolution([candidate], config);
+    expect(strict.status).toBe("needs_confirmation");
+
+    const relaxed = decideResolution([candidate], { ...config, strongLexicalThreshold: 0.8 });
+    expect(relaxed.status).toBe("resolved");
+    expect(relaxed.confidenceLabel).toBe("medium");
+  });
+});
+
+describe("requireDeterministicForAutoResolve", () => {
+  it("true (default): fused score alone cannot auto-resolve", () => {
+    const d = decideResolution(
+      [hit({ id: "p1", name: "מלפפון", lexicalScore: 0.6, score: 0.7 })],
+      config,
+    );
+    expect(d.status).toBe("needs_confirmation");
+  });
+
+  it("false: fused score >= autoAcceptScore auto-resolves (rollback lever)", () => {
+    const d = decideResolution(
+      [hit({ id: "p1", name: "מלפפון", lexicalScore: 0.6, score: 0.7 })],
+      { ...config, requireDeterministicForAutoResolve: false },
+    );
+    expect(d.status).toBe("resolved");
+    expect(d.autoPrice).toBe(true);
+  });
+
+  it("false: vector-only candidates still never auto-resolve", () => {
+    const d = decideResolution(
+      [hit({ id: "p1", name: "מלפפון", matchedVia: "vector", vectorDistance: 0.1, score: 0.9 })],
+      { ...config, requireDeterministicForAutoResolve: false },
+    );
+    expect(d.status).not.toBe("resolved");
+  });
+});

@@ -1,12 +1,13 @@
 import type { Freshness } from "../products/types.js";
 import type { SearchProductHit } from "../search/types.js";
 import type { GeoPoint } from "../../lib/geo.js";
+import type { StoreLocationMetadata } from "../../lib/resolveStoreLocation.js";
 
 export interface BasketItemInput {
   productId?: string;
   gtin?: string;
   query?: string;
-  /** Legacy pack count when amount/unit omitted. */
+  /** Internal pack count mapped from boundary `pack_qty` (or deprecated `qty`). */
   qty?: number;
   /** Physical amount requested (e.g. 1.5 with unit=kg). */
   amount?: number;
@@ -14,11 +15,18 @@ export interface BasketItemInput {
   unit?: string;
 }
 
-export interface BasketOptimizeInput {
-  items: BasketItemInput[];
+export interface BasketLocationInput {
   city?: string;
   near?: GeoPoint;
   radiusKm?: number;
+}
+
+export interface BasketPrepareInput extends BasketLocationInput {
+  items: BasketItemInput[];
+}
+
+export interface BasketOptimizeInput extends BasketLocationInput {
+  items: BasketItemInput[];
   includeClub?: boolean;
   /** Max store breakdowns to return (default 5). Use 0 for all. */
   storesLimit?: number;
@@ -180,6 +188,34 @@ export interface BasketCompleteness {
   totalsArePartial: boolean;
 }
 
+export interface BasketPrepareQuestionOption {
+  productId: string;
+  name: string;
+  sizeQty: number | null;
+  sizeUnit: string | null;
+  hasLocalPrice: boolean;
+}
+
+export interface BasketPrepareQuestion {
+  itemIndex: number;
+  /** Stable within the basket contract so callers can associate an answer with a line. */
+  id: string;
+  prompt: string;
+  reason: string;
+  required: boolean;
+  options: BasketPrepareQuestionOption[];
+}
+
+export interface BasketPrepareResult {
+  items: BasketItemStatus[];
+  completeness: BasketCompleteness;
+  /** Safe automatic selections applied during resolution (query → chosen product). */
+  assumptions: string[];
+  /** Required confirmations for lines that cannot be safely auto-selected. */
+  questions: BasketPrepareQuestion[];
+  location: StoreLocationMetadata;
+}
+
 export interface BasketOptimizeResult {
   items: BasketItemStatus[];
   /** Candidate stores ranked cheapest / most-complete first (trimmed). */
@@ -192,6 +228,7 @@ export interface BasketOptimizeResult {
   multiStore: MultiStorePlan | null;
   /** Resolution coverage; when below minSafeResolutionRatio, cheapest/multiStore are null. */
   completeness: BasketCompleteness;
+  location: StoreLocationMetadata;
 }
 
 export interface ResolveLocationScope {

@@ -1,7 +1,12 @@
 import { AppError, DEFAULT_SEMANTIC_SEARCH_CONFIG } from "@super-mcp/shared";
-import { listStores } from "../stores/index.js";
 import { resolveRadiusKm } from "../../lib/defaults.js";
+import {
+  resolveStoreLocation,
+  type StoreLocationMetadata,
+} from "../../lib/resolveStoreLocation.js";
+import { toSearchLocationParams } from "../search/locationScope.js";
 import { getActiveOntology } from "../search/ontology.js";
+import type { StoreSummary } from "../stores/index.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
 import { loadBasketPricingData } from "./loadPricingData.js";
 import { buildCheapestRecommendation, priceStoreBasket } from "./priceStoreBasket.js";
@@ -10,6 +15,7 @@ import { applyCheapestStoreSubstitutions, buildMultiStorePlan } from "./substitu
 import type {
   BasketCompleteness,
   BasketItemStatus,
+  BasketLocationInput,
   BasketOptimizeInput,
   BasketOptimizeResult,
   BasketRecommendation,
@@ -18,7 +24,16 @@ import type {
   ResolutionStatus,
 } from "./types.js";
 
-export async function optimizeBasket(input: BasketOptimizeInput): Promise<BasketOptimizeResult> {
+export interface ResolvedBasketLines {
+  resolvedItems: ResolvedItem[];
+  itemStatuses: BasketItemStatus[];
+  completeness: BasketCompleteness;
+  candidateStores: StoreSummary[];
+  storeIds: string[];
+  location: StoreLocationMetadata;
+}
+
+function assertBasketInput(input: BasketLocationInput & { items: BasketOptimizeInput["items"] }): void {
   if (input.items.length === 0) {
     throw new AppError("bad_request", "items must contain at least one entry", 400);
   }
@@ -29,22 +44,10 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
       400,
     );
   }
+}
 
-  // Location first: free-text resolution must prefer products priced in these stores.
-  const candidateStores = await listStores({
-    city: input.city,
-    near: input.near,
-    radiusKm: resolveRadiusKm(input.near, input.radiusKm),
-  });
-  const storeIds = candidateStores.map((s) => s.id);
-
-  const resolvedItems = await resolveItems(input.items, {
-    city: input.city,
-    near: input.near,
-    radiusKm: resolveRadiusKm(input.near, input.radiusKm),
-    storeIds: storeIds.length > 0 ? storeIds : undefined,
-  });
-  const itemStatuses: BasketItemStatus[] = resolvedItems.map((r) => ({
+export function buildItemStatuses(resolvedItems: ResolvedItem[]): BasketItemStatus[] {
+  return resolvedItems.map((r) => ({
     index: r.index,
     qty: r.qty,
     qtyMode: r.qtyMode,
@@ -60,17 +63,57 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     candidates: r.candidates,
     substitution: r.substitution,
   }));
+}
+
+/** Shared resolve path for prepare and optimize — location scope, resolve, completeness. */
+export async function resolveBasketLines(
+  input: BasketLocationInput & { items: BasketOptimizeInput["items"] },
+): Promise<ResolvedBasketLines> {
+  assertBasketInput(input);
+
+  const radiusKm = resolveRadiusKm(input.near, input.radiusKm);
+  const locationResult = await resolveStoreLocation({
+    city: input.city,
+    near: input.near,
+    radiusKm,
+  });
+  const candidateStores = locationResult.stores;
+  const storeIds = candidateStores.map((s) => s.id);
+
+  const resolvedItems = await resolveItems(
+    input.items,
+    toSearchLocationParams({
+      city: input.city,
+      near: input.near,
+      radiusKm,
+      storeIds: storeIds.length > 0 ? storeIds : undefined,
+    }),
+  );
+  const itemStatuses = buildItemStatuses(resolvedItems);
 
   const ontology = await getActiveOntology();
   const minSafeResolutionRatio =
     ontology?.searchConfig?.minSafeResolutionRatio ?? DEFAULT_SEMANTIC_SEARCH_CONFIG.minSafeResolutionRatio;
   const completeness = computeBasketCompleteness(resolvedItems, minSafeResolutionRatio);
 
-  // Load listings/prices for ALL candidates so each store can use the best available match.
-  const productIds = collectProductIds(resolvedItems);
+  return {
+    resolvedItems,
+    itemStatuses,
+    completeness,
+    candidateStores,
+    storeIds,
+    location: locationResult.location,
+  };
+}
+
+export async function optimizeBasket(input: BasketOptimizeInput): Promise<BasketOptimizeResult> {
+  const { resolvedItems, itemStatuses, completeness, candidateStores, storeIds, location } =
+    await resolveBasketLines(input);
+
+  const productIds = collectProductIdsForPricing(resolvedItems);
 
   if (productIds.length === 0 || candidateStores.length === 0) {
-    return emptyBasketResult(itemStatuses, completeness);
+    return emptyBasketResult(itemStatuses, completeness, location);
   }
 
   const includeClub = input.includeClub ?? true;
@@ -114,6 +157,7 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
       cheapest: null,
       multiStore: null,
       completeness,
+      location,
     };
   }
 
@@ -134,10 +178,11 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     cheapest,
     multiStore,
     completeness,
+    location,
   };
 }
 
-function classifyResolutionLine(item: ResolvedItem): ResolutionStatus {
+export function classifyResolutionLine(item: ResolvedItem): ResolutionStatus {
   if (item.resolutionStatus === "resolved" || (item.productId != null && !item.lowConfidence)) {
     return "resolved";
   }
@@ -179,21 +224,24 @@ export function computeBasketCompleteness(
   };
 }
 
-function collectProductIds(resolvedItems: ResolvedItem[]): string[] {
+export function collectProductIdsForPricing(resolvedItems: ResolvedItem[]): string[] {
   return [
     ...new Set(
-      resolvedItems.flatMap((r) => {
-        const ids = r.candidates.map((c) => c.productId);
-        if (r.productId) ids.push(r.productId);
-        return ids;
-      }),
+      resolvedItems
+        .filter((r) => isSafelyResolvedForPricing(r))
+        .flatMap((r) => (r.productId != null ? [r.productId] : [])),
     ),
   ];
+}
+
+function isSafelyResolvedForPricing(item: ResolvedItem): boolean {
+  return item.resolutionStatus === "resolved" || (item.productId != null && !item.lowConfidence);
 }
 
 function emptyBasketResult(
   itemStatuses: BasketItemStatus[],
   completeness: BasketCompleteness,
+  location: StoreLocationMetadata,
 ): BasketOptimizeResult {
   return {
     items: itemStatuses,
@@ -203,5 +251,6 @@ function emptyBasketResult(
     cheapest: null,
     multiStore: null,
     completeness,
+    location,
   };
 }

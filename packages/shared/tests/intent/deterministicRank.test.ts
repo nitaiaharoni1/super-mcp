@@ -125,4 +125,108 @@ describe("rankDeterministicCandidates", () => {
     expect(ranked[0]?.id).toBe("thighs");
     expect(ranked[0]?.hasLocalPrice).toBe(false);
   });
+
+  it("rejects candy cola and prefers a regular bottle over zero for bare קולה", () => {
+    const q = buildQueryProfile("קולה", ontology);
+    const regular = profileFromText("קוקה קולה 1.5 ליטר", ontology);
+    const zero = profileFromText("RC קולה זירו פחית 330 מ״ל", ontology);
+    const candy = profileFromText("סוכריות גומי בטעם קולה", ontology);
+    expect(zero.penalties).toContain("variant:diet");
+    expect(candy.attributes.product_class).toBe("candy");
+
+    const constraints = constraintsFromQueryProfile(q, ontology);
+    const zeroGate = gateAgainstConstraints(zero, constraints, ontology, {
+      queryText: q.normalizedText,
+    });
+    const regularGate = gateAgainstConstraints(regular, constraints, ontology, {
+      queryText: q.normalizedText,
+    });
+    const candyGate = gateAgainstConstraints(candy, constraints, ontology, {
+      queryText: q.normalizedText,
+    });
+    expect(zeroGate.penaltyScore).toBeGreaterThan(regularGate.penaltyScore);
+    expect(zeroGate.tier).toBe(2);
+    expect(regularGate.tier).toBe(1);
+    expect(candyGate.allowed).toBe(false);
+
+    const ranked = rankDeterministicCandidates(
+      q,
+      [
+        cand("candy", "סוכריות גומי בטעם קולה", candy, {
+          lexicalScore: 1,
+          exactPhrase: true,
+          exactName: false,
+        }),
+        cand("zero", "RC קולה זירו פחית 330 מ״ל", zero, {
+          lexicalScore: 0.99,
+          exactPhrase: true,
+          exactName: false,
+        }),
+        cand("regular", "קוקה קולה 1.5 ליטר", regular, {
+          lexicalScore: 0.95,
+          exactPhrase: true,
+          exactName: false,
+        }),
+      ],
+      ontology,
+    );
+
+    expect(ranked[0]?.id).toBe("regular");
+    expect(ranked.map((candidate) => candidate.id)).not.toContain("candy");
+  });
+
+  it("preserves explicit zero intent over a stronger regular cola match", () => {
+    const q = buildQueryProfile("קולה זירו", ontology);
+    const zero = profileFromText("RC קולה זירו פחית 330 מ״ל", ontology);
+    const regular = profileFromText("קוקה קולה בקבוק 1.5 ליטר", ontology);
+    const constraints = constraintsFromQueryProfile(q, ontology);
+    const zeroGate = gateAgainstConstraints(zero, constraints, ontology, {
+      queryText: q.normalizedText,
+    });
+    expect(zeroGate.penaltyScore).toBe(0);
+    expect(zeroGate.tier).toBe(1);
+
+    const ranked = rankDeterministicCandidates(
+      q,
+      [
+        cand("regular", "קוקה קולה בקבוק 1.5 ליטר", regular, {
+          lexicalScore: 1,
+          exactPhrase: true,
+        }),
+        cand("zero", "RC קולה זירו פחית 330 מ״ל", zero, {
+          lexicalScore: 0.91,
+          exactPhrase: true,
+        }),
+      ],
+      ontology,
+    );
+    expect(ranked[0]?.id).toBe("zero");
+  });
+
+  it("rejects ice appliances, whiskey accessories, and popsicles for bare קרח", () => {
+    const q = buildQueryProfile("קרח", ontology);
+    const candidates = [
+      cand("machine", "מכונת קרח ביתית", profileFromText("מכונת קרח ביתית", ontology), {
+        lexicalScore: 1,
+        exactPhrase: true,
+      }),
+      cand(
+        "whiskey",
+        "קוביות קרח רב פעמיות לוויסקי",
+        profileFromText("קוביות קרח רב פעמיות לוויסקי", ontology),
+        { lexicalScore: 0.99, exactPhrase: true },
+      ),
+      cand("popsicle", "קרחון קולה", profileFromText("קרחון קולה", ontology), {
+        lexicalScore: 0.98,
+        exactPhrase: false,
+      }),
+      cand("bag", "שקית קוביות קרח 2 ק״ג", profileFromText("שקית קוביות קרח 2 ק״ג", ontology), {
+        lexicalScore: 0.9,
+        exactPhrase: true,
+      }),
+    ];
+
+    const ranked = rankDeterministicCandidates(q, candidates, ontology);
+    expect(ranked.map((candidate) => candidate.id)).toEqual(["bag"]);
+  });
 });

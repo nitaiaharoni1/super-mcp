@@ -2,21 +2,26 @@ import type { FastifyInstance } from "fastify";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { authenticate, recordUsage } from "../auth.js";
+import { beginPrivilegedAudit, finalizePrivilegedAudit } from "../services/privilegedAudit.js";
 import { registerTools } from "./tools/index.js";
+
+export const MCP_SERVER_INSTRUCTIONS =
+  "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness " +
+  "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. " +
+  "For shopping lists: call prepare_basket with items[{query|gtin|product_id, pack_qty|amount+unit}] " +
+  "and city (Hebrew/English) or near=lat,lng. Confirm every required question, then call optimize_basket " +
+  "once with product_id values for confirmed lines. Do not call search_products per line first; use " +
+  "search_products / resolve_products only for unresolved or missing lines. qty remains a deprecated alias " +
+  "for pack_qty and must not be supplied with it. Use amount+unit for natural counts and weighed goods " +
+  "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). The response includes the cheapest " +
+  "single-store plan plus multiStore (cheapest-per-item across stores). Location filters default to 10km " +
+  "when near is set. Use get_promotions to explain discounts.";
 
 function createMcpServer(): McpServer {
   const server = new McpServer(
     { name: "super-mcp", version: "0.1.0" },
     {
-      instructions:
-        "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness " +
-        "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. " +
-        "For shopping lists: call optimize_basket ONCE with items[{query|gtin|product_id, qty|amount+unit}] " +
-        "and city (Hebrew/English) or near=lat,lng. Do NOT call search_products per line first. " +
-        "Use search_products / resolve_products only when an item is low_confidence or missing. " +
-        "Prefer amount+unit for weighed goods (e.g. amount=1.5 unit=kg). Response includes cheapest " +
-        "single-store plan plus multiStore (cheapest-per-item across stores). " +
-        "Location filters default to 10km when near is set. Use get_promotions to explain discounts.",
+      instructions: MCP_SERVER_INSTRUCTIONS,
     },
   );
   registerTools(server);
@@ -31,13 +36,20 @@ const METHOD_NOT_ALLOWED = {
 
 /**
  * Mounts a remote MCP server (Streamable HTTP, stateless) at /mcp on the same Fastify instance
- * as the REST API, sharing the same API-key auth (Bearer header or ?api_key= query param).
+ * as the REST API, sharing Bearer API-key auth. Query-string ?api_key= is accepted only when
+ * SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 (legacy MCP escape hatch).
  */
 export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
   app.post("/mcp", async (request, reply) => {
     // Throws AppError on missing/invalid/rate-limited key; caught by the global error handler.
     const auth = await authenticate(request);
     const startedAt = Date.now();
+    const auditId =
+      auth.role === "master"
+        ? await beginPrivilegedAudit({ apiKeyId: auth.apiKeyId, method: request.method, route: "/mcp" })
+        : null;
+    let auditErrorCode: string | null = null;
+    let auditFinalized = false;
 
     // Streamable HTTP writes directly to the raw response (and may stream SSE), so Fastify
     // must step out of the way. One fresh server+transport per request keeps this stateless
@@ -46,8 +58,19 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
     const server = createMcpServer();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
+    const finalizeAudit = async (statusCode: number, errorCode: string | null): Promise<void> => {
+      if (!auditId || auditFinalized) return;
+      auditFinalized = true;
+      await finalizePrivilegedAudit(auditId, statusCode, Date.now() - startedAt, errorCode);
+    };
+
     reply.raw.on("close", () => {
-      recordUsage(auth.apiKeyId, "/mcp", reply.raw.statusCode || 200, Date.now() - startedAt);
+      const statusCode = reply.raw.statusCode || 200;
+      const latency = Date.now() - startedAt;
+      void finalizeAudit(statusCode, auditErrorCode).catch((err: unknown) => {
+        request.log.error({ err }, "failed to finalize MCP privileged audit");
+      });
+      recordUsage(auth.apiKeyId, "/mcp", statusCode, latency);
       void transport.close();
       void server.close();
     });
@@ -56,7 +79,13 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
       await server.connect(transport);
       await transport.handleRequest(request.raw, reply.raw, request.body);
     } catch (err) {
+      auditErrorCode = "internal_error";
       request.log.error({ err }, "mcp request failed");
+      try {
+        await finalizeAudit(500, auditErrorCode);
+      } catch (auditErr) {
+        request.log.error({ err: auditErr }, "failed to finalize MCP privileged audit");
+      }
       if (!reply.raw.headersSent) {
         reply.raw.writeHead(500, { "Content-Type": "application/json" });
         reply.raw.end(

@@ -14,7 +14,8 @@ export function getOpenApiSpec(): Record<string, unknown> {
       version: "0.1.0",
       description:
         "Canonical Israeli supermarket product, price, and promotion data. REST API + remote MCP server " +
-        "(mounted at /mcp) share the same service layer and API-key auth.",
+        "(mounted at /mcp) share the same service layer. Auth is Bearer by default; query-string API keys " +
+        "are only accepted on /mcp when SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1.",
     },
     servers: [{ url: "/" }],
     security: [{ BearerAuth: [] }],

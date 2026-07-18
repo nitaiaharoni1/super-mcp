@@ -234,13 +234,16 @@ export function gateAgainstConstraints(
 
   for (const pen of profile.penalties) {
     const [attr, val] = pen.split(":");
-    const termHit = ontology.terms.find(
+    const penaltyTerms = ontology.terms.filter(
       (t) => t.kind === "penalty" && t.attribute === attr && t.value === val,
     );
-    if (!termHit) continue;
-    const surface = normalizeEmbedInput(termHit.term);
-    if (surface && queryPenaltySurfaces.has(surface)) continue;
-    penaltyScore += termHit.weight;
+    if (penaltyTerms.length === 0) continue;
+    const queryWaives = penaltyTerms.some((t) => {
+      const surface = normalizeEmbedInput(t.term);
+      return surface && queryPenaltySurfaces.has(surface);
+    });
+    if (queryWaives) continue;
+    penaltyScore += penaltyTerms[0]!.weight;
     relaxed.push(`penalty:${pen}`);
   }
 

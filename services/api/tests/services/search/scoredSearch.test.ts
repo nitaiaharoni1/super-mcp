@@ -39,6 +39,23 @@ import {
   searchProductsScored,
 } from "../../../src/services/search/scoredSearch.js";
 
+function weakLexicalRow() {
+  return {
+    id: "lex",
+    gtin: "1",
+    name: "lexical match",
+    brand: null,
+    category_l1: null,
+    category_l2: null,
+    size_qty: null,
+    size_unit: null,
+    score: 0.78,
+    matched_via: "product" as const,
+    has_price: true,
+    has_local_price: true,
+  };
+}
+
 describe("searchProductsScored hybrid path", () => {
   const lexicalHit = makeSearchProductHit({
     id: "lex",
@@ -74,25 +91,8 @@ describe("searchProductsScored hybrid path", () => {
       cacheHit: false,
     });
     searchByQueryVector.mockResolvedValue([vectorHit]);
-    // Lexical SQL path — return one row shaped like SearchHitRow via query mock.
-    query.mockResolvedValue({
-      rows: [
-        {
-          id: lexicalHit.id,
-          gtin: "1",
-          name: lexicalHit.name,
-          brand: null,
-          category_l1: null,
-          category_l2: null,
-          size_qty: null,
-          size_unit: null,
-          score: 0.78,
-          matched_via: "name",
-          has_price: true,
-          has_local_price: true,
-        },
-      ],
-    });
+    // Exact probe + lexical passes share this mock; weak name keeps probe from short-circuiting.
+    query.mockResolvedValue({ rows: [weakLexicalRow()] });
   });
 
   it("falls back to lexical when ontology is unavailable", async () => {
@@ -110,7 +110,129 @@ describe("searchProductsScored hybrid path", () => {
     warn.mockRestore();
   });
 
-  it("skips embedding and ANN for strong lexical evidence", async () => {
+  it("returns early via exact_probe for exact product name", async () => {
+    query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "exact-1",
+          gtin: "1",
+          name: "פרגיות",
+          brand: null,
+          category_l1: null,
+          category_l2: null,
+          size_qty: null,
+          size_unit: null,
+          score: 1,
+          matched_via: "product",
+          has_price: true,
+          has_local_price: true,
+        },
+      ],
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const hits = await searchProductsScored({ q: "פרגיות", limit: 10 });
+
+    expect(hits.map((hit) => hit.id)).toEqual(["exact-1"]);
+    expect(getQueryEmbedding).not.toHaveBeenCalled();
+    expect(searchByQueryVector).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(String(log.mock.calls[0]?.[0])).toContain('"path":"exact_probe"');
+    log.mockRestore();
+  });
+
+  it("uses firstPassLexicalLimit (20) for non-fuzzy product-only SQL overFetch when limit is 60", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    // Weak exact probe → continue to first-pass lexical.
+    query.mockResolvedValueOnce({ rows: [] });
+    query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: lexicalHit.id,
+          gtin: "1",
+          name: "פרגיות עוף טרי",
+          brand: null,
+          category_l1: null,
+          category_l2: null,
+          size_qty: null,
+          size_unit: null,
+          score: 0.78,
+          matched_via: "product",
+          has_price: true,
+          has_local_price: true,
+        },
+      ],
+    });
+
+    await searchProductsScored({ q: "פרגיות", limit: 60 });
+
+    // First-pass lexical: GREATEST scoring CTE without listing_hit (not exact probe).
+    const lexicalCall = query.mock.calls.find(
+      (c) =>
+        typeof c[0] === "string" &&
+        String(c[0]).includes("GREATEST") &&
+        String(c[0]).includes("candidates AS") &&
+        !String(c[0]).includes("listing_hit AS"),
+    );
+    expect(lexicalCall).toBeTruthy();
+    const params = lexicalCall![1] as unknown[];
+    // $7 = overFetch must be firstPassLexicalLimit (20), not max(20, 60)=60
+    expect(params[6]).toBe(20);
+    const sql = String(lexicalCall![0]);
+    // First pass is non-fuzzy and product+alias only (no listing ILIKE).
+    expect(sql).not.toMatch(/p\.name % \$1/);
+    expect(sql).not.toContain("l.name ILIKE '%' || $6 || '%' ESCAPE '\\'");
+    log.mockRestore();
+  });
+
+  it("retries weak first-pass with listing + fuzzy before vector", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    query.mockResolvedValueOnce({ rows: [] }); // exact probe
+    query.mockResolvedValueOnce({ rows: [weakLexicalRow()] }); // first-pass no listing
+    query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "listed",
+          gtin: "2",
+          name: "chain listing hit",
+          brand: null,
+          category_l1: null,
+          category_l2: null,
+          size_qty: null,
+          size_unit: null,
+          score: 0.92,
+          matched_via: "listing",
+          has_price: true,
+          has_local_price: true,
+        },
+      ],
+    }); // fuzzy + listing
+
+    await searchProductsScored({ q: "פרגיות", limit: 10 });
+
+    const lexicalCalls = query.mock.calls.filter(
+      (c) =>
+        typeof c[0] === "string" &&
+        String(c[0]).includes("GREATEST") &&
+        String(c[0]).includes("candidates AS"),
+    );
+    expect(lexicalCalls.length).toBeGreaterThanOrEqual(2);
+    const firstPassSql = String(lexicalCalls[0]![0]);
+    const listingPassSql = String(
+      lexicalCalls.find((c) => String(c[0]).includes("listing_hit AS"))?.[0] ?? "",
+    );
+    expect(firstPassSql).not.toMatch(/listing_hit AS/i);
+    expect(firstPassSql).not.toMatch(/p\.name % \$1/);
+    expect(listingPassSql).toMatch(/listing_hit AS/i);
+    expect(listingPassSql).toMatch(/p\.name % \$1/);
+    expect(getQueryEmbedding).toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("skips embedding and ANN for strong lexical evidence after weak exact probe", async () => {
+    // Exact probe: empty → continue to lexical.
+    query.mockResolvedValueOnce({ rows: [] });
+    // Non-fuzzy lexical: dominant prefix hit.
     query.mockResolvedValueOnce({
       rows: [
         {
@@ -123,7 +245,7 @@ describe("searchProductsScored hybrid path", () => {
           size_qty: null,
           size_unit: null,
           score: 0.95,
-          matched_via: "name",
+          matched_via: "product",
           has_price: true,
           has_local_price: true,
         },
@@ -169,8 +291,6 @@ describe("searchProductsScored hybrid path", () => {
 
   it("returns lexical ordering under V2 shadow after computing fusion", async () => {
     semanticV2Shadow.mockReturnValue(true);
-    // Put vector-only hit first in fused ranking by giving it sole presence + high weight path:
-    // keep both; shadow must still return lexical order (lex first from SQL).
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
 
     const hits = await searchProductsScored({ q: "פרגיות", limit: 10 });

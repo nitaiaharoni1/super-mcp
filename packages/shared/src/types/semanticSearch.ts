@@ -10,6 +10,8 @@ export interface SemanticSearchConfig {
   rrfK: number;
   autoAcceptScore: number;
   autoAcceptGap: number;
+  /** Lexical score at/above which a name-safe hit may auto-resolve. */
+  strongLexicalThreshold: number;
   nearbyAlternativesEnabled: boolean;
   minProfileCoverage: number;
   firstPassLexicalLimit: number;
@@ -29,6 +31,7 @@ export const DEFAULT_SEMANTIC_SEARCH_CONFIG: SemanticSearchConfig = {
   rrfK: 60,
   autoAcceptScore: 0.55,
   autoAcceptGap: 0.15,
+  strongLexicalThreshold: 0.9,
   nearbyAlternativesEnabled: true,
   minProfileCoverage: 0.1,
   firstPassLexicalLimit: 20,
@@ -58,6 +61,10 @@ export function parseSemanticSearchConfig(raw: unknown): SemanticSearchConfig {
     rrfK: n("rrfK", DEFAULT_SEMANTIC_SEARCH_CONFIG.rrfK),
     autoAcceptScore: n("autoAcceptScore", DEFAULT_SEMANTIC_SEARCH_CONFIG.autoAcceptScore),
     autoAcceptGap: n("autoAcceptGap", DEFAULT_SEMANTIC_SEARCH_CONFIG.autoAcceptGap),
+    strongLexicalThreshold: n(
+      "strongLexicalThreshold",
+      DEFAULT_SEMANTIC_SEARCH_CONFIG.strongLexicalThreshold,
+    ),
     nearbyAlternativesEnabled: b(
       "nearbyAlternativesEnabled",
       DEFAULT_SEMANTIC_SEARCH_CONFIG.nearbyAlternativesEnabled,

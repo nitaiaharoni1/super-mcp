@@ -1,4 +1,5 @@
-export { optimizeBasket } from "./optimize.js";
+export { optimizeBasket, computeBasketCompleteness, resolveBasketLines } from "./optimize.js";
+export { prepareBasket, buildPrepareAssumptions } from "./prepare.js";
 export { resolveItems } from "./resolve.js";
 
 export type {
@@ -7,6 +8,11 @@ export type {
   BasketItemStatus,
   BasketLine,
   BasketMissingItem,
+  BasketLocationInput,
+  BasketPrepareInput,
+  BasketPrepareQuestion,
+  BasketPrepareQuestionOption,
+  BasketPrepareResult,
   BasketOptimizeInput,
   BasketOptimizeResult,
   BasketRecommendation,

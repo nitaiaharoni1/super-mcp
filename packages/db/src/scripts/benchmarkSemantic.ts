@@ -4,7 +4,11 @@
  *   pnpm db:benchmark-semantic
  *   SUPER_MCP_EMBED_BACKEND=hasher pnpm db:benchmark-semantic
  *
- * Loads packages/db/tests/fixtures/semantic-benchmark.json.
+ * Basket resolve latency (warm prepareBasket / resolveItems):
+ *   pnpm db:benchmark-semantic -- --basket
+ *   pnpm db:benchmark-semantic -- --basket --city=… --near=lat,lng --fixture=path.json
+ *
+ * Loads packages/db/tests/fixtures/semantic-benchmark.json (or --fixture).
  * When DATABASE_URL / embeddings / catalog are unavailable, prints a structured
  * report with zeros/skipped and exits 0. Exit 1 only on hard script errors
  * (missing/invalid fixture).
@@ -52,6 +56,26 @@ const LATENCY_P95_BUDGET_MS = 1000;
 const MIN_VECTOR_COVERAGE = 0.5;
 const MIN_PROFILE_COVERAGE = 0.1;
 const MAX_UNSAFE_RATE = 0.05;
+const EXPECTED_BBQ_QUERIES = [
+  "פרגיות",
+  "קבבים",
+  "אנטרקוט",
+  "פיתות",
+  "חומוס",
+  "טחינה",
+  "מלח גס",
+  "עגבניות",
+  "מלפפונים",
+  "פלפלים",
+  "בצלים",
+  "חסה",
+  "לימונים",
+  "אבטיח",
+  "קולה",
+  "יין",
+  "קפה טייסטרס צ׳ויס",
+  "קרח",
+] as const;
 
 interface FixtureLocation {
   city?: string;
@@ -127,6 +151,26 @@ function loadFixture(filePath: string): FixtureFile {
     throw new Error(`Fixture ${filePath} must contain a "cases" array`);
   }
   return parsed as FixtureFile;
+}
+
+function assertExactBbqFixture(fixture: FixtureFile): void {
+  const actualQueries = fixture.cases.map((row) => row.query);
+  if (
+    actualQueries.length !== EXPECTED_BBQ_QUERIES.length ||
+    actualQueries.some((query, index) => query !== EXPECTED_BBQ_QUERIES[index])
+  ) {
+    throw new Error(
+      `BBQ acceptance fixture must contain exactly ${EXPECTED_BBQ_QUERIES.length} ordered Hebrew lines`,
+    );
+  }
+  for (const row of fixture.cases) {
+    if (
+      !Array.isArray(row.forbiddenNameSubstrings) ||
+      row.forbiddenNameSubstrings.length === 0
+    ) {
+      throw new Error(`BBQ acceptance line "${row.query}" must declare forbidden classes`);
+    }
+  }
 }
 
 function percentile(sortedAsc: number[], p: number): number | null {
@@ -603,6 +647,8 @@ async function evaluateCase(
 
 async function runBenchmark(): Promise<Record<string, unknown>> {
   const fixture = loadFixture(FIXTURE_PATH);
+  const bbqFixture = loadFixture(BBQ_FIXTURE_PATH);
+  assertExactBbqFixture(bbqFixture);
   const k = fixture.k && fixture.k > 0 ? fixture.k : 10;
   const model = resolveEmbedModel();
   const backend = resolveEmbedBackend();
@@ -697,16 +743,10 @@ async function runBenchmark(): Promise<Record<string, unknown>> {
     evals.push(await evaluateCase(pool, row, evalOpts));
   }
 
-  let bbqEvals: QueryEval[] = [];
-  let bbqCaseCount = 0;
-  try {
-    const bbqFixture = loadFixture(BBQ_FIXTURE_PATH);
-    bbqCaseCount = bbqFixture.cases.length;
-    for (const row of bbqFixture.cases) {
-      bbqEvals.push(await evaluateCase(pool, toBenchmarkCase(row), evalOpts));
-    }
-  } catch {
-    bbqEvals = [];
+  const bbqEvals: QueryEval[] = [];
+  const bbqCaseCount = bbqFixture.cases.length;
+  for (const row of bbqFixture.cases) {
+    bbqEvals.push(await evaluateCase(pool, toBenchmarkCase(row), evalOpts));
   }
 
   const latencies = evals.map((e) => e.timing.totalMs).sort((a, b) => a - b);
@@ -832,8 +872,163 @@ async function runBenchmark(): Promise<Record<string, unknown>> {
   };
 }
 
+function parseCliArg(name: string): string | undefined {
+  const prefix = `--${name}=`;
+  const hit = process.argv.find((arg) => arg.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : undefined;
+}
+
+function hasCliFlag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
+}
+
+function parseNear(raw: string | undefined): { lat: number; lng: number } | undefined {
+  if (!raw) return undefined;
+  const [latRaw, lngRaw] = raw.split(",");
+  const lat = Number(latRaw);
+  const lng = Number(lngRaw);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error(`Invalid --near=${raw}; expected lat,lng`);
+  }
+  return { lat, lng };
+}
+
+interface BasketFixtureCase {
+  query: string;
+  qty?: number;
+  amount?: number;
+  unit?: string;
+}
+
+interface BasketFixtureFile {
+  cases: BasketFixtureCase[];
+}
+
+function loadBasketFixture(filePath: string): BasketFixtureFile {
+  const fixture = loadFixture(filePath);
+  return { cases: fixture.cases as BasketFixtureCase[] };
+}
+
+async function runBasketBenchmark(): Promise<Record<string, unknown>> {
+  const fixturePath = path.resolve(parseCliArg("fixture") ?? BBQ_FIXTURE_PATH);
+  const city = parseCliArg("city");
+  const near = parseNear(parseCliArg("near"));
+  // CLI defaults are for fixture runs only — never used in production resolve paths.
+  const locationCity = city ?? (near ? undefined : "Herzliya");
+  const warmRuns = 3;
+
+  if (!process.env.DATABASE_URL) {
+    return {
+      event: "basket_benchmark",
+      skipped: true,
+      skippedReason: "DATABASE_URL unset",
+      fixturePath,
+    };
+  }
+
+  let pool: Pool;
+  try {
+    pool = getPool();
+  } catch (err) {
+    return {
+      event: "basket_benchmark",
+      skipped: true,
+      skippedReason: err instanceof Error ? err.message : String(err),
+      fixturePath,
+    };
+  }
+
+  const reachable = await probeDb(pool);
+  if (!reachable) {
+    return {
+      event: "basket_benchmark",
+      skipped: true,
+      skippedReason: "database unreachable",
+      fixturePath,
+    };
+  }
+
+  let dirty = 0;
+  try {
+    const dirtyRes = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM semantic_index_dirty`,
+    );
+    dirty = Number(dirtyRes.rows[0]?.count ?? 0);
+  } catch {
+    dirty = -1;
+  }
+  if (dirty > 0) {
+    console.warn(
+      JSON.stringify({
+        event: "basket_benchmark_warning",
+        message: "semantic_index_dirty is non-empty; latency results may be invalid",
+        dirty,
+      }),
+    );
+  }
+
+  const fixture = loadBasketFixture(fixturePath);
+  const items = fixture.cases.map((row) => ({
+    query: row.query,
+    ...(row.qty != null ? { qty: row.qty } : {}),
+    ...(row.amount != null ? { amount: row.amount } : {}),
+    ...(row.unit != null ? { unit: row.unit } : {}),
+    ...(row.qty == null && row.amount == null ? { qty: 1 } : {}),
+  }));
+
+  const prepareUrl = new URL(
+    "../../../../services/api/src/services/basket/prepare.ts",
+    import.meta.url,
+  );
+  const { prepareBasket } = await import(prepareUrl.href);
+
+  // One uncounted warmup, then warmRuns measured iterations.
+  await prepareBasket({
+    items,
+    ...(locationCity ? { city: locationCity } : {}),
+    ...(near ? { near } : {}),
+  });
+
+  const durationsMs: number[] = [];
+  let lastCompleteness: Record<string, unknown> | null = null;
+  for (let i = 0; i < warmRuns; i++) {
+    const t0 = performance.now();
+    const result = await prepareBasket({
+      items,
+      ...(locationCity ? { city: locationCity } : {}),
+      ...(near ? { near } : {}),
+    });
+    durationsMs.push(performance.now() - t0);
+    lastCompleteness = result.completeness ?? null;
+  }
+
+  const sorted = [...durationsMs].sort((a, b) => a - b);
+  const p50 = percentile(sorted, 50);
+  const p95 = percentile(sorted, 95);
+
+  return {
+    event: "basket_benchmark",
+    skipped: false,
+    fixturePath,
+    itemCount: items.length,
+    location: {
+      city: locationCity ?? null,
+      near: near ?? null,
+    },
+    dirty,
+    dirtyWarning: dirty > 0,
+    warmRuns,
+    latencyMs: {
+      samples: durationsMs.map((ms) => Math.round(ms * 10) / 10),
+      p50: p50 != null ? Math.round(p50 * 10) / 10 : null,
+      p95: p95 != null ? Math.round(p95 * 10) / 10 : null,
+    },
+    completeness: lastCompleteness,
+  };
+}
+
 async function main(): Promise<void> {
-  const report = await runBenchmark();
+  const report = hasCliFlag("basket") ? await runBasketBenchmark() : await runBenchmark();
   console.log(JSON.stringify(report, null, 2));
 
   const reportPath = process.env.SUPER_MCP_BENCH_REPORT;
@@ -853,7 +1048,7 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    if (!r.activationGate?.pass) {
+    if (r.activationGate && !r.activationGate.pass) {
       console.error(`benchmark gate: FAIL; ${r.activationGate?.summary ?? "no gate computed"}`);
       process.exitCode = 1;
     }

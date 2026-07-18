@@ -47,8 +47,8 @@ KEY=$(cat .local/api-key.txt)
 curl -s http://localhost:8787/health
 curl -s -H "Authorization: Bearer $KEY" 'http://localhost:8787/v1/products?q=חלב'
 curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"items":[{"query":"חלב","qty":2},{"gtin":"7290112490463","qty":1}],"city":"תל אביב"}' \
-  http://localhost:8787/v1/basket/optimize
+  -d '{"items":[{"query":"חלב","pack_qty":2},{"gtin":"7290112490463","pack_qty":1}],"city":"תל אביב"}' \
+  http://localhost:8787/v1/basket/prepare
 ```
 
 ### Semantic retrieval V2 (generic ontology + pgvector)
@@ -74,7 +74,11 @@ Ingest drains `semantic_index_dirty` before reporting success; failures mark the
 
 Free-text basket lines resolve with **deterministic evidence first** (exact name/phrase, form/class gates); embeddings run only when lexical recall is weak. The API warms the query embedder on boot (fire-and-forget) to cut cold latency on the first basket call.
 
-`POST /v1/basket/optimize` returns a `completeness` block: `resolvedLines`, `needsConfirmationLines`, `unresolvedLines`, and `safeResolutionRatio`. When `safeResolutionRatio` is below `minSafeResolutionRatio` (default **0.7**, from ontology config), `cheapest` and `multiStore` are **null** and `totalsArePartial` is **true** — store breakdowns remain for debugging, but must not be read as a full-list cheapest total. Confirm ambiguous lines via `candidates` before shopping.
+**Agent / MCP flow (required):** call `prepare_basket` first (resolve near `city`/`near`, safe shopping defaults, no pricing), answer every required `question`, then call `optimize_basket` once with `product_id` on confirmed lines. Questions identify their item and include at most five compact product/pack options. Pricing loads **only safely resolved product IDs** — never the full unconfirmed shortlist.
+
+REST has the same two-step flow: `POST /v1/basket/prepare`, confirm required questions, then `POST /v1/basket/optimize`. Both inputs use `pack_qty` for packs; deprecated `qty` remains accepted but cannot be supplied together with `pack_qty`. Use `amount` + `unit` for weighed goods and natural counts—for example, 20 pitas is `{"amount":20,"unit":"יח"}`, not 20 packs.
+
+`POST /v1/basket/optimize` returns a `completeness` block: `resolvedLines`, `needsConfirmationLines`, `unresolvedLines`, and `safeResolutionRatio`. When `safeResolutionRatio` is below `minSafeResolutionRatio` (default **0.7**, from ontology config), `cheapest` and `multiStore` are **null** and `totalsArePartial` is **true**.
 
 | Env | Effect |
 |-----|--------|
@@ -110,30 +114,30 @@ SUPER_MCP_EMBED_BACKEND=hasher pnpm db:benchmark-semantic
 pnpm db:migrate
 SUPER_MCP_EMBED_BACKEND=hasher pnpm db:benchmark-semantic
 pnpm --filter @super-mcp/api dev
-# warm embedder on first request; then POST /v1/basket/optimize with city=Herzliya + BBQ items
+# warm embedder on first request; then prepare, confirm, and optimize the BBQ items
 KEY=$(cat .local/api-key.txt)
 curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"city":"Herzliya","items":[
     {"query":"פרגיות","amount":1.75,"unit":"kg"},
     {"query":"קבבים","amount":1.5,"unit":"kg"},
     {"query":"אנטרקוט","amount":0.75,"unit":"kg"},
-    {"query":"פיתות","qty":20},
+    {"query":"פיתות","amount":20,"unit":"יח"},
     {"query":"חומוס","amount":1.5,"unit":"kg"},
     {"query":"טחינה","amount":500,"unit":"g"},
-    {"query":"מלח גס","qty":1},
+    {"query":"מלח גס","pack_qty":1},
     {"query":"עגבניות","amount":1,"unit":"kg"},
     {"query":"מלפפונים","amount":1,"unit":"kg"},
-    {"query":"פלפלים","qty":3},
-    {"query":"בצלים","qty":3},
-    {"query":"חסה","qty":1},
-    {"query":"לימונים","qty":4},
-    {"query":"אבטיח","qty":1},
-    {"query":"קולה","qty":2},
-    {"query":"יין","qty":3},
-    {"query":"קפה טייסטרס צ׳ויס","qty":1},
-    {"query":"קרח","qty":1}
+    {"query":"פלפלים","pack_qty":3},
+    {"query":"בצלים","pack_qty":3},
+    {"query":"חסה","pack_qty":1},
+    {"query":"לימונים","pack_qty":4},
+    {"query":"אבטיח","pack_qty":1},
+    {"query":"קולה","pack_qty":2},
+    {"query":"יין","pack_qty":3},
+    {"query":"קפה טייסטרס צ׳ויס","pack_qty":1},
+    {"query":"קרח","pack_qty":1}
   ]}' \
-  http://localhost:8787/v1/basket/optimize
+  http://localhost:8787/v1/basket/prepare
 ```
 
 Manual success criteria:
@@ -167,8 +171,21 @@ Raw feeds archive to `data/raw/` (local stand-in for GCS).
 ### Create API key
 
 ```bash
+# Standard shopping key
 pnpm create-key -- --name=my-agent
+
+# Bootstrap a revocable, expiring master key (raw key prints once)
+pnpm create-key -- --name=operations --role=master --expires-at=2026-12-31T23:59:59Z
 ```
+
+Keys are stored only as SHA-256 hashes. Keep the one-time raw value in a secret
+manager and send it as `Authorization: Bearer <key>`; do not put it in config,
+URLs, logs, or this repository. Master keys can create, list, rotate, and revoke
+keys under `/v1/admin/keys`, and read global usage at `/v1/admin/usage`. Rotation
+returns the replacement raw key once and revokes the prior key atomically.
+
+Query-string credentials are rejected by default. Legacy MCP-only query auth
+can be explicitly enabled with `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1`.
 
 ## Packages
 
@@ -187,13 +204,14 @@ See [docs/folder-conventions.md](./docs/folder-conventions.md) for target folder
 - `GET /v1/products/:id/prices` — compare nearby (default **10km**); `?sort=unit_price` for cheaper per 100g/ml
 - `GET /v1/products/:id/substitutes` — cheaper similar products by unit price
 - `GET /v1/products/:id/history`
-- `GET /v1/chains` · `GET /v1/stores` — `?near=` defaults to **10km** radius
+- `GET /v1/chains` · `GET /v1/stores` — returns `{ stores, location }` (not a bare array); `?near=` defaults to **10km** radius
 - `GET /v1/promotions`
+- `POST /v1/basket/prepare` — resolves lines and returns safe assumptions plus required confirmation questions
 - `POST /v1/basket/optimize` — requires `city` and/or `near`; response includes `cheapest`, `completeness`, and per-line resolution status
 - `GET /v1/usage`
 
 ## MCP tools
 
-`search_products` · `resolve_products` · `get_product` · `compare_prices` · `suggest_substitutes` · `optimize_basket` · `list_stores` · `get_promotions`
+`search_products` · `resolve_products` · `get_product` · `compare_prices` · `suggest_substitutes` · `prepare_basket` · `optimize_basket` · `list_stores` · `get_promotions`
 
-Shopping lists: call `optimize_basket` once with `{query, qty}` or `{query, amount, unit}` items — do not search each line first.
+Shopping lists: call `prepare_basket` with `{query, pack_qty}` or `{query, amount, unit}`, confirm required questions, then call `optimize_basket` once with confirmed `product_id` lines. Do not search each line first.

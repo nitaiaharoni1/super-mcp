@@ -19,10 +19,16 @@ import {
 import { mapProduct } from "../products/mapProduct.js";
 import type { ProductSummary } from "../products/types.js";
 import {
+  EXACT_PROBE_CANDIDATE_LIMIT,
+  isExactProbeStrong,
+  searchExactProducts,
+} from "./exactProductSearch.js";
+import {
   buildDedupedFromRankedCte,
   buildLexicalRankedCte,
   buildSearchResultsSelect,
 } from "./lexicalSql.js";
+import { toSearchLocationParams } from "./locationScope.js";
 import { getActiveOntology } from "./ontology.js";
 import { getQueryEmbedding } from "./queryEmbedding.js";
 import { fuseRankedCandidates } from "./rankFusion.js";
@@ -114,13 +120,17 @@ function buildSearchScopeParams(
   };
   finalLimit: number;
 } {
+  const location = toSearchLocationParams(params);
   const q = (params.q ?? "").trim();
   const qLike = escapeIlike(q);
   const gtin = params.gtin?.trim() ? normalizeGtin(params.gtin.trim()) : null;
   const finalLimit = params.limit && params.limit > 0 ? Math.min(params.limit, 200) : 20;
-  const overFetch = Math.min(Math.max(candidateLimit, finalLimit), 200);
-  const radius = resolveRadiusKm(params.near, params.radiusKm);
-  const scoped = Boolean(params.city || params.near || (params.storeIds && params.storeIds.length > 0));
+  // Use candidateLimit alone — do not inflate to finalLimit (basket searchLimit is often 60).
+  const overFetch = Math.min(Math.max(candidateLimit, 1), 200);
+  const radius = resolveRadiusKm(location.near, location.radiusKm);
+  const scoped = Boolean(
+    location.city || location.near || (location.storeIds && location.storeIds.length > 0),
+  );
 
   const sqlParams: unknown[] = [
     q,
@@ -137,16 +147,16 @@ function buildSearchScopeParams(
   let radiusParam: number | undefined;
   let storeIdsParam: number | undefined;
 
-  if (params.storeIds && params.storeIds.length > 0) {
-    sqlParams.push(params.storeIds);
+  if (location.storeIds && location.storeIds.length > 0) {
+    sqlParams.push(location.storeIds);
     storeIdsParam = sqlParams.length;
   }
-  if (params.city) {
-    sqlParams.push(cityMatchKeys(params.city));
+  if (location.city) {
+    sqlParams.push(cityMatchKeys(location.city));
     cityParam = sqlParams.length;
   }
-  if (params.near && radius != null) {
-    sqlParams.push(params.near.lat, params.near.lng, radius);
+  if (location.near && radius != null) {
+    sqlParams.push(location.near.lat, location.near.lng, radius);
     nearLatParam = sqlParams.length - 2;
     nearLngParam = sqlParams.length - 1;
     radiusParam = sqlParams.length;
@@ -195,15 +205,38 @@ export function orderByLocationStock(
     .slice(0, limit);
 }
 
+function isLexicalStrong(hit: SearchProductHit | undefined): boolean {
+  return Boolean(
+    hit &&
+      (hit.evidence?.exactName ||
+        (hit.evidence?.exactPhrase && isDominantPhraseMatch(hit.name, hit.evidence)) ||
+        (hit.evidence?.aliasMatched &&
+          (hit.lexicalScore ?? hit.score) >= 0.9 &&
+          isDominantPhraseMatch(hit.name, {
+            exactName: false,
+            exactPhrase: true,
+            queryTokenCount: Math.max(1, hit.evidence.queryTokenCount || 1),
+          }))),
+  );
+}
+
 async function searchLexicalOnce(
   params: SearchProductsParams,
   config: SemanticSearchConfig,
-  opts?: { includeAlias?: boolean; applyFinalLimit?: boolean },
+  opts?: {
+    includeAlias?: boolean;
+    includeFuzzy?: boolean;
+    /** Default true. First-pass sets false to skip listing ILIKE scan. */
+    includeListing?: boolean;
+    applyFinalLimit?: boolean;
+  },
 ): Promise<SearchProductHit[]> {
   const includeAlias = opts?.includeAlias !== false;
+  const includeFuzzy = opts?.includeFuzzy === true;
+  const includeListing = opts?.includeListing !== false;
   const applyFinalLimit = opts?.applyFinalLimit !== false;
   const candidateLimit = config.lexicalLimit;
-  const { sqlParams, scope, finalLimit } = buildSearchScopeParams(params, candidateLimit);
+  const { sqlParams, scope } = buildSearchScopeParams(params, candidateLimit);
 
   // When feeding RRF, fetch the full lexical candidate pool (limit = overFetch).
   if (!applyFinalLimit) {
@@ -211,7 +244,12 @@ async function searchLexicalOnce(
   }
 
   const sql = `
-    WITH ${buildLexicalRankedCte(includeAlias, config.trigramThreshold)}
+    WITH ${buildLexicalRankedCte({
+      includeAliasHit: includeAlias,
+      includeFuzzy,
+      includeListing,
+      trigramThreshold: config.trigramThreshold,
+    })}
     ${buildDedupedFromRankedCte()}
     ${buildSearchResultsSelect(
       scope.localExists,
@@ -232,7 +270,12 @@ async function searchLexicalOnce(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (!includeAlias || !/product_alias/i.test(message)) throw err;
-    return searchLexicalOnce(params, config, { includeAlias: false, applyFinalLimit });
+    return searchLexicalOnce(params, config, {
+      includeAlias: false,
+      includeFuzzy,
+      includeListing,
+      applyFinalLimit,
+    });
   }
 }
 
@@ -279,11 +322,15 @@ async function searchLexical(
   config: SemanticSearchConfig,
   opts?: {
     includeAlias?: boolean;
+    includeFuzzy?: boolean;
+    includeListing?: boolean;
     applyFinalLimit?: boolean;
     ontology?: OntologySnapshot | null;
   },
 ): Promise<SearchProductHit[]> {
   const applyFinalLimit = opts?.applyFinalLimit !== false;
+  const includeFuzzy = opts?.includeFuzzy === true;
+  const includeListing = opts?.includeListing !== false;
   const candidateLimit = config.lexicalLimit;
   const originalQuery = (params.originalQuery ?? params.q ?? "").trim();
   const variants = opts?.ontology
@@ -293,7 +340,12 @@ async function searchLexical(
   const primary = await searchLexicalOnce(
     { ...params, q: originalQuery || params.q, originalQuery },
     config,
-    { includeAlias: opts?.includeAlias, applyFinalLimit: false },
+    {
+      includeAlias: opts?.includeAlias,
+      includeFuzzy,
+      includeListing,
+      applyFinalLimit: false,
+    },
   );
   const primaryTop = primary[0];
   const primaryStrong = Boolean(
@@ -319,6 +371,8 @@ async function searchLexical(
     expanded.map((q) =>
       searchLexicalOnce({ ...params, q, originalQuery }, config, {
         includeAlias: opts?.includeAlias,
+        includeFuzzy,
+        includeListing,
         applyFinalLimit: false,
       }),
     ),
@@ -330,6 +384,22 @@ async function searchLexical(
         params.limit && params.limit > 0 ? Math.min(params.limit, 200) : 20,
       )
     : merged;
+}
+
+async function tryExactProbe(
+  params: SearchProductsParams,
+  config: SemanticSearchConfig,
+): Promise<SearchProductHit[] | null> {
+  const q = (params.q ?? "").trim();
+  if (!q && !params.gtin?.trim()) return null;
+
+  const rows = await searchExactProducts(params, EXACT_PROBE_CANDIDATE_LIMIT);
+  if (rows.length === 0) return null;
+
+  const evidenceQuery = params.originalQuery ?? params.q ?? "";
+  const searchQuery = params.q ?? evidenceQuery;
+  const hits = rows.map((row) => mapSearchHitRow(row, evidenceQuery, searchQuery));
+  return isExactProbeStrong(hits, config) ? hits : null;
 }
 
 /**
@@ -353,6 +423,27 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
   const finalLimit = params.limit && params.limit > 0 ? Math.min(params.limit, 200) : 20;
   const started = Date.now();
 
+  // Fail-fast product-only probe (no listing CTE, no trigram %).
+  const exactHits = await tryExactProbe(params, config);
+  if (exactHits) {
+    console.log(
+      JSON.stringify({
+        event: "semantic_search",
+        model: null,
+        ontologyVersion: ontology?.version ?? null,
+        queryCacheHit: false,
+        lexicalCandidates: exactHits.length,
+        vectorCandidates: 0,
+        fusedCandidates: 0,
+        profileCoverage: null,
+        fallbackReason: null,
+        path: "exact_probe",
+        durationMs: Date.now() - started,
+      }),
+    );
+    return orderByLocationStock(exactHits, finalLimit);
+  }
+
   // Ontology unavailable → lexical-only (no vector config / RRF).
   if (!semanticExpand || !q || !ontology) {
     if (semanticExpand && q && !ontology) {
@@ -372,32 +463,52 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
         }),
       );
     }
-    return searchLexical(params, config, { applyFinalLimit: true, ontology });
+    return searchLexical(params, config, {
+      applyFinalLimit: true,
+      includeFuzzy: true,
+      ontology,
+    });
   }
 
   const firstPassConfig = {
     ...config,
     lexicalLimit: config.firstPassLexicalLimit || 20,
   };
-  const lexical = await searchLexical(params, firstPassConfig, {
+  // First pass: product + alias only (skip listing ILIKE scan).
+  let lexical = await searchLexical(params, firstPassConfig, {
     applyFinalLimit: false,
+    includeFuzzy: false,
+    includeListing: false,
     ontology,
   });
-  const lexicalTop = lexical[0];
-  const lexicalStrong = Boolean(
-    lexicalTop &&
-      (lexicalTop.evidence?.exactName ||
-        (lexicalTop.evidence?.exactPhrase &&
-          isDominantPhraseMatch(lexicalTop.name, lexicalTop.evidence)) ||
-        (lexicalTop.evidence?.aliasMatched &&
-          (lexicalTop.lexicalScore ?? lexicalTop.score) >= 0.9 &&
-          isDominantPhraseMatch(lexicalTop.name, {
-            exactName: false,
-            exactPhrase: true,
-            queryTokenCount: Math.max(1, lexicalTop.evidence.queryTokenCount || 1),
-          }))),
-  );
-  if (lexicalStrong) {
+  if (isLexicalStrong(lexical[0])) {
+    console.log(
+      JSON.stringify({
+        event: "semantic_search",
+        model: null,
+        ontologyVersion: ontology.version,
+        queryCacheHit: false,
+        lexicalCandidates: lexical.length,
+        vectorCandidates: 0,
+        fusedCandidates: 0,
+        profileCoverage: null,
+        fallbackReason: null,
+        path: "deterministic_only",
+        durationMs: Date.now() - started,
+      }),
+    );
+    return orderByLocationStock(lexical, finalLimit);
+  }
+
+  // Weak first pass → fuzzy lexical WITH listing (full candidate limit) before / with vector.
+  const fuzzyLexical = await searchLexical(params, config, {
+    applyFinalLimit: false,
+    includeFuzzy: true,
+    includeListing: true,
+    ontology,
+  });
+  lexical = mergeLexicalHits([...lexical, ...fuzzyLexical], config.lexicalLimit);
+  if (isLexicalStrong(lexical[0])) {
     console.log(
       JSON.stringify({
         event: "semantic_search",

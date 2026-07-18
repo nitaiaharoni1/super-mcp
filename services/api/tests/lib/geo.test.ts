@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { geoBoundingBoxSql, haversineKmSql } from "../../src/lib/geo.js";
+import { geoBoundingBoxSql, haversineKmSql, parseNear } from "../../src/lib/geo.js";
 
 describe("geo SQL helpers", () => {
   it("builds haversine expression with param indexes", () => {
@@ -15,4 +15,11 @@ describe("geo SQL helpers", () => {
     expect(sql).toContain("BETWEEN");
     expect(sql).toContain("st.lat <> 0");
   });
+
+  it.each(["0,0", "32.16,0", "40.71,-74.01"])(
+    "rejects near points outside the supported Israel region (%s)",
+    (near) => {
+      expect(() => parseNear(near)).toThrow(/supported Israel region/);
+    },
+  );
 });

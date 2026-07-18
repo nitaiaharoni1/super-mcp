@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { heRetailOntologyFixture } from "@super-mcp/shared/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SearchProductHit } from "../../../src/services/search/types.js";
@@ -30,6 +33,35 @@ type GoldenCase = {
   unit?: string;
   forbiddenNameSubstrings: string[];
   acceptableNameSubstrings: string[];
+};
+
+const expectedBbqQueries = [
+  "פרגיות",
+  "קבבים",
+  "אנטרקוט",
+  "פיתות",
+  "חומוס",
+  "טחינה",
+  "מלח גס",
+  "עגבניות",
+  "מלפפונים",
+  "פלפלים",
+  "בצלים",
+  "חסה",
+  "לימונים",
+  "אבטיח",
+  "קולה",
+  "יין",
+  "קפה טייסטרס צ׳ויס",
+  "קרח",
+] as const;
+
+const goldenFixturePath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../../packages/db/tests/fixtures/herzliya-bbq-golden.json",
+);
+const goldenFixture = JSON.parse(readFileSync(goldenFixturePath, "utf8")) as {
+  cases: GoldenCase[];
 };
 
 function hit(id: string, name: string, lexicalScore: number, exactPhrase = false): SearchProductHit {
@@ -81,8 +113,13 @@ const fixture: { cases: GoldenCase[] } = {
     },
     {
       query: "קרח",
-      forbiddenNameSubstrings: ["קרחון", "גלידה"],
+      forbiddenNameSubstrings: ["מכונת", "וויסקי", "קרחון", "גלידה"],
       acceptableNameSubstrings: ["קרח"],
+    },
+    {
+      query: "קולה",
+      forbiddenNameSubstrings: ["סוכריות", "גומי", "דיאט", "זירו", "zero"],
+      acceptableNameSubstrings: ["קוקה", "קולה", "cola"],
     },
   ],
 };
@@ -91,7 +128,18 @@ const candidatesByQuery: Record<string, SearchProductHit[]> = {
   פרגיות: [hit("safe-thighs", "פרגיות עוף", 0.95, true), hit("sausage", "נקניקיות עוף", 0.99)],
   מלפפונים: [hit("fresh-cucumber", "מלפפון טרי", 0.95, true), hit("pickled", "מלפפונים במלח", 0.99)],
   לימונים: [hit("lemon", "לימון טרי", 0.95, true), hit("liqueur", "ליקר לימון", 0.99)],
-  קרח: [hit("ice", "קרח", 1, true), hit("dessert", "קרחון לימון", 0.99)],
+  קרח: [
+    hit("machine", "מכונת קרח ביתית", 1, true),
+    hit("whiskey", "קוביות קרח רב פעמיות לוויסקי", 0.99, true),
+    hit("dessert", "קרחון לימון", 0.98),
+    hit("ice-cream", "גלידת וניל", 0.97),
+    hit("ice", "שקית קרח", 0.9, true),
+  ],
+  קולה: [
+    hit("candy", "סוכריות גומי קולה", 1, true),
+    hit("zero", "RC קולה זירו", 0.99, true),
+    hit("regular", "קוקה קולה בקבוק", 0.95, true),
+  ],
 };
 
 describe("Herzliya BBQ golden safety", () => {
@@ -99,6 +147,27 @@ describe("Herzliya BBQ golden safety", () => {
     getActiveOntology.mockResolvedValue(heRetailOntologyFixture());
     loadSemanticProfiles.mockResolvedValue(new Map());
     searchProductsScored.mockImplementation(({ q }: { q: string }) => candidatesByQuery[q] ?? []);
+  });
+
+  it("keeps the canonical Hebrew BBQ acceptance fixture at exactly 18 ordered lines", () => {
+    expect(goldenFixture.cases).toHaveLength(18);
+    expect(goldenFixture.cases.map((row) => row.query)).toEqual(expectedBbqQueries);
+    expect(goldenFixture.cases.find((row) => row.query === "פיתות")).toMatchObject({
+      amount: 20,
+      unit: "יח",
+    });
+    expect(goldenFixture.cases.find((row) => row.query === "פרגיות")?.forbiddenNameSubstrings).toEqual(
+      expect.arrayContaining(["נקניק", "פסטרמה"]),
+    );
+    expect(
+      goldenFixture.cases.find((row) => row.query === "מלפפונים")?.forbiddenNameSubstrings,
+    ).toEqual(expect.arrayContaining(["במלח", "כבוש", "חמוץ"]));
+    expect(goldenFixture.cases.find((row) => row.query === "קולה")?.forbiddenNameSubstrings).toEqual(
+      expect.arrayContaining(["דיאט", "zero"]),
+    );
+    expect(goldenFixture.cases.find((row) => row.query === "קרח")?.forbiddenNameSubstrings).toEqual(
+      expect.arrayContaining(["קרחון", "גלידה"]),
+    );
   });
 
   for (const golden of fixture.cases) {
@@ -119,6 +188,33 @@ describe("Herzliya BBQ golden safety", () => {
       if (result.productId) expect(isForbidden(result.name)).toBe(false);
     });
   }
+
+  it("defaults bare cola to regular but asks when lexical evidence remains ambiguous", async () => {
+    const result = await resolveQueryItem(
+      { query: "קולה" },
+      { index: 0, amount: null, unit: null },
+      { city: "הרצליה" },
+      false,
+    );
+
+    expect(result.candidates[0]?.productId).toBe("regular");
+    expect(result.candidates.map((candidate) => candidate.productId)).not.toContain("candy");
+    expect(result.resolutionStatus).toBe("needs_confirmation");
+    expect(result.productId).toBeNull();
+  });
+
+  it("defaults bare ice to consumable bagged ice and excludes non-food lookalikes", async () => {
+    const result = await resolveQueryItem(
+      { query: "קרח" },
+      { index: 0, amount: null, unit: null },
+      { city: "הרצליה" },
+      false,
+    );
+
+    expect(result.candidates.map((candidate) => candidate.productId)).toEqual(["ice"]);
+    expect(result.resolutionStatus).toBe("resolved");
+    expect(result.productId).toBe("ice");
+  });
 
   it("reapplies current form policy when a stored profile predates migration 009", async () => {
     loadSemanticProfiles.mockResolvedValue(

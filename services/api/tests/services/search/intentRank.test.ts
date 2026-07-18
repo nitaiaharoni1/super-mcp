@@ -97,4 +97,54 @@ describe("rankHitsForIntent", () => {
     );
     expect(ranked).toHaveLength(0);
   });
+
+  it("ranks production-like cola retrieval without candy leakage", () => {
+    const ontology = heRetailOntologyFixture();
+    const { ranked } = rankHitsForIntent(
+      [
+        hit({ id: "rc-candy", name: "סוכריות גומי RC קולה", score: 1 }),
+        hit({ id: "rc-zero", name: "RC קולה זירו פחית 330 מ״ל", score: 0.99 }),
+        hit({ id: "coca-cola", name: "קוקה קולה בקבוק 1.5 ליטר", score: 0.91 }),
+      ],
+      "קולה",
+      { ontology, preferLocal: false },
+    );
+
+    expect(ranked.map((candidate) => candidate.id)).toEqual(["coca-cola", "rc-zero"]);
+    expect(ranked[0]?.penaltyScore).toBe(0);
+    expect(ranked[1]?.penaltyScore).toBeGreaterThan(0);
+  });
+
+  it("preserves explicit zero cola intent at retrieval ranking level", () => {
+    const ontology = heRetailOntologyFixture();
+    const { ranked } = rankHitsForIntent(
+      [
+        hit({ id: "regular", name: "קוקה קולה בקבוק 1.5 ליטר", score: 1 }),
+        hit({ id: "zero", name: "RC קולה זירו פחית 330 מ״ל", score: 0.9 }),
+      ],
+      "קולה זירו",
+      { ontology, preferLocal: false },
+    );
+
+    expect(ranked.map((candidate) => candidate.id)).toEqual(["zero", "regular"]);
+    expect(ranked[0]?.intentTier).toBe(1);
+    expect(ranked[1]?.intentTier).toBe(2);
+  });
+
+  it("ranks only consumable bagged ice from adversarial retrieval", () => {
+    const ontology = heRetailOntologyFixture();
+    const { ranked } = rankHitsForIntent(
+      [
+        hit({ id: "machine", name: "מכונת קרח ביתית", score: 1 }),
+        hit({ id: "whiskey", name: "קוביות קרח רב פעמיות לוויסקי", score: 0.99 }),
+        hit({ id: "popsicle", name: "קרחון קולה", score: 0.98 }),
+        hit({ id: "ice-cream", name: "גלידת וניל", score: 0.97 }),
+        hit({ id: "bag", name: "שקית קוביות קרח 2 ק״ג", score: 0.9 }),
+      ],
+      "קרח",
+      { ontology, preferLocal: false },
+    );
+
+    expect(ranked.map((candidate) => candidate.id)).toEqual(["bag"]);
+  });
 });

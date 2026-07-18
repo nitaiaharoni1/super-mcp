@@ -82,14 +82,16 @@ describe("optimizeBasket completeness gate", () => {
           new Map([
             [
               "00000000-0000-4000-8000-000000000000",
-              {
-                id: "33333333-3333-4333-8333-333333333333",
-                product_id: "00000000-0000-4000-8000-000000000000",
-                chain_id: "22222222-2222-4222-8222-222222222222",
-                item_code: "1",
-                name: "Product 0",
-                gtin: null,
-              },
+              [
+                {
+                  id: "33333333-3333-4333-8333-333333333333",
+                  product_id: "00000000-0000-4000-8000-000000000000",
+                  chain_id: "22222222-2222-4222-8222-222222222222",
+                  item_code: "1",
+                  name: "Product 0",
+                  gtin: null,
+                },
+              ],
             ],
           ]),
         ],
@@ -127,5 +129,11 @@ describe("optimizeBasket completeness gate", () => {
     expect(result.completeness.safeResolutionRatio).toBeCloseTo(1 / 18);
     expect(result.items).toHaveLength(18);
     expect(result.stores.length).toBeGreaterThan(0);
+    expect(loadBasketPricingData).toHaveBeenCalledOnce();
+    expect(loadBasketPricingData).toHaveBeenCalledWith(
+      ["00000000-0000-4000-8000-000000000000"],
+      ["11111111-1111-4111-8111-111111111111"],
+      true,
+    );
   });
 });

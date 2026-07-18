@@ -2,6 +2,7 @@ node_modules/
 dist/
 .local/
 .env
+!.env.example
 data/raw/
 *.log
 *.tsbuildinfo

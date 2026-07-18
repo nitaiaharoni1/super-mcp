@@ -27,7 +27,10 @@ export const apiKeyHeader = {
   BearerAuth: {
     type: "http",
     scheme: "bearer",
-    description: "sha256-hashed and matched against api_key.key_hash.",
+    description:
+      "API key via Authorization: Bearer <key> (sha256-hashed and matched against api_key.key_hash). " +
+      "Query-string ?api_key= is rejected by default and only accepted on /mcp when " +
+      "SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1.",
   },
 };
 
