@@ -6,6 +6,7 @@ import {
   profileFromText,
   rankDeterministicCandidates,
   resolvePurchaseQty,
+  type ClassPath,
   type OntologySnapshot,
   type RetrievalEvidence,
   type SemanticProfile,
@@ -23,7 +24,6 @@ import {
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
-  buildEquivalenceSet,
 } from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
@@ -59,6 +59,8 @@ export interface RankQueryOptions {
    * Avoids repeating profileFromText across lines that share candidates.
    */
   mergedProfileCache?: Map<string, SemanticProfile>;
+  /** Offline LLM taxonomy paths keyed by product id (migration 017). */
+  classMap?: Map<string, ClassPath>;
 }
 
 function mergeProfileWithCurrentOntology(
@@ -100,6 +102,7 @@ export function rankQueryCandidates(
   const profileMs = options?.profileMs ?? 0;
   const sharedProfileBatch = options?.sharedProfileBatch === true;
   const mergedProfileCache = options?.mergedProfileCache;
+  const classMap = options?.classMap;
 
   // Cap CPU for deterministic ranking: pack-size lines keep a wider pool.
   const rankCap = wantsPackSize
@@ -280,6 +283,7 @@ export function rankQueryCandidates(
           ? 1
           : 3,
       penaltyScore: ontology ? (gateById.get(hit.id)?.penaltyScore ?? 0) : 0,
+      classPath: classMap?.get(hit.id),
       profile: ontology
         ? mergeProfileWithCurrentOntology(
             hit.name,
@@ -357,7 +361,7 @@ export function rankQueryCandidates(
   // Build the candidate list once so risk classification, equivalence, and the
   // response all read the same product_class / intentTier the gate assigned.
   const candidates: BasketCandidate[] = shortlist.map((hit) =>
-    hitToCandidate(hit, productClassFor(hit)),
+    hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
   );
   // BasketCandidate drops brand; the risk classifier needs it, so keep the raw
   // hit brand keyed by product id.
@@ -390,6 +394,7 @@ export function rankQueryCandidates(
         productClass: c.productClass,
         brand: shortlistBrandById.get(c.productId) ?? null,
         intentTier: c.intentTier ?? null,
+        classL1: c.classL1 ?? null,
       }),
     ),
   );
@@ -398,6 +403,8 @@ export function rankQueryCandidates(
   // ambiguity auto-resolves to the top pick with an equivalence set attached.
   // HARD GUARD: never override a vector-only top pick (invariant: vector-only
   // can't auto-price), and only for commodity risk — never cross_class/opaque.
+  // Uses the query-token-safe builder so a brand/variety query (טסטרס צ'ויס)
+  // never groups a different brand of the same class (עלית צ'יקו).
   if (
     decision.status === "needs_confirmation" &&
     risk.kind === "commodity" &&
@@ -405,10 +412,13 @@ export function rankQueryCandidates(
     shortlist[0] != null &&
     !isVectorOnlyHit(shortlist[0])
   ) {
-    const equivalents = buildEquivalenceSet(candidates[0], candidates, {
-      packTolerance: searchConfig?.packTolerance ?? 0.5,
-      maxEquivalents: searchConfig?.maxEquivalents ?? 5,
-    });
+    const equivalents = buildCommodityEquivalents(
+      candidates[0],
+      candidates,
+      item.query ?? "",
+      searchConfig?.maxEquivalents ?? 5,
+      searchConfig?.packTolerance ?? 0.5,
+    );
     if (equivalents.length >= 2) {
       const top = candidates[0];
       return {

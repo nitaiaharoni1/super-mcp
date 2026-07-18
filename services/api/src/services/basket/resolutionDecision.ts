@@ -1,7 +1,9 @@
 import {
+  compareClassPaths,
   isDominantPhraseMatch,
   normalizeEmbedInput,
   tokenizeNormalized,
+  type ClassPath,
   type RetrievalEvidence,
   type SemanticProfile,
   type SemanticSearchConfig,
@@ -32,6 +34,8 @@ export type ResolutionCandidate = Pick<SearchProductHit, "id" | "name" | "matche
   penaltyScore?: number;
   /** True when priced in the requested location scope (city/near/store). */
   hasLocalPrice?: boolean;
+  /** Offline LLM taxonomy path (migration 017), for hierarchical distinguishability. */
+  classPath?: ClassPath;
   profile?: SemanticProfile;
 };
 
@@ -131,6 +135,18 @@ function profilesDisagreeOnFormClass(
   return false;
 }
 
+/**
+ * Two candidates the LLM taxonomy places in different classes are distinguishable,
+ * not confusable — the spread/dry-grains/roasted-snack rivals of "חומוס" stop
+ * blocking the lexical margin, so the line collapses to its same-class SKUs and
+ * auto-resolves. "unknown" (either unclassified) never distinguishes → today's
+ * behavior. Compared at the DEEPEST level both carry.
+ */
+function classesDistinguish(a: ResolutionCandidate, b: ResolutionCandidate): boolean {
+  if (!a.classPath || !b.classPath) return false;
+  return compareClassPaths(a.classPath, b.classPath) === "different";
+}
+
 /** Two candidates are the same product line if they share a product id or a normalized name. */
 function sameProductLine(a: ResolutionCandidate, b: ResolutionCandidate): boolean {
   if (a.id === b.id) return true;
@@ -153,6 +169,7 @@ function hasLexicalMargin(
   for (const rival of rivals) {
     if (sameProductLine(chosen, rival)) continue;
     if (profilesDisagreeOnFormClass(chosen, rival)) continue;
+    if (classesDistinguish(chosen, rival)) continue;
     const rivalLex = effectiveLexicalScore(rival);
     if (chosenLex == null || rivalLex == null) {
       // Missing scores: only a form/class disagreement (handled above) can

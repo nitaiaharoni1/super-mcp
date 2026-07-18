@@ -55,6 +55,10 @@ export interface BasketCandidate {
   hasLocalPrice: boolean;
   /** Semantic product-class of the candidate (from its profile), or null when unclassified. */
   productClass: string | null;
+  /** Offline LLM taxonomy path (migration 017); null levels when unclassified. */
+  classL1?: string | null;
+  classL2?: string | null;
+  classL3?: string | null;
   intentTier?: 1 | 2 | 3 | 0;
 }
 

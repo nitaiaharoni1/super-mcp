@@ -8,6 +8,7 @@ import {
 } from "../search/index.js";
 import { toSearchLocationParams } from "../search/locationScope.js";
 import { hitToCandidate } from "./candidates.js";
+import { loadProductClasses } from "./productClasses.js";
 import { rankQueryCandidates } from "./rankQueryCandidates.js";
 import {
   searchQueryItem,
@@ -235,6 +236,8 @@ export async function resolveItems(
     profiles = loaded ?? new Map();
     profileBatchMs = Date.now() - profileStarted;
   }
+  // Offline LLM taxonomy (migration 017) for every candidate id, one batched read.
+  const classMap = await loadProductClasses(candidateIds);
 
   // Phase 3: rank/decide each query line from the shared profile Map.
   // Ranking is sync/CPU-bound on the main thread; a shared merge cache avoids
@@ -250,6 +253,7 @@ export async function resolveItems(
       profileMs: 0,
       sharedProfileBatch: true,
       mergedProfileCache,
+      classMap,
     });
     resolved[row.index] = {
       index: row.index,

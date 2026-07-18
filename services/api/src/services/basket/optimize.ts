@@ -7,6 +7,7 @@ import {
 import { toSearchLocationParams } from "../search/locationScope.js";
 import { getActiveOntology } from "../search/ontology.js";
 import type { StoreSummary } from "../stores/index.js";
+import { enrichCommodityCoverage } from "./commodityCoverage.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
 import { loadBasketPricingData } from "./loadPricingData.js";
 import { DEFAULT_PREPARE_OPTIONS_LIMIT, buildPrepareQuestions } from "./prepare.js";
@@ -114,6 +115,12 @@ export async function resolveBasketLines(
 export async function optimizeBasket(input: BasketOptimizeInput): Promise<BasketOptimizeResult> {
   const { resolvedItems, itemStatuses, completeness, candidateStores, storeIds, location } =
     await resolveBasketLines(input);
+
+  // Broaden auto-resolved, CLASSIFIED commodity lines to the same-class SKUs the
+  // in-scope stores actually carry, so per-chain pricing fills them instead of
+  // showing not_carried_by_chain. Class-gated: safe from cross-category drift.
+  // Optimize-only (prepare doesn't price, so it skips this work).
+  await enrichCommodityCoverage(input.items, resolvedItems, storeIds);
 
   const productIds = collectProductIdsForPricing(resolvedItems);
 

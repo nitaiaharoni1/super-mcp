@@ -4,6 +4,8 @@ export interface RiskCandidate {
   productClass: string | null;
   brand: string | null;
   intentTier: number | null;
+  /** LLM taxonomy L1 (migration 017), or null when unclassified. */
+  classL1?: string | null;
 }
 
 export type LineRisk =
@@ -61,6 +63,18 @@ export function classifyLineRisk(queryText: string, shortlist: RiskCandidate[]):
     }
   }
 
+  // With the LLM taxonomy the TOP (most-relevant) candidate anchors the commodity
+  // class, and cross_class is DELIBERATELY not raised for a classified line: the
+  // dominant-intent resolution is what the shopper wants ("חומוס"->spread, "פלפל"
+  // ->bell pepper), not a "spread or dry beans?" question. Safety is delegated, not
+  // dropped: off-class rivals are made non-blocking by the resolution margin
+  // (classesDistinguish), and every equivalence builder groups strictly by class
+  // path (classesConflict) — so an off-class rival can never be priced as the
+  // commodity, and if same-class ambiguity remains unresolved the line still asks.
+  const anchor = pool[0];
+  if (anchor?.classL1) return { kind: "commodity" };
+
+  // Unclassified fallback: the pre-taxonomy flat-class behavior.
   const classes = [
     ...new Set(pool.map((c) => c.productClass).filter((x): x is string => x != null)),
   ];

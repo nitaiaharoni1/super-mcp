@@ -1,5 +1,19 @@
-import { normalizeEmbedInput, tokenizeNormalized } from "@super-mcp/shared";
+import { compareClassPaths, normalizeEmbedInput, tokenizeNormalized } from "@super-mcp/shared";
 import type { BasketCandidate } from "./types.js";
+
+/** Build the LLM taxonomy path from a candidate's class levels. */
+function classPathOf(c: BasketCandidate) {
+  return { l1: c.classL1 ?? null, l2: c.classL2 ?? null, l3: c.classL3 ?? null };
+}
+
+/**
+ * The LLM taxonomy places these two in DIFFERENT classes (compared at the deepest
+ * level both carry) — never interchangeable. "unknown" (either unclassified) is
+ * not a disagreement, so pre-classification behavior is preserved.
+ */
+function classesConflict(a: BasketCandidate, b: BasketCandidate): boolean {
+  return compareClassPaths(classPathOf(a), classPathOf(b)) === "different";
+}
 
 // Preserved/prepared forms that are a DIFFERENT product from the fresh staple,
 // even though the name shares the query token: pickled/soured/canned, sliced/
@@ -75,6 +89,7 @@ export function buildEquivalenceSet(
     if (c.productId === top.productId) continue;
     if (c.intentTier == null || c.intentTier < 1 || c.intentTier > 2) continue;
     if (c.productClass !== top.productClass) continue;
+    if (classesConflict(top, c)) continue;
     if (hasUnrequestedPreservedForm(topTokens, c.name)) continue;
     if ((c.sizeUnit ?? null) !== (top.sizeUnit ?? null)) continue;
     if (top.sizeQty != null && c.sizeQty != null && top.sizeQty > 0) {
@@ -114,6 +129,7 @@ export function buildCommodityEquivalents(
     if (out.length > maxEquivalents) break;
     if (c.productId === top.productId) continue;
     if (c.productClass !== top.productClass) continue;
+    if (classesConflict(top, c)) continue;
     if ((c.sizeUnit ?? null) !== (top.sizeUnit ?? null)) continue;
     if (top.sizeQty != null && c.sizeQty != null && top.sizeQty > 0) {
       if (Math.abs(c.sizeQty - top.sizeQty) / top.sizeQty > packTolerance) continue;
@@ -186,6 +202,7 @@ export function buildAvailabilityEquivalents(
       if (Math.abs(c.sizeQty - primary.sizeQty) / primary.sizeQty > opts.packTolerance) continue;
     }
     if (primary.productClass && c.productClass && primary.productClass !== c.productClass) continue;
+    if (classesConflict(primary, c)) continue;
     out.push(c);
   }
   return out.length >= 2 ? out : [];

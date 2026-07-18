@@ -1,3 +1,4 @@
+import type { ClassPath } from "@super-mcp/shared";
 import type { SearchProductHit } from "../search/types.js";
 import { AUTO_ACCEPT_GAP, AUTO_ACCEPT_SCORE } from "./constants.js";
 import type { BasketCandidate } from "./types.js";
@@ -5,6 +6,7 @@ import type { BasketCandidate } from "./types.js";
 export function hitToCandidate(
   hit: SearchProductHit & { intentTier?: 1 | 2 | 3 | 0 },
   productClass: string | null = null,
+  classPath?: ClassPath | null,
 ): BasketCandidate {
   return {
     productId: hit.id,
@@ -15,7 +17,13 @@ export function hitToCandidate(
     sizeUnit: hit.sizeUnit,
     hasPrice: hit.hasPrice,
     hasLocalPrice: hit.hasLocalPrice ?? hit.hasPrice,
-    productClass,
+    // Prefer the LLM taxonomy L1 as the coarse product_class when the ontology
+    // didn't derive one (keeps flat-class consumers working); classL* carry the
+    // full path for hierarchical comparison.
+    productClass: productClass ?? classPath?.l1 ?? null,
+    classL1: classPath?.l1 ?? null,
+    classL2: classPath?.l2 ?? null,
+    classL3: classPath?.l3 ?? null,
     intentTier: hit.intentTier,
   };
 }
