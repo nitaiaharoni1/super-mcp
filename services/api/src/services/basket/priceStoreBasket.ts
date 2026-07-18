@@ -63,6 +63,7 @@ export function priceStoreBasket(
     } | null = null;
 
     let sawListing = false;
+    let matchedTotal = Infinity;
     const primaryScore = tryOrder[0]?.score ?? 0;
     for (const candidate of tryOrder) {
       // Don't silently swap to a much worse match (e.g. 6-pack mini pita for "פיתות 10").
@@ -89,8 +90,16 @@ export function priceStoreBasket(
         productSizeUnit: candidate.sizeUnit,
         productName: candidate.name,
       });
-      matched = { candidate, listing, priceRow, qty: purchase.qty };
-      break;
+      // Pick the CHEAPEST priced member of the equivalence set, not the first.
+      // For a generic commodity line the set is same-category (e.g. all red wines
+      // for 'יין אדום'), and the default is cheapest unless a variety/brand was
+      // named. tryOrder is [primary] for non-commodity lines, so this is a no-op
+      // there; ties keep the primary (it sorts first).
+      const candidateTotal = Number(priceRow.price) * purchase.qty;
+      if (candidateTotal < matchedTotal) {
+        matched = { candidate, listing, priceRow, qty: purchase.qty };
+        matchedTotal = candidateTotal;
+      }
     }
 
     if (!matched) {

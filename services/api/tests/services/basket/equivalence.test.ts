@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEquivalenceSet, buildSameNameEquivalents } from "../../../src/services/basket/equivalence.js";
+import { buildCommodityEquivalents, buildEquivalenceSet } from "../../../src/services/basket/equivalence.js";
 import type { BasketCandidate } from "../../../src/services/basket/types.js";
 
 const cand = (over: Partial<BasketCandidate>): BasketCandidate => ({
@@ -56,7 +56,7 @@ describe("buildEquivalenceSet", () => {
   });
 });
 
-describe("buildSameNameEquivalents", () => {
+describe("buildCommodityEquivalents", () => {
   const c = (over: Partial<BasketCandidate>): BasketCandidate => ({
     productId: crypto.randomUUID(),
     name: "עגבניות",
@@ -71,35 +71,62 @@ describe("buildSameNameEquivalents", () => {
     ...over,
   });
 
-  it("groups identical-name per-chain SKUs even when intentTier is null", () => {
+  it("groups fragmented per-chain produce SKUs even when intentTier is null", () => {
     const top = c({});
-    const set = buildSameNameEquivalents(
-      top,
-      [top, c({}), c({}), c({ name: "עגבניות מרוסקות" })], // crushed = different name, excluded
-      5,
-    );
+    const set = buildCommodityEquivalents(top, [top, c({}), c({})], "עגבניות", 5);
     expect(set).toHaveLength(3);
-    expect(new Set(set.map((x) => x.name))).toEqual(new Set(["עגבניות"]));
   });
 
-  it("never groups a different-name product sharing only a coarse class (wine)", () => {
-    const wine = c({ name: "יין אדום אמרונה קורט", productClass: "beverage", sizeUnit: "ml", sizeQty: 750 });
-    const set = buildSameNameEquivalents(
-      wine,
-      [wine, c({ name: "יין אדום מרלו", productClass: "beverage", sizeUnit: "ml", sizeQty: 750 })],
+  it("groups every red wine for a generic query so the cheapest can win", () => {
+    const wine = (name: string) =>
+      c({ name, productClass: "beverage", sizeUnit: "ml", sizeQty: 750 });
+    const top = wine("יין אדום אמרונה קורט");
+    const set = buildCommodityEquivalents(
+      top,
+      [top, wine("יין אדום מרלו"), wine("יין אדום קברנה סוביניון")],
+      "יין אדום",
       5,
     );
-    expect(set).toEqual([wine]); // no cross-wine substitution
+    expect(set).toHaveLength(3); // all red wines are interchangeable when unspecified
   });
 
-  it("excludes a same-name SKU with a different unit", () => {
+  it("respects query specificity: 'יין אדום קברנה' excludes non-cabernet wines", () => {
+    const wine = (name: string) =>
+      c({ name, productClass: "beverage", sizeUnit: "ml", sizeQty: 750 });
+    const top = wine("יין אדום קברנה סוביניון גדׂו");
+    const set = buildCommodityEquivalents(
+      top,
+      [top, wine("יין אדום קברנה רקנאטי"), wine("יין אדום מרלו")],
+      "יין אדום קברנה",
+      5,
+    );
+    expect(set.map((x) => x.name)).not.toContain("יין אדום מרלו");
+    expect(set).toHaveLength(2);
+  });
+
+  it("excludes a bulk size beyond pack tolerance (2L wine vs 750ml)", () => {
+    const wine = (name: string, sizeQty: number) =>
+      c({ name, productClass: "beverage", sizeUnit: "ml", sizeQty });
+    const top = wine("יין אדום קורט", 750);
+    const set = buildCommodityEquivalents(top, [top, wine("יין אדום ביתי", 2000)], "יין אדום", 5);
+    expect(set).toHaveLength(1);
+  });
+
+  it("excludes a different unit and a different class", () => {
     const top = c({});
-    const set = buildSameNameEquivalents(top, [top, c({ sizeUnit: "unit" })], 5);
+    const set = buildCommodityEquivalents(
+      top,
+      [top, c({ sizeUnit: "unit" }), c({ productClass: "canned" })],
+      "עגבניות",
+      5,
+    );
     expect(set).toHaveLength(1);
   });
 
   it("returns only the top pick when it has no product class", () => {
     const top = c({ productClass: null });
-    expect(buildSameNameEquivalents(top, [top, c({ productClass: null })], 5)).toEqual([top]);
+    expect(buildCommodityEquivalents(top, [top, c({ productClass: null })], "עגבניות", 5)).toEqual([
+      top,
+    ]);
   });
 });

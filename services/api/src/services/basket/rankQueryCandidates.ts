@@ -20,7 +20,7 @@ import {
   DEFAULT_CANDIDATE_LIMIT,
   SEMANTIC_CANDIDATE_LIMIT,
 } from "./constants.js";
-import { buildEquivalenceSet, buildSameNameEquivalents } from "./equivalence.js";
+import { buildCommodityEquivalents, buildEquivalenceSet } from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
@@ -437,10 +437,12 @@ export function rankQueryCandidates(
     !isVectorOnlyHit(shortlist[0])
   ) {
     const primary = candidates.find((c) => c.productId === base.productId) ?? candidates[0]!;
-    const equivalents = buildSameNameEquivalents(
+    const equivalents = buildCommodityEquivalents(
       primary,
       candidates,
+      item.query ?? "",
       searchConfig?.maxEquivalents ?? 5,
+      searchConfig?.packTolerance ?? 0.5,
     );
     if (equivalents.length >= 2) {
       return { ...base, equivalents };
