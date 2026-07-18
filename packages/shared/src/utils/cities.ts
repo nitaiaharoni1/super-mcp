@@ -239,7 +239,23 @@ export function cityMatchKeys(cityQuery: string): string[] {
   return [...keys].filter(Boolean);
 }
 
+/**
+ * CBS locality codes inside the ingest coverage region (central Israel + the
+ * metro corridors we ingest when SUPER_MCP_REGION_FILTER=1). This is kept as an
+ * EXPLICIT set, decoupled from LOCALITY_CODE_TO_CITY: that map is a complete
+ * code→name lookup used for display and geocoding (nationwide, incl. Eilat,
+ * Ashkelon, etc.), so deriving coverage from its keys would silently pull
+ * out-of-region cities into the ingest filter. Add a code here only when the
+ * locality is genuinely in the ingest region.
+ */
+const IN_REGION_LOCALITY_CODES: ReadonlySet<string> = new Set([
+  "154", "168", "182", "195", "229", "681", "1015", "1309", "2400", "2500",
+  "2610", "2620", "2640", "2650", "3000", "3616", "4000", "5000", "6100", "6200",
+  "6300", "6400", "6600", "6800", "6900", "7400", "7800", "7900", "8300", "8400",
+  "8600", "8700", "9000", "9500", "9600", "9700",
+]);
+
 /** CBS codes we treat as in-coverage (for ingest region filter). */
 export function coveredLocalityCodes(): ReadonlySet<string> {
-  return new Set(Object.keys(LOCALITY_CODE_TO_CITY));
+  return IN_REGION_LOCALITY_CODES;
 }
