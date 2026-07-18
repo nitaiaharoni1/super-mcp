@@ -3,7 +3,7 @@ import { getActivePromotionsForListings } from "../promotions/index.js";
 import type { ListingRow, StorePriceRow } from "./types.js";
 
 export interface BasketPricingContext {
-  listingByChainAndProduct: Map<string, Map<string, ListingRow>>;
+  listingByChainAndProduct: Map<string, Map<string, ListingRow[]>>;
   priceByListingAndStore: Map<string, StorePriceRow>;
   promoMap: Awaited<ReturnType<typeof getActivePromotionsForListings>>;
 }
@@ -19,10 +19,13 @@ export async function loadBasketPricingData(
      WHERE l.product_id = ANY($1::uuid[])`,
     [productIds],
   );
-  const listingByChainAndProduct = new Map<string, Map<string, ListingRow>>();
+  const listingByChainAndProduct = new Map<string, Map<string, ListingRow[]>>();
   for (const listing of listingRes.rows) {
-    const byProduct = listingByChainAndProduct.get(listing.chain_id) ?? new Map<string, ListingRow>();
-    byProduct.set(listing.product_id, listing);
+    const byProduct =
+      listingByChainAndProduct.get(listing.chain_id) ?? new Map<string, ListingRow[]>();
+    const rows = byProduct.get(listing.product_id) ?? [];
+    rows.push(listing);
+    byProduct.set(listing.product_id, rows);
     listingByChainAndProduct.set(listing.chain_id, byProduct);
   }
 

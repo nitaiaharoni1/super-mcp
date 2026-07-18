@@ -31,7 +31,7 @@ function tryOrderForItem(item: ResolvedItem): BasketCandidate[] {
 export function priceStoreBasket(
   store: Awaited<ReturnType<typeof listStores>>[number],
   resolvedItems: ResolvedItem[],
-  listingByChainAndProduct: Map<string, Map<string, ListingRow>>,
+  listingByChainAndProduct: Map<string, Map<string, ListingRow[]>>,
   priceByListingAndStore: Map<string, StorePriceRow>,
   promoMap: Awaited<ReturnType<typeof getActivePromotionsForListings>>,
 ): BasketStoreResult | null {
@@ -65,11 +65,20 @@ export function priceStoreBasket(
     for (const candidate of tryOrder) {
       // Don't silently swap to a much worse match (e.g. 6-pack mini pita for "פיתות 10").
       if (candidate.score + 0.2 < primaryScore) continue;
-      const listing = byProduct?.get(candidate.productId);
-      if (!listing) continue;
+      const listings = byProduct?.get(candidate.productId) ?? [];
+      if (listings.length === 0) continue;
       sawListing = true;
-      const priceRow = priceByListingAndStore.get(`${listing.id}:${store.id}`);
-      if (!priceRow) continue;
+      let picked: { listing: ListingRow; priceRow: StorePriceRow } | null = null;
+      for (const l of listings) {
+        const pr = priceByListingAndStore.get(`${l.id}:${store.id}`);
+        if (pr) {
+          picked = { listing: l, priceRow: pr };
+          break;
+        }
+      }
+      if (!picked) continue;
+      const listing = picked.listing;
+      const priceRow = picked.priceRow;
       const purchase = resolvePurchaseQty({
         packQty: item.amount == null ? item.qty : undefined,
         amount: item.amount ?? undefined,
