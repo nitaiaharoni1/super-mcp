@@ -56,6 +56,22 @@ describe("constraintsFromQueryProfile", () => {
     expect(form?.strength).toBe("hard");
     expect(form?.source).toBe("explicit");
   });
+
+  it("marks term-implied attributes as implied/ranking, not explicit/hard", () => {
+    // "שניצל" implies species=chicken via a term implication (not an explicit
+    // surface for species). It must gate as implied/ranking so it never
+    // hard-rejects a conflicting candidate.
+    const query = buildQueryProfile("שניצל", ontology);
+    const constraints = constraintsFromQueryProfile(query, ontology);
+    const species = constraints.find((c) => c.attribute === "species");
+    expect(species?.value).toBe("chicken");
+    expect(species?.source).toBe("implied");
+    expect(species?.strength).toBe("ranking");
+    // The explicit surface (cut=schnitzel) stays explicit/hard.
+    const cut = constraints.find((c) => c.attribute === "cut");
+    expect(cut?.source).toBe("explicit");
+    expect(cut?.strength).toBe("hard");
+  });
 });
 
 describe("rankDeterministicCandidates", () => {
@@ -228,5 +244,63 @@ describe("rankDeterministicCandidates", () => {
 
     const ranked = rankDeterministicCandidates(q, candidates, ontology);
     expect(ranked.map((candidate) => candidate.id)).toEqual(["bag"]);
+  });
+
+  it("keeps a species-conflicting corn schnitzel candidate (implied constraint, no hard reject)", () => {
+    const q = buildQueryProfile("שניצל תירס", ontology);
+    // A corn schnitzel: shares the schnitzel cut but is not chicken. species
+    // arrived only via implication from "שניצל", so it must not hard-reject.
+    const corn: SemanticProfile = {
+      attributes: { cut: "schnitzel", species: "other", product_class: "produce" },
+      concepts: [],
+      penalties: [],
+      conceptTerms: ["שניצל", "תירס"],
+    };
+    const chicken = profileFromText("שניצל עוף קפוא", ontology);
+
+    const constraints = constraintsFromQueryProfile(q, ontology);
+    const cornGate = gateAgainstConstraints(corn, constraints, ontology, {
+      queryText: q.normalizedText,
+    });
+    expect(cornGate.allowed).toBe(true);
+
+    const ranked = rankDeterministicCandidates(
+      q,
+      [
+        cand("corn", "שניצל תירס קפוא", corn, { lexicalScore: 0.9, exactPhrase: true }),
+        cand("chicken", "שניצל עוף קפוא", chicken, { lexicalScore: 0.9, exactPhrase: true }),
+      ],
+      ontology,
+    );
+    // Corn must survive the gate (not filtered out) — it stays in the shortlist.
+    expect(ranked.some((c) => c.id === "corn")).toBe(true);
+  });
+
+  it("demotes a penalized candidate below an unpenalized one within the same tier", () => {
+    const q = buildQueryProfile("קולה", ontology);
+    const clean = profileFromText("קוקה קולה 1.5 ליטר", ontology);
+    const penalized = profileFromText("קוקה קולה 1.5 ליטר", ontology);
+    const ranked = rankDeterministicCandidates(
+      q,
+      [
+        // Identical evidence + profile; only the gate.penaltyScore differs.
+        {
+          ...cand("penalized", "קוקה קולה 1.5 ליטר", penalized, {
+            lexicalScore: 0.95,
+            exactPhrase: true,
+          }),
+          gate: { allowed: true, tier: 1, conflicts: [], relaxed: [], penaltyScore: 1 },
+        },
+        {
+          ...cand("clean", "קוקה קולה 1.5 ליטר", clean, {
+            lexicalScore: 0.95,
+            exactPhrase: true,
+          }),
+          gate: { allowed: true, tier: 1, conflicts: [], relaxed: [], penaltyScore: 0 },
+        },
+      ],
+      ontology,
+    );
+    expect(ranked[0]?.id).toBe("clean");
   });
 });

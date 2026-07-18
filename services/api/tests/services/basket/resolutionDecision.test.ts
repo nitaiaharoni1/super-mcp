@@ -34,14 +34,150 @@ function hit(
 
 describe("decideResolution", () => {
   it("returns unresolved when there are no candidates", () => {
-    const d = decideResolution([], config);
+    const d = decideResolution("", [], config);
     expect(d.status).toBe("unresolved");
     expect(d.autoPrice).toBe(false);
     expect(d.productId).toBeNull();
   });
 
+  it("does not auto-resolve a mid-word prefix continuation (קרח -> קרחון לימון)", () => {
+    // "קרח" is a whole-token prefix of "קרחון" but NOT a whole token of the name.
+    // A ≤3-token name is only safe when every query token is a whole name token.
+    const d = decideResolution(
+      "קרח",
+      [
+        hit({
+          id: "popsicle",
+          name: "קרחון לימון",
+          lexicalScore: 0.95,
+          evidence: {
+            exactPhrase: false,
+            exactName: false,
+            queryTokenCount: 1,
+            matchedTokenCount: 0,
+            lexicalScore: 0.95,
+          },
+        }),
+        hit({
+          id: "drybag",
+          name: "קרח יבש לויסקי",
+          lexicalScore: 0.78,
+          evidence: { lexicalScore: 0.78 },
+        }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("needs_confirmation");
+    expect(d.autoPrice).toBe(false);
+    expect(d.productId).toBeNull();
+  });
+
+  it("margin check considers every strong rival in the shortlist, not just [1]", () => {
+    // A chosen at [0]; a comparable near-twin C at [2] from a different product
+    // line (different name / product id) must trigger confirmation.
+    const d = decideResolution(
+      "קפה נמס",
+      [
+        hit({
+          id: "a",
+          name: "קפה נמס 200 גרם",
+          lexicalScore: 0.9,
+          evidence: {
+            exactPhrase: true,
+            queryTokenCount: 2,
+            matchedTokenCount: 2,
+            lexicalScore: 0.9,
+          },
+        }),
+        hit({
+          id: "b",
+          name: "קפה שחור טחון",
+          lexicalScore: 0.6,
+          evidence: { lexicalScore: 0.6 },
+        }),
+        hit({
+          id: "c",
+          name: "קפה נמס עדין 200 גרם",
+          lexicalScore: 0.9,
+          evidence: {
+            exactPhrase: true,
+            queryTokenCount: 2,
+            matchedTokenCount: 2,
+            lexicalScore: 0.9,
+          },
+        }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("needs_confirmation");
+    expect(d.autoPrice).toBe(false);
+  });
+
+  it("does not trip the full-shortlist margin on same-product-line twins (equal SKUs)", () => {
+    // Two near-twins share the same normalized name -> same product line ->
+    // not a real ambiguity; the top pick still auto-resolves.
+    const d = decideResolution(
+      "מלפפון",
+      [
+        hit({
+          id: "sku1",
+          name: "מלפפון",
+          lexicalScore: 0.95,
+          evidence: {
+            exactName: true,
+            exactPhrase: true,
+            queryTokenCount: 1,
+            matchedTokenCount: 1,
+            lexicalScore: 0.95,
+          },
+        }),
+        hit({
+          id: "sku2",
+          name: "מלפפון",
+          lexicalScore: 0.95,
+          evidence: {
+            exactName: true,
+            exactPhrase: true,
+            queryTokenCount: 1,
+            matchedTokenCount: 1,
+            lexicalScore: 0.95,
+          },
+        }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("resolved");
+    expect(d.autoPrice).toBe(true);
+    expect(d.productId).toBe("sku1");
+  });
+
+  it("does not auto-resolve a penalized sole strong hit", () => {
+    const d = decideResolution(
+      "קולה",
+      [
+        hit({
+          id: "zero",
+          name: "קולה זירו",
+          lexicalScore: 0.95,
+          intentTier: 2,
+          penaltyScore: 1,
+          evidence: {
+            exactPhrase: true,
+            queryTokenCount: 1,
+            matchedTokenCount: 1,
+            lexicalScore: 0.95,
+          },
+        }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("needs_confirmation");
+    expect(d.autoPrice).toBe(false);
+  });
+
   it("does not auto-resolve RRF-scale 0.016 scores", () => {
     const d = decideResolution(
+      "Alpha",
       [
         hit({
           id: "a",
@@ -60,6 +196,7 @@ describe("decideResolution", () => {
 
   it("auto-resolves exact phrase lexical 0.95 with margin", () => {
     const d = decideResolution(
+      "מלפפון",
       [
         hit({
           id: "top",
@@ -91,6 +228,7 @@ describe("decideResolution", () => {
 
   it("auto-resolves exact name with high confidence label", () => {
     const d = decideResolution(
+      "לימון",
       [
         hit({
           id: "exact",
@@ -107,6 +245,7 @@ describe("decideResolution", () => {
 
   it("does not auto-resolve vector-only recall", () => {
     const d = decideResolution(
+      "לימון",
       [
         hit({
           id: "vec",
@@ -125,6 +264,7 @@ describe("decideResolution", () => {
 
   it("needs confirmation when gate tier is above 2", () => {
     const d = decideResolution(
+      "מלפפון",
       [
         hit({
           id: "nearby",
@@ -147,6 +287,7 @@ describe("decideResolution", () => {
 
   it("needs confirmation when lexical margin is too small without form disagreement", () => {
     const d = decideResolution(
+      "Alpha",
       [
         hit({
           id: "a",
@@ -176,6 +317,7 @@ describe("decideResolution", () => {
 
   it("auto-resolves when next candidate fails form agreement", () => {
     const d = decideResolution(
+      "מלפפון",
       [
         hit({
           id: "fresh",
@@ -206,6 +348,7 @@ describe("decideResolution", () => {
 
   it("ignores fused score when lexical evidence is weak", () => {
     const d = decideResolution(
+      "Product",
       [
         hit({
           id: "rrf",
@@ -223,6 +366,7 @@ describe("decideResolution", () => {
 
   it("does not auto-resolve incidental exactPhrase inside a longer host name", () => {
     const d = decideResolution(
+      "בצלים",
       [
         hit({
           id: "bread",
@@ -259,10 +403,13 @@ describe("decideResolution", () => {
 describe("strongLexicalThreshold config", () => {
   it("uses the configured threshold instead of a hardcoded 0.9", () => {
     const candidate = hit({ id: "p1", name: "מלפפון", lexicalScore: 0.85 });
-    const strict = decideResolution([candidate], config);
+    const strict = decideResolution("מלפפון", [candidate], config);
     expect(strict.status).toBe("needs_confirmation");
 
-    const relaxed = decideResolution([candidate], { ...config, strongLexicalThreshold: 0.8 });
+    const relaxed = decideResolution("מלפפון", [candidate], {
+      ...config,
+      strongLexicalThreshold: 0.8,
+    });
     expect(relaxed.status).toBe("resolved");
     expect(relaxed.confidenceLabel).toBe("medium");
   });
@@ -271,6 +418,7 @@ describe("strongLexicalThreshold config", () => {
 describe("requireDeterministicForAutoResolve", () => {
   it("true (default): fused score alone cannot auto-resolve", () => {
     const d = decideResolution(
+      "מלפפון",
       [hit({ id: "p1", name: "מלפפון", lexicalScore: 0.6, score: 0.7 })],
       config,
     );
@@ -279,6 +427,7 @@ describe("requireDeterministicForAutoResolve", () => {
 
   it("false: fused score >= autoAcceptScore auto-resolves (rollback lever)", () => {
     const d = decideResolution(
+      "מלפפון",
       [hit({ id: "p1", name: "מלפפון", lexicalScore: 0.6, score: 0.7 })],
       { ...config, requireDeterministicForAutoResolve: false },
     );
@@ -288,6 +437,7 @@ describe("requireDeterministicForAutoResolve", () => {
 
   it("false: vector-only candidates still never auto-resolve", () => {
     const d = decideResolution(
+      "מלפפון",
       [hit({ id: "p1", name: "מלפפון", matchedVia: "vector", vectorDistance: 0.1, score: 0.9 })],
       { ...config, requireDeterministicForAutoResolve: false },
     );
