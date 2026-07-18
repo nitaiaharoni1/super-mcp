@@ -19,6 +19,8 @@ export interface SemanticSearchConfig {
   minSafeResolutionRatio: number;
   substitutionMinConfidence: number;
   requireDeterministicForAutoResolve: boolean;
+  /** Gate penaltyScore at/above which a candidate may not auto-resolve. */
+  penaltyBlockThreshold: number;
 }
 
 export const DEFAULT_SEMANTIC_SEARCH_CONFIG: SemanticSearchConfig = {
@@ -39,6 +41,7 @@ export const DEFAULT_SEMANTIC_SEARCH_CONFIG: SemanticSearchConfig = {
   minSafeResolutionRatio: 0.7,
   substitutionMinConfidence: 0.25,
   requireDeterministicForAutoResolve: true,
+  penaltyBlockThreshold: 1,
 };
 
 export function parseSemanticSearchConfig(raw: unknown): SemanticSearchConfig {
@@ -80,6 +83,10 @@ export function parseSemanticSearchConfig(raw: unknown): SemanticSearchConfig {
     requireDeterministicForAutoResolve: b(
       "requireDeterministicForAutoResolve",
       DEFAULT_SEMANTIC_SEARCH_CONFIG.requireDeterministicForAutoResolve,
+    ),
+    penaltyBlockThreshold: n(
+      "penaltyBlockThreshold",
+      DEFAULT_SEMANTIC_SEARCH_CONFIG.penaltyBlockThreshold,
     ),
   };
 }

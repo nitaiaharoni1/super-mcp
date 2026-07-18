@@ -28,6 +28,10 @@ export type ResolutionCandidate = Pick<SearchProductHit, "id" | "name" | "matche
   evidence?: RetrievalEvidence;
   /** Compatibility gate tier when available (1 exact, 2 relaxed, 3 nearby, 0 rejected). */
   intentTier?: 1 | 2 | 3 | 0;
+  /** Semantic gate penalty weight; a penalized candidate cannot auto-resolve. */
+  penaltyScore?: number;
+  /** True when priced in the requested location scope (city/near/store). */
+  hasLocalPrice?: boolean;
   profile?: SemanticProfile;
 };
 
@@ -55,17 +59,24 @@ function hasDominantPhrase(candidate: ResolutionCandidate): boolean {
   return isDominantPhraseMatch(candidate.name, ev);
 }
 
-/** Prefer evidence-based dominance; fall back to short product names (≤3 tokens). */
-function nameIsQuerySafe(candidate: ResolutionCandidate): boolean {
+/**
+ * Prefer evidence-based dominance; else certify a short (≤3-token) product name
+ * only when every query token is a *whole* token of the name. A mid-word
+ * continuation must never certify: "קרח" must not make "קרחון לימון" safe.
+ */
+function nameIsQuerySafe(candidate: ResolutionCandidate, queryText: string): boolean {
   if (hasDominantPhrase(candidate)) return true;
   const nameTokens = tokenizeNormalized(normalizeEmbedInput(candidate.name));
   // Blocks incidental host names like "לחם מחמצת עם בצלים" (4+ tokens).
-  return nameTokens.length > 0 && nameTokens.length <= 3;
+  if (nameTokens.length === 0 || nameTokens.length > 3) return false;
+  const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
+  return queryTokens.length > 0 && queryTokens.every((qt) => nameTokens.includes(qt));
 }
 
 function hasDeterministicEvidence(
   candidate: ResolutionCandidate,
   config: SemanticSearchConfig,
+  queryText: string,
 ): boolean {
   if (isVectorOnly(candidate)) return false;
 
@@ -75,13 +86,14 @@ function hasDeterministicEvidence(
   // Boundary/contains scores are not enough alone — "לחם…בצלים" for query
   // "בצלים" must not auto-price. Require a name-safe / dominant match.
   const exact =
-    Boolean(ev?.exactName) || (Boolean(ev?.exactPhrase) && nameIsQuerySafe(candidate));
+    Boolean(ev?.exactName) || (Boolean(ev?.exactPhrase) && nameIsQuerySafe(candidate, queryText));
   const aliasStrong =
     Boolean(ev?.aliasMatched) &&
     lex != null &&
     lex >= threshold &&
-    nameIsQuerySafe(candidate);
-  const strongLexical = lex != null && lex >= threshold && nameIsQuerySafe(candidate);
+    nameIsQuerySafe(candidate, queryText);
+  const strongLexical =
+    lex != null && lex >= threshold && nameIsQuerySafe(candidate, queryText);
 
   if (config.requireDeterministicForAutoResolve) {
     return exact || strongLexical || aliasStrong;
@@ -92,7 +104,14 @@ function hasDeterministicEvidence(
   return exact || strongLexical || aliasStrong;
 }
 
-function gateTierAllowsAutoResolve(candidate: ResolutionCandidate): boolean {
+function gateTierAllowsAutoResolve(
+  candidate: ResolutionCandidate,
+  config: SemanticSearchConfig,
+): boolean {
+  // A candidate the semantic gate penalized (e.g. an unrequested diet/spicy
+  // variant) is never confident enough to auto-price.
+  const penaltyBlock = config.penaltyBlockThreshold ?? 1;
+  if ((candidate.penaltyScore ?? 0) >= penaltyBlock) return false;
   if (candidate.intentTier == null) return true;
   return candidate.intentTier > 0 && candidate.intentTier <= 2;
 }
@@ -112,30 +131,49 @@ function profilesDisagreeOnFormClass(
   return false;
 }
 
+/** Two candidates are the same product line if they share a product id or a normalized name. */
+function sameProductLine(a: ResolutionCandidate, b: ResolutionCandidate): boolean {
+  if (a.id === b.id) return true;
+  return normalizeEmbedInput(a.name) === normalizeEmbedInput(b.name);
+}
+
+/**
+ * Auto-resolve needs a lexical margin over EVERY rival in the shortlist, not
+ * just [1]: a comparable near-twin from a different product line at any position
+ * is a real ambiguity. Rivals that disagree on form/product-class are
+ * distinguishable (not confusable) and don't block; equal SKUs of the same line
+ * are pricing detail, not ambiguity.
+ */
 function hasLexicalMargin(
   chosen: ResolutionCandidate,
-  next: ResolutionCandidate | undefined,
+  rivals: ResolutionCandidate[],
   autoAcceptGap: number,
 ): boolean {
-  if (!next) return true;
   const chosenLex = effectiveLexicalScore(chosen);
-  const nextLex = effectiveLexicalScore(next);
-  if (chosenLex == null || nextLex == null) {
-    return profilesDisagreeOnFormClass(chosen, next);
+  for (const rival of rivals) {
+    if (sameProductLine(chosen, rival)) continue;
+    if (profilesDisagreeOnFormClass(chosen, rival)) continue;
+    const rivalLex = effectiveLexicalScore(rival);
+    if (chosenLex == null || rivalLex == null) {
+      // Missing scores: only a form/class disagreement (handled above) can
+      // clear the ambiguity; otherwise treat as a confusable near-twin.
+      return false;
+    }
+    if (rivalLex > chosenLex - autoAcceptGap) return false;
   }
-  if (nextLex <= chosenLex - autoAcceptGap) return true;
-  return profilesDisagreeOnFormClass(chosen, next);
+  return true;
 }
 
 function confidenceLabelFor(
   candidate: ResolutionCandidate,
+  queryText: string,
   config?: SemanticSearchConfig,
 ): "high" | "medium" | null {
   if (candidate.evidence?.exactName) return "high";
-  if (candidate.evidence?.exactPhrase && nameIsQuerySafe(candidate)) return "medium";
+  if (candidate.evidence?.exactPhrase && nameIsQuerySafe(candidate, queryText)) return "medium";
   const lex = effectiveLexicalScore(candidate);
   const threshold = config?.strongLexicalThreshold ?? 0.9;
-  if (lex != null && lex >= threshold && nameIsQuerySafe(candidate)) return "medium";
+  if (lex != null && lex >= threshold && nameIsQuerySafe(candidate, queryText)) return "medium";
   return null;
 }
 
@@ -168,6 +206,7 @@ function unresolvedDecision(): ResolutionDecision {
  * Uses lexical evidence and compatibility tier — never fused RRF scores or vector alone.
  */
 export function decideResolution(
+  queryText: string,
   candidates: ResolutionCandidate[],
   config: SemanticSearchConfig,
 ): ResolutionDecision {
@@ -176,12 +215,21 @@ export function decideResolution(
   }
 
   const chosen = candidates[0]!;
-  const next = candidates.length > 1 ? candidates[1] : undefined;
+  const rivals = candidates.slice(1);
+
+  // Don't auto-price a product that nobody in the requested location carries when
+  // a shortlist alternative IS locally available — even on an exact name match.
+  // (The query "קוקה קולה 1.5 ליטר" exact-matched a single-chain SKU with zero
+  // local stores while 6-chain cokes sat one rank lower.) When NO candidate has a
+  // local price it's data sparsity, not a wrong pick, so we don't block there.
+  const prefersUnavailableProduct =
+    chosen.hasLocalPrice === false && rivals.some((c) => c.hasLocalPrice === true);
 
   const canAutoResolve =
-    hasDeterministicEvidence(chosen, config) &&
-    gateTierAllowsAutoResolve(chosen) &&
-    hasLexicalMargin(chosen, next, config.autoAcceptGap);
+    hasDeterministicEvidence(chosen, config, queryText) &&
+    gateTierAllowsAutoResolve(chosen, config) &&
+    hasLexicalMargin(chosen, rivals, config.autoAcceptGap) &&
+    !prefersUnavailableProduct;
 
   if (!canAutoResolve) {
     return needsConfirmationDecision();
@@ -191,7 +239,7 @@ export function decideResolution(
     status: "resolved",
     productId: chosen.id,
     name: chosen.name,
-    confidenceLabel: confidenceLabelFor(chosen, config),
+    confidenceLabel: confidenceLabelFor(chosen, queryText, config),
     confidence: effectiveLexicalScore(chosen),
     lowConfidence: false,
     autoPrice: true,

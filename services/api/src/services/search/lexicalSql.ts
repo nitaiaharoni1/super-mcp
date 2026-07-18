@@ -188,7 +188,10 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
                CASE
                  WHEN $4::text IS NOT NULL AND p.gtin = $4 THEN 1.0
                  WHEN $1 <> '' AND lower(p.name) = lower($1) THEN 1.0
-                 WHEN $1 <> '' AND p.name ILIKE $6 || '%' ESCAPE '\\' THEN 0.95
+                 -- A whole-word prefix (query is a full leading token) scores 0.9
+                 -- via the boundary arm below. A boundary-less prefix
+                 -- (mid-word continuation, e.g. "קרח" in "קרחון") must NOT score
+                 -- 0.95 — it drops to the 0.78 contains arm and cannot auto-resolve.
                  WHEN $1 <> '' AND (
                    p.name ILIKE $6 || ' %' ESCAPE '\\'
                    OR p.name ILIKE '% ' || $6 ESCAPE '\\'

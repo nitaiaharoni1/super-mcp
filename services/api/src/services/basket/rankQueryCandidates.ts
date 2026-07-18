@@ -141,7 +141,10 @@ export function rankQueryCandidates(
   });
 
   let ranked: Array<SearchProductHit & { intentTier?: 1 | 2 | 3 | 0 }>;
-  const gateById = new Map<string, { tier: 1 | 2 | 3 | 0; relaxed: string[] }>();
+  const gateById = new Map<
+    string,
+    { tier: 1 | 2 | 3 | 0; relaxed: string[]; penaltyScore: number }
+  >();
   let rankMs = 0;
 
   if (ontology) {
@@ -175,7 +178,11 @@ export function rankQueryCandidates(
     );
     const hitsById = new Map(hits.map((hit) => [hit.id, hit]));
     ranked = deterministic.flatMap((candidate) => {
-      gateById.set(candidate.id, { tier: candidate.gate.tier, relaxed: candidate.gate.relaxed });
+      gateById.set(candidate.id, {
+        tier: candidate.gate.tier,
+        relaxed: candidate.gate.relaxed,
+        penaltyScore: candidate.gate.penaltyScore,
+      });
       const hit = hitsById.get(candidate.id);
       return hit ? [{ ...hit, intentTier: candidate.gate.tier }] : [];
     });
@@ -222,6 +229,7 @@ export function rankQueryCandidates(
     }
   }
   const decision = decideResolution(
+    item.query ?? "",
     shortlist.map((hit) => ({
       ...hit,
       lexicalScore: hit.lexicalScore ?? hit.evidence?.lexicalScore ?? null,
@@ -233,6 +241,7 @@ export function rankQueryCandidates(
         : hit.evidence?.exactName
           ? 1
           : 3,
+      penaltyScore: ontology ? (gateById.get(hit.id)?.penaltyScore ?? 0) : 0,
       profile: ontology
         ? mergeProfileWithCurrentOntology(
             hit.name,

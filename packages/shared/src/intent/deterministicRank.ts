@@ -7,7 +7,7 @@ import type {
   SemanticProfile,
 } from "../types/semanticTypes.js";
 import { normalizeEmbedInput } from "../embeddings/localEmbed.js";
-import { gateAgainstConstraints } from "./semanticMatcher.js";
+import { extractConstraints, gateAgainstConstraints } from "./semanticMatcher.js";
 import { tokenizeNormalized } from "./tokenMatcher.js";
 
 export interface DeterministicCandidate {
@@ -25,8 +25,19 @@ export function constraintsFromQueryProfile(
   query: QueryProfile,
   ontology: OntologySnapshot,
 ): SemanticConstraint[] {
+  // Provenance mirrors the search-path twin (`extractConstraints`): attributes
+  // that arrived only via a term implication (e.g. "שניצל" -> species=chicken)
+  // are implied/ranking so they never hard-reject a conflicting candidate.
+  // Explicit surfaces keep their ontology-defined strength.
+  const derived = extractConstraints(query.normalizedText, ontology);
+  const bySurface = new Map(derived.map((c) => [c.attribute, c]));
+
   return Object.entries(query.attributes).map(([attribute, value]) => {
     const def = ontology.attributes.find((a) => a.attribute === attribute);
+    const twin = bySurface.get(attribute);
+    if (twin && twin.value === value && twin.source === "implied") {
+      return { attribute, value, strength: "ranking" as const, source: "implied" as const };
+    }
     return {
       attribute,
       value,
@@ -64,6 +75,12 @@ function compareDeterministicCandidates(
   ontology: OntologySnapshot,
 ): number {
   if (a.gate.tier !== b.gate.tier) return a.gate.tier - b.gate.tier;
+
+  // Within a tier, a penalized candidate (unrequested diet/spicy/multipack)
+  // sorts after any unpenalized one.
+  const aPenalized = a.gate.penaltyScore > 0;
+  const bPenalized = b.gate.penaltyScore > 0;
+  if (aPenalized !== bPenalized) return aPenalized ? 1 : -1;
 
   const exactNameCmp = boolDesc(a.evidence.exactName, b.evidence.exactName);
   if (exactNameCmp !== 0) return exactNameCmp;

@@ -444,3 +444,57 @@ describe("requireDeterministicForAutoResolve", () => {
     expect(d.status).not.toBe("resolved");
   });
 });
+
+describe("local availability guard (Coke fix)", () => {
+  const exactCoke = {
+    id: "obscure",
+    name: "קוקה קולה 1.5 ליטר",
+    lexicalScore: 1,
+    hasLocalPrice: false,
+    evidence: { exactName: true, lexicalScore: 1, queryTokenCount: 3, matchedTokenCount: 3 },
+  } as const;
+
+  it("does not auto-resolve an exact-name product with no local price when a rival is locally available", () => {
+    const d = decideResolution(
+      "קוקה קולה 1.5 ליטר",
+      [
+        hit(exactCoke),
+        hit({
+          id: "mainstream",
+          name: "קוקה קולה מוגז 1.5 ל",
+          lexicalScore: 0.7,
+          hasLocalPrice: true,
+        }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("needs_confirmation");
+    expect(d.autoPrice).toBe(false);
+  });
+
+  it("still auto-resolves the exact match when NO candidate has a local price (data sparsity, not a wrong pick)", () => {
+    const d = decideResolution(
+      "קוקה קולה 1.5 ליטר",
+      [
+        hit(exactCoke),
+        hit({ id: "mainstream", name: "קוקה קולה מוגז 1.5 ל", lexicalScore: 0.7, hasLocalPrice: false }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("resolved");
+    expect(d.productId).toBe("obscure");
+  });
+
+  it("auto-resolves normally when the exact match is itself locally available", () => {
+    const d = decideResolution(
+      "קוקה קולה 1.5 ליטר",
+      [
+        hit({ ...exactCoke, hasLocalPrice: true }),
+        hit({ id: "mainstream", name: "קוקה קולה מוגז 1.5 ל", lexicalScore: 0.7, hasLocalPrice: true }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("resolved");
+    expect(d.productId).toBe("obscure");
+  });
+});
