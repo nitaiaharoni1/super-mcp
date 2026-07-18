@@ -11,6 +11,7 @@ import { DEFAULT_STORES_LIMIT } from "./constants.js";
 import { loadBasketPricingData } from "./loadPricingData.js";
 import { DEFAULT_PREPARE_OPTIONS_LIMIT, buildPrepareQuestions } from "./prepare.js";
 import { buildCheapestRecommendation, priceStoreBasket } from "./priceStoreBasket.js";
+import { pickRecommendations } from "./recommendStores.js";
 import { resolveItems } from "./resolve.js";
 import { applyCheapestStoreSubstitutions, buildMultiStorePlan } from "./substitutions.js";
 import type {
@@ -20,10 +21,13 @@ import type {
   BasketOptimizeInput,
   BasketOptimizeResult,
   BasketRecommendation,
+  BasketRecommendations,
   BasketStoreResult,
   ResolvedItem,
   ResolutionStatus,
 } from "./types.js";
+
+const DEFAULT_DISTANCE_PENALTY_PER_KM = 3;
 
 export interface ResolvedBasketLines {
   resolvedItems: ResolvedItem[];
@@ -152,11 +156,23 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
   // One-shot: always price the safely-resolved subset. completeness.totalsArePartial
   // stays as the honesty flag, but recommendations are no longer nulled — the lines
   // that still need a human decision are returned inline as `questions`.
+  const picks = pickRecommendations(storeResults, {
+    distancePenaltyPerKm: input.distancePenaltyPerKm ?? DEFAULT_DISTANCE_PENALTY_PER_KM,
+  });
+  const recommendations: BasketRecommendations = {
+    cheapest: picks.cheapest ? buildCheapestRecommendation(picks.cheapest) : null,
+    bestNearby: picks.bestNearby ? buildCheapestRecommendation(picks.bestNearby) : null,
+  };
+
+  // Top-level cheapest kept for backward-compat: stores[0] is coverage-first
+  // (fewest-missing then total), the historic "cheapest" field.
   const top = storeResults[0];
   const cheapest: BasketRecommendation | null = top ? buildCheapestRecommendation(top) : null;
 
-  if (top) {
-    applyCheapestStoreSubstitutions(itemStatuses, top);
+  // Substitution display describes the store you'd actually go to (bestNearby),
+  // not the raw lowest-total pick.
+  if (picks.bestNearby) {
+    applyCheapestStoreSubstitutions(itemStatuses, picks.bestNearby);
   }
 
   const multiStore = buildMultiStorePlan(resolvedItems, storeResults);
@@ -169,6 +185,7 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     storesCompared: storeResults.length,
     storesTruncated: storeResults.length > trimmed.length,
     cheapest,
+    recommendations,
     multiStore,
     completeness,
     questions,
@@ -249,6 +266,7 @@ function emptyBasketResult(
     storesCompared: 0,
     storesTruncated: false,
     cheapest: null,
+    recommendations: { cheapest: null, bestNearby: null },
     multiStore: null,
     completeness,
     questions: buildPrepareQuestions(inputItems, itemStatuses, DEFAULT_PREPARE_OPTIONS_LIMIT),

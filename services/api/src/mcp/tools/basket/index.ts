@@ -118,7 +118,9 @@ export function registerBasketTools(server: McpServer): void {
         "One-shot: prices the safely-resolved lines immediately and returns any lines that still need " +
         "confirmation as `questions` (same shape as prepare_basket) — no separate prepare call required. " +
         "Totals cover the resolved subset (see completeness.totalsArePartial); re-call with `product_id` " +
-        "answers to the questions to finalize. Returns cheapest (single-store), multiStore (cheapest-per-item), " +
+        "answers to the questions to finalize. Returns `recommendations` with cheapest (lowest total) and " +
+        "bestNearby (most items covered, ties broken by total + distance — the store you'd actually go to), " +
+        "multiStore (cheapest-per-item), " +
         `top stores (default 5), and questions. Requires city and/or near (default ${DEFAULT_RADIUS_KM}km). ` +
         "Missing items are listed — never silently dropped. Every priced line carries a `link` to open that " +
         "product on the chain's online store.",
@@ -136,9 +138,17 @@ export function registerBasketTools(server: McpServer): void {
           .max(500)
           .optional()
           .describe("Max store breakdowns to return (default 5). 0 = all compared stores."),
+        distance_penalty_per_km: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe(
+            "Shekels of 'cost' per km when ranking recommendations.bestNearby (default 3). Higher favors closer stores when coverage ties.",
+          ),
       },
     },
-    async ({ items, city, near, radius_km, include_club, stores_limit }) => {
+    async ({ items, city, near, radius_km, include_club, stores_limit, distance_penalty_per_km }) => {
       assertBasketItems(items);
       const geo = toGeo(near);
       return optimizeBasket({
@@ -148,6 +158,7 @@ export function registerBasketTools(server: McpServer): void {
         radiusKm: resolveRadiusKm(geo, radius_km),
         includeClub: include_club,
         storesLimit: stores_limit,
+        distancePenaltyPerKm: distance_penalty_per_km,
       });
     },
   );

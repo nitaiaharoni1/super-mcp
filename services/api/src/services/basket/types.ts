@@ -30,6 +30,8 @@ export interface BasketOptimizeInput extends BasketLocationInput {
   includeClub?: boolean;
   /** Max store breakdowns to return (default 5). Use 0 for all. */
   storesLimit?: number;
+  /** Shekels of "cost" per km when ranking the bestNearby recommendation (default 3). */
+  distancePenaltyPerKm?: number;
 }
 
 export type ResolvedBy = "product_id" | "gtin" | "query" | "unresolved";
@@ -161,6 +163,16 @@ export interface BasketRecommendation {
   reason: string;
 }
 
+export interface BasketRecommendations {
+  /** Lowest total among compared stores. */
+  cheapest: BasketRecommendation | null;
+  /**
+   * Most lines covered; ties broken by total + a per-km distance penalty. The
+   * store you'd actually go to when no single store carries the full basket.
+   */
+  bestNearby: BasketRecommendation | null;
+}
+
 export interface MultiStoreLine {
   itemIndex: number;
   productId: string;
@@ -230,8 +242,17 @@ export interface BasketOptimizeResult {
   stores: BasketStoreResult[];
   storesCompared: number;
   storesTruncated: boolean;
-  /** Same as stores[0] when any store can fill at least one item; null otherwise. */
+  /**
+   * @deprecated Use `recommendations.cheapest`. Kept for one release for
+   * backward-compat. Same as stores[0] when any store can fill at least one item.
+   */
   cheapest: BasketRecommendation | null;
+  /**
+   * Coverage-first (`bestNearby`) and lowest-total (`cheapest`) store picks. The
+   * "even if it's not the cheapest, where should I actually go" answer lives in
+   * `bestNearby`; both share the BasketRecommendation shape.
+   */
+  recommendations: BasketRecommendations;
   /** Per-item cheapest across stores (may require multiple trips). */
   multiStore: MultiStorePlan | null;
   /**

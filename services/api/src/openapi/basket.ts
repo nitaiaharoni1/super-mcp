@@ -69,6 +69,14 @@ export const basketOptimizeRequestSchema = {
       maximum: 500,
       description: "Max store breakdowns (default 5). 0 = all.",
     },
+    distance_penalty_per_km: {
+      type: "number",
+      minimum: 0,
+      maximum: 100,
+      default: 3,
+      description:
+        "Shekels of 'cost' per km when ranking recommendations.bestNearby (default 3). Higher favors closer stores when coverage ties.",
+    },
   },
 };
 
@@ -137,6 +145,23 @@ export const basketCandidateSchema = {
       type: "boolean",
       description: "True when priced in the requested city/near/store scope.",
     },
+  },
+};
+
+export const basketRecommendationSchema = {
+  type: "object",
+  nullable: true,
+  properties: {
+    storeId: { type: "string", format: "uuid" },
+    storeName: { type: "string" },
+    chainId: { type: "string" },
+    chainName: { type: "string" },
+    total: { type: "number" },
+    currency: { type: "string" },
+    itemsFound: { type: "integer" },
+    itemsRequested: { type: "integer" },
+    distanceKm: { type: "number", nullable: true },
+    reason: { type: "string" },
   },
 };
 
@@ -241,20 +266,27 @@ export const basketOptimizeResponseSchema = {
       },
     },
     cheapest: {
+      ...basketRecommendationSchema,
+      deprecated: true,
+      description:
+        "Deprecated: use recommendations.cheapest. Recommended cheapest nearby store (same as stores[0] when present).",
+    },
+    recommendations: {
       type: "object",
-      nullable: true,
-      description: "Recommended cheapest nearby store for this basket (same as stores[0] when present).",
+      description:
+        "Two complementary store picks. `cheapest` = lowest total. `bestNearby` = most items covered, " +
+        "ties broken by total + a per-km distance penalty (distance_penalty_per_km) — the store to actually go to " +
+        "when no single store carries the full basket. Both share the recommendation shape; either may be null.",
       properties: {
-        storeId: { type: "string", format: "uuid" },
-        storeName: { type: "string" },
-        chainId: { type: "string" },
-        chainName: { type: "string" },
-        total: { type: "number" },
-        currency: { type: "string" },
-        itemsFound: { type: "integer" },
-        itemsRequested: { type: "integer" },
-        distanceKm: { type: "number", nullable: true },
-        reason: { type: "string" },
+        cheapest: {
+          ...basketRecommendationSchema,
+          description: "Lowest total among compared stores.",
+        },
+        bestNearby: {
+          ...basketRecommendationSchema,
+          description:
+            "Most items covered; ties broken by total + distance penalty. The 'where should I actually go' answer.",
+        },
       },
     },
     questions: {
