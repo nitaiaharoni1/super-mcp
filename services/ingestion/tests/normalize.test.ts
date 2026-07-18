@@ -8,9 +8,20 @@ vi.mock("@super-mcp/db", () => ({
   upsertPromotion: vi.fn(async () => "promo-1"),
   upsertStore: vi.fn(async () => "store-1"),
   upsertStorePrice: vi.fn(async () => {}),
+  // Batch hot-path writers: build result maps from the inputs the same way the
+  // real queries do, so a key-format mismatch in flushPrices fails the tests.
+  bulkResolveProducts: vi.fn(
+    async (rows: Array<{ gtin: string | null; sourceKey: string | null }>) =>
+      new Map(rows.map((r) => [r.gtin ?? r.sourceKey, "product-1"])),
+  ),
+  bulkUpsertListings: vi.fn(
+    async (rows: Array<{ chainId: string; itemCode: string }>) =>
+      new Map(rows.map((r) => [`${r.chainId} ${r.itemCode}`, "listing-1"])),
+  ),
+  bulkUpsertStorePrices: vi.fn(async () => {}),
 }));
 
-import { upsertChain, upsertPromotion, upsertStorePrice } from "@super-mcp/db";
+import { bulkUpsertStorePrices, upsertChain, upsertPromotion } from "@super-mcp/db";
 import type { RawPriceRecord, RawRecord } from "@super-mcp/shared";
 import { Normalizer } from "../src/normalize.js";
 
@@ -61,8 +72,10 @@ describe("Normalizer", () => {
     };
     const n = new Normalizer("test");
     await n.apply([record]);
-    expect(upsertStorePrice).toHaveBeenCalledWith(
-      expect.objectContaining({ unitPrice: null }),
+    // Flows through the batched writer; a lost row (e.g. a key-format mismatch
+    // between listing upsert and price lookup) would send an empty array here.
+    expect(bulkUpsertStorePrices).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ unitPrice: null })]),
     );
   });
 

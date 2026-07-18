@@ -7,6 +7,14 @@ export {
   type UpsertListingInput,
 } from "./listings.js";
 export { upsertStorePrice, type UpsertPriceInput } from "./prices.js";
+export {
+  bulkResolveProducts,
+  bulkUpsertListings,
+  bulkUpsertStorePrices,
+  type BatchProductInput,
+  type BatchListingInput,
+  type BatchPriceInput,
+} from "./batchWrite.js";
 export { upsertPromotion, type UpsertPromoInput } from "./promotions.js";
 export { checkCatalogIntegrity, type CatalogIntegrityReport } from "./integrity.js";
 export {
