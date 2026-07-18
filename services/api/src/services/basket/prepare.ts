@@ -1,3 +1,4 @@
+import { countNearbyPricedStores } from "./loadPricingData.js";
 import { resolveBasketLines } from "./optimize.js";
 import type {
   BasketCandidate,
@@ -9,7 +10,7 @@ import type {
   ResolvedItem,
 } from "./types.js";
 
-export const DEFAULT_PREPARE_OPTIONS_LIMIT = 5;
+export const DEFAULT_PREPARE_OPTIONS_LIMIT = 3;
 
 export function buildPrepareAssumptions(
   inputItems: BasketItemInput[],
@@ -69,12 +70,15 @@ function serializePrepareItems(
 
 /**
  * Confirmation questions for needs_confirmation lines. Exported so optimize_basket
- * builds questions with the exact same shape prepare_basket does.
+ * builds questions with the exact same shape prepare_basket does. `nearbyPricedStores`
+ * carries the REAL per-option count of location-scoped stores that price the product
+ * (missing id → 0); callers that haven't measured availability pass an empty map.
  */
 export function buildPrepareQuestions(
   inputItems: BasketItemInput[],
   items: BasketItemStatus[],
   optionsLimit: number,
+  nearbyPricedStores: Map<string, number> = new Map(),
 ): BasketPrepareQuestion[] {
   return items.flatMap((item) => {
     if (item.resolutionStatus !== "needs_confirmation") return [];
@@ -89,26 +93,60 @@ export function buildPrepareQuestions(
         reason: "This line has multiple or insufficiently strong product matches.",
         required: true,
         options: selectPrepareCandidateShortlist(item.candidates, optionsLimit).map(
-          (candidate) => ({
-            productId: candidate.productId,
-            name: candidate.name,
-            sizeQty: candidate.sizeQty,
-            sizeUnit: candidate.sizeUnit,
-            hasLocalPrice: candidate.hasLocalPrice,
-          }),
+          (candidate) => {
+            const priced = nearbyPricedStores.get(candidate.productId) ?? 0;
+            return {
+              productId: candidate.productId,
+              name: candidate.name,
+              sizeQty: candidate.sizeQty,
+              sizeUnit: candidate.sizeUnit,
+              nearbyPricedStores: priced,
+              hasLocalPrice: priced > 0,
+            };
+          },
         ),
       },
     ];
   });
 }
 
+/**
+ * Option product ids that will be surfaced as question options, for measuring
+ * real nearby availability with a single aggregate. Mirrors the shortlist the
+ * questions themselves use so counts line up with what's shown.
+ */
+function collectQuestionOptionProductIds(
+  items: BasketItemStatus[],
+  optionsLimit: number,
+): string[] {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (item.resolutionStatus !== "needs_confirmation") continue;
+    for (const candidate of selectPrepareCandidateShortlist(item.candidates, optionsLimit)) {
+      ids.add(candidate.productId);
+    }
+  }
+  return [...ids];
+}
+
 export async function prepareBasket(input: BasketPrepareInput): Promise<BasketPrepareResult> {
-  const { resolvedItems, itemStatuses, completeness, location } = await resolveBasketLines(input);
+  const { resolvedItems, itemStatuses, completeness, storeIds, location } =
+    await resolveBasketLines(input);
   const assumptions = buildPrepareAssumptions(input.items, resolvedItems);
+
+  // Real availability per option: one aggregate over the option product ids
+  // scoped to the location's stores. Replaces the fabricated hasLocalPrice flag.
+  const optionProductIds = collectQuestionOptionProductIds(
+    itemStatuses,
+    DEFAULT_PREPARE_OPTIONS_LIMIT,
+  );
+  const nearbyPricedStores = await countNearbyPricedStores(optionProductIds, storeIds);
+
   const questions = buildPrepareQuestions(
     input.items,
     itemStatuses,
     DEFAULT_PREPARE_OPTIONS_LIMIT,
+    nearbyPricedStores,
   );
 
   return {

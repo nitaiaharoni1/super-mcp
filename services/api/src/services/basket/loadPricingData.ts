@@ -50,3 +50,30 @@ export async function loadBasketPricingData(
 
   return { listingByChainAndProduct, priceByListingAndStore, promoMap };
 }
+
+/**
+ * How many distinct location-scoped stores carry a positive price for each of the
+ * given product ids. One aggregate over all ids (not per product) so a prepared
+ * basket can report REAL nearby availability per option instead of a fabricated
+ * flag. Returns a Map keyed by product id; ids with no priced store are absent.
+ */
+export async function countNearbyPricedStores(
+  productIds: string[],
+  storeIds: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (productIds.length === 0 || storeIds.length === 0) return counts;
+  const res = await query<{ product_id: string; priced_stores: string | number }>(
+    `SELECT l.product_id, count(DISTINCT sp.store_id) AS priced_stores
+     FROM listing l JOIN store_price sp ON sp.listing_id = l.id
+     WHERE l.product_id = ANY($1::uuid[])
+       AND sp.store_id = ANY($2::uuid[])
+       AND sp.price > 0
+     GROUP BY l.product_id`,
+    [productIds, storeIds],
+  );
+  for (const row of res.rows) {
+    counts.set(row.product_id, Number(row.priced_stores));
+  }
+  return counts;
+}

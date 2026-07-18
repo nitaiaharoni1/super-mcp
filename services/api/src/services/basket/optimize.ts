@@ -179,9 +179,21 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
 
   const questions = buildPrepareQuestions(input.items, itemStatuses, DEFAULT_PREPARE_OPTIONS_LIMIT);
 
+  // Payload slimming: unless verbose, drop per-store line detail for every store
+  // except the recommended ones. missingItems is kept everywhere (small, needed
+  // for coverage reasoning).
+  const recommendedIds = new Set(
+    [recommendations.cheapest?.storeId, recommendations.bestNearby?.storeId].filter(
+      (id): id is string => Boolean(id),
+    ),
+  );
+  const stores = (input.verbose ?? false)
+    ? trimmed
+    : trimmed.map((s) => (recommendedIds.has(s.storeId) ? s : { ...s, lines: [] }));
+
   return {
     items: itemStatuses,
-    stores: trimmed,
+    stores,
     storesCompared: storeResults.length,
     storesTruncated: storeResults.length > trimmed.length,
     cheapest,

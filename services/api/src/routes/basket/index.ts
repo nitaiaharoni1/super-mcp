@@ -42,6 +42,7 @@ export async function registerBasketRoutes(app: FastifyInstance): Promise<void> 
         includeClub: body.include_club,
         storesLimit: body.stores_limit,
         distancePenaltyPerKm: body.distance_penalty_per_km,
+        verbose: body.verbose,
       });
     }),
   );

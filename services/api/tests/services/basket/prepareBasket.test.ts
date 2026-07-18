@@ -4,6 +4,8 @@ import type { ResolvedItem } from "../../../src/services/basket/types.js";
 const resolveItems = vi.fn();
 const listStores = vi.fn();
 const loadBasketPricingData = vi.fn();
+const countNearbyPricedStores = vi.fn();
+const dbQuery = vi.fn();
 
 vi.mock("../../../src/services/basket/resolve.js", () => ({
   resolveItems: (...args: unknown[]) => resolveItems(...args),
@@ -15,6 +17,7 @@ vi.mock("../../../src/services/stores/index.js", () => ({
 
 vi.mock("../../../src/services/basket/loadPricingData.js", () => ({
   loadBasketPricingData: (...args: unknown[]) => loadBasketPricingData(...args),
+  countNearbyPricedStores: (...args: unknown[]) => countNearbyPricedStores(...args),
 }));
 
 vi.mock("../../../src/services/search/ontology.js", () => ({
@@ -92,6 +95,8 @@ function makeResolvedItem(
 describe("prepareBasket", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: no option product is priced anywhere (real nearbyPricedStores = 0).
+    countNearbyPricedStores.mockResolvedValue(new Map<string, number>());
     listStores.mockResolvedValue([
       {
         id: "11111111-1111-4111-8111-111111111111",
@@ -109,11 +114,15 @@ describe("prepareBasket", () => {
     ]);
   });
 
-  it("returns resolved items and completeness without loading prices", async () => {
+  it("returns resolved items and completeness without loading basket prices", async () => {
     resolveItems.mockResolvedValue([
       makeResolvedItem(0, { resolved: true, name: "Coca-Cola 1.5L", resolvedBy: "query" }),
       makeResolvedItem(1, { resolved: false }),
     ]);
+    // The needs-confirmation line's single option is priced at 4 nearby stores.
+    countNearbyPricedStores.mockResolvedValue(
+      new Map<string, number>([["00000000-0000-4000-9000-000000000001", 4]]),
+    );
 
     const result = await prepareBasket({
       items: [
@@ -124,6 +133,13 @@ describe("prepareBasket", () => {
     });
 
     expect(loadBasketPricingData).not.toHaveBeenCalled();
+    // Availability comes from one aggregate over the option product ids scoped to
+    // the location's stores, not a fabricated flag.
+    expect(countNearbyPricedStores).toHaveBeenCalledOnce();
+    expect(countNearbyPricedStores).toHaveBeenCalledWith(
+      ["00000000-0000-4000-9000-000000000001"],
+      ["11111111-1111-4111-8111-111111111111"],
+    );
     expect(listStores).toHaveBeenCalledOnce();
     expect(resolveItems).toHaveBeenCalledOnce();
     // Resolved storeIds are the sole search location predicate (no city re-check).
@@ -154,6 +170,7 @@ describe("prepareBasket", () => {
             name: "Candidate 0",
             sizeQty: 1,
             sizeUnit: "unit",
+            nearbyPricedStores: 4,
             hasLocalPrice: true,
           },
         ],
@@ -187,24 +204,21 @@ describe("prepareBasket", () => {
       "Candidate 7",
       "Candidate 8",
     ]);
-    expect(result.questions[0]?.options).toHaveLength(5);
-    expect(result.items[0]?.candidates).toHaveLength(5);
+    expect(result.questions[0]?.options).toHaveLength(3);
+    expect(result.items[0]?.candidates).toHaveLength(3);
     expect(result.items[1]?.candidates).toHaveLength(0);
     // Local-priced candidates are preferred into the capped shortlist.
     expect(result.questions[0]?.options.map((o) => o.name)).toEqual([
       "Candidate 0",
       "Candidate 2",
       "Candidate 4",
-      "Candidate 6",
-      "Candidate 8",
     ]);
     expect(result.items[0]?.candidates.map((c) => c.name)).toEqual([
       "Candidate 0",
       "Candidate 2",
       "Candidate 4",
-      "Candidate 6",
-      "Candidate 8",
     ]);
+    expect(JSON.stringify(result)).not.toContain("Candidate 6");
     expect(JSON.stringify(result)).not.toContain("Candidate 7");
   });
 
@@ -261,15 +275,11 @@ describe("prepareBasket", () => {
       "שקית קרח",
       "קוביות קרח",
       "קרח כתוש",
-      "מכונת קרח ביתית",
-      "קוביות קרח לוויסקי",
     ]);
     expect(result.items[0]?.candidates.map((c) => c.name)).toEqual([
       "שקית קרח",
       "קוביות קרח",
       "קרח כתוש",
-      "מכונת קרח ביתית",
-      "קוביות קרח לוויסקי",
     ]);
     expect(result.questions[0]?.options.every((o) => typeof o.hasLocalPrice === "boolean")).toBe(
       true,
@@ -316,7 +326,6 @@ describe("prepareBasket", () => {
       "קוקה קולה 1.5 ליטר",
       "RC קולה",
       "סוכריות גומי בטעם קולה",
-      "קולה דיאט",
     ]);
   });
 
@@ -334,6 +343,34 @@ describe("prepareBasket", () => {
     expect(result.assumptions).toEqual([]);
     expect(result.questions).toHaveLength(1);
     expect(result.questions[0]?.required).toBe(true);
+  });
+
+  it("caps question options at 3 and carries real numeric nearbyPricedStores", async () => {
+    const ambiguous = makeResolvedItem(0, { candidateCount: 9 });
+    resolveItems.mockResolvedValue([ambiguous]);
+    // Two of the option products are priced nearby; the rest are unpriced.
+    countNearbyPricedStores.mockResolvedValue(
+      new Map<string, number>([
+        ["00000000-0000-4000-9000-000000000000", 5],
+        ["00000000-0000-4000-9002-000000000000", 2],
+      ]),
+    );
+
+    const result = await prepareBasket({
+      items: [{ query: "generic ambiguous item", qty: 1 }],
+      city: "Herzliya",
+    });
+
+    for (const q of result.questions) {
+      expect(q.options.length).toBeLessThanOrEqual(3);
+      for (const o of q.options) {
+        expect(typeof o.nearbyPricedStores).toBe("number");
+        expect(o.hasLocalPrice).toBe(o.nearbyPricedStores > 0);
+      }
+    }
+    const byId = new Map(result.questions[0]!.options.map((o) => [o.productId, o]));
+    expect(byId.get("00000000-0000-4000-9000-000000000000")?.nearbyPricedStores).toBe(5);
+    expect(byId.get("00000000-0000-4000-9000-000000000000")?.hasLocalPrice).toBe(true);
   });
 
   it("rejects empty items", async () => {

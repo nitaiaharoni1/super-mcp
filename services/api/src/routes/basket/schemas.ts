@@ -42,4 +42,5 @@ export const optimizeBasketBodySchema = z.object({
   include_club: z.boolean().optional().default(true),
   stores_limit: z.coerce.number().int().min(0).max(500).optional(),
   distance_penalty_per_km: z.coerce.number().min(0).max(100).optional(),
+  verbose: z.coerce.boolean().optional(),
 });

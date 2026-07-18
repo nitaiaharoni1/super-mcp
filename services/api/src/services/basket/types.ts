@@ -32,6 +32,12 @@ export interface BasketOptimizeInput extends BasketLocationInput {
   storesLimit?: number;
   /** Shekels of "cost" per km when ranking the bestNearby recommendation (default 3). */
   distancePenaltyPerKm?: number;
+  /**
+   * When false (default), per-store `lines` are dropped from every store except
+   * the recommended ones (recommendations.cheapest/bestNearby) to keep the
+   * response small; `missingItems` is always kept. Set true for full detail.
+   */
+  verbose?: boolean;
 }
 
 export type ResolvedBy = "product_id" | "gtin" | "query" | "unresolved";
@@ -213,6 +219,9 @@ export interface BasketPrepareQuestionOption {
   name: string;
   sizeQty: number | null;
   sizeUnit: string | null;
+  /** Distinct location-scoped stores that carry a positive price for this option. */
+  nearbyPricedStores: number;
+  /** Real availability derived from nearbyPricedStores > 0 (never fabricated). */
   hasLocalPrice: boolean;
 }
 

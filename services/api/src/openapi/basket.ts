@@ -77,6 +77,14 @@ export const basketOptimizeRequestSchema = {
       description:
         "Shekels of 'cost' per km when ranking recommendations.bestNearby (default 3). Higher favors closer stores when coverage ties.",
     },
+    verbose: {
+      type: "boolean",
+      default: false,
+      description:
+        "When false (default), per-store `lines` are omitted for every store except the recommended ones " +
+        "(recommendations.cheapest/bestNearby) to keep the response small; `missingItems` is always kept. " +
+        "Set true for full per-store line detail.",
+    },
   },
 };
 
@@ -246,6 +254,9 @@ export const basketOptimizeResponseSchema = {
     },
     stores: {
       type: "array",
+      description:
+        "Per-store breakdowns. Unless verbose=true, `lines` is empty for every store except the recommended " +
+        "ones (recommendations.cheapest/bestNearby) to keep the response small; `missingItems` is always present.",
       items: {
         type: "object",
         properties: {
@@ -260,7 +271,12 @@ export const basketOptimizeResponseSchema = {
           total: { type: "number" },
           itemsFound: { type: "integer" },
           itemsRequested: { type: "integer" },
-          lines: { type: "array", items: basketLineSchema },
+          lines: {
+            type: "array",
+            description:
+              "Priced lines for this store. Empty for non-recommended stores unless verbose=true.",
+            items: basketLineSchema,
+          },
           missingItems: { type: "array", items: basketMissingItemSchema },
         },
       },
@@ -306,7 +322,7 @@ export const basketOptimizeResponseSchema = {
           required: { type: "boolean" },
           options: {
             type: "array",
-            maxItems: 5,
+            maxItems: 3,
             items: {
               type: "object",
               properties: {
@@ -314,7 +330,15 @@ export const basketOptimizeResponseSchema = {
                 name: { type: "string" },
                 sizeQty: { type: "number", nullable: true },
                 sizeUnit: { type: "string", nullable: true },
-                hasLocalPrice: { type: "boolean" },
+                nearbyPricedStores: {
+                  type: "integer",
+                  description:
+                    "Real count of location-scoped stores that carry a positive price for this option.",
+                },
+                hasLocalPrice: {
+                  type: "boolean",
+                  description: "True when nearbyPricedStores > 0 (derived from the real count).",
+                },
               },
             },
           },
@@ -349,7 +373,7 @@ export const basketPrepareResponseSchema = {
           required: { type: "boolean" },
           options: {
             type: "array",
-            maxItems: 5,
+            maxItems: 3,
             items: {
               type: "object",
               properties: {
@@ -357,7 +381,15 @@ export const basketPrepareResponseSchema = {
                 name: { type: "string" },
                 sizeQty: { type: "number", nullable: true },
                 sizeUnit: { type: "string", nullable: true },
-                hasLocalPrice: { type: "boolean" },
+                nearbyPricedStores: {
+                  type: "integer",
+                  description:
+                    "Real count of location-scoped stores that carry a positive price for this option.",
+                },
+                hasLocalPrice: {
+                  type: "boolean",
+                  description: "True when nearbyPricedStores > 0 (derived from the real count).",
+                },
               },
             },
           },
@@ -401,8 +433,9 @@ export const basketPaths = {
         "decision as `questions` (same shape as prepare_basket). Prefer pack_qty for packs (qty is a deprecated " +
         "alias; do not supply both); use amount+unit for weighed goods and natural counts. Requires city or near. " +
         "Returns cheapest, multiStore, trimmed store breakdowns, completeness, questions, and location metadata. " +
-        "When completeness.totalsArePartial is true, totals cover only the resolved subset — re-call with " +
-        "product_id answers to the questions to finalize.",
+        "By default (verbose=false) per-store `lines` are returned only for the recommended stores; set verbose=true " +
+        "for full detail on every store. When completeness.totalsArePartial is true, totals cover only the resolved " +
+        "subset — re-call with product_id answers to the questions to finalize.",
       requestBody: {
         required: true,
         content: { "application/json": { schema: basketOptimizeRequestSchema } },

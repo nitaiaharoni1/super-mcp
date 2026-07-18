@@ -150,8 +150,10 @@ export function fallbackCandidate(item: ResolvedItem): BasketCandidate {
     matchedVia: "product",
     sizeQty: null,
     sizeUnit: null,
-    hasPrice: true,
-    hasLocalPrice: true,
+    // Synthesized from a resolved item without a priced shortlist; availability
+    // is unknown, not guaranteed — never fabricate it as true.
+    hasPrice: false,
+    hasLocalPrice: false,
     productClass: null,
   };
 }

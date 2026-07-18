@@ -90,7 +90,9 @@ export function registerBasketTools(server: McpServer): void {
       description:
         "FIRST step for shopping lists: resolve free-text lines to product candidates near city/near " +
         "(default radius). Returns resolutionStatus, safe assumptions, and required questions with at most " +
-        "five compact product/pack options for needs_confirmation lines. Does not load store prices. " +
+        "three compact product/pack options for needs_confirmation lines. Each option carries " +
+        "nearbyPricedStores (real count of location-scoped stores that price it) and hasLocalPrice " +
+        "(nearbyPricedStores > 0). Does not load basket prices. " +
         "After the user answers every required question, call optimize_basket with product_id for confirmed lines.",
       inputSchema: {
         items: basketItemsSchema,
@@ -122,6 +124,8 @@ export function registerBasketTools(server: McpServer): void {
         "bestNearby (most items covered, ties broken by total + distance — the store you'd actually go to), " +
         "multiStore (cheapest-per-item), " +
         `top stores (default 5), and questions. Requires city and/or near (default ${DEFAULT_RADIUS_KM}km). ` +
+        "By default (verbose=false) per-store `lines` are included only for the recommended stores to keep the " +
+        "response small (missingItems is always kept); set verbose=true for full per-store line detail. " +
         "Missing items are listed — never silently dropped. Every priced line carries a `link` to open that " +
         "product on the chain's online store.",
       inputSchema: {
@@ -146,9 +150,24 @@ export function registerBasketTools(server: McpServer): void {
           .describe(
             "Shekels of 'cost' per km when ranking recommendations.bestNearby (default 3). Higher favors closer stores when coverage ties.",
           ),
+        verbose: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default false. When false, per-store `lines` are returned only for the recommended stores (missingItems always kept); set true for full per-store line detail.",
+          ),
       },
     },
-    async ({ items, city, near, radius_km, include_club, stores_limit, distance_penalty_per_km }) => {
+    async ({
+      items,
+      city,
+      near,
+      radius_km,
+      include_club,
+      stores_limit,
+      distance_penalty_per_km,
+      verbose,
+    }) => {
       assertBasketItems(items);
       const geo = toGeo(near);
       return optimizeBasket({
@@ -159,6 +178,7 @@ export function registerBasketTools(server: McpServer): void {
         includeClub: include_club,
         storesLimit: stores_limit,
         distancePenaltyPerKm: distance_penalty_per_km,
+        verbose,
       });
     },
   );

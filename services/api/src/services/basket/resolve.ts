@@ -128,8 +128,10 @@ async function resolveDirectItem(
           matchedVia: "product",
           sizeQty: row.size_qty,
           sizeUnit: row.size_unit,
-          hasPrice: true,
-          hasLocalPrice: true,
+          // Direct product_id resolution hasn't checked local price yet; do not
+          // fabricate availability.
+          hasPrice: false,
+          hasLocalPrice: false,
           productClass: null,
         },
       ],
