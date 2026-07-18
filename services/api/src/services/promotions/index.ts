@@ -1,6 +1,7 @@
 export {
   getActivePromotionsForListings,
-  pickPromoForStore,
+  pickBestPromoForStore,
+  type PickedPromo,
   type PromoCandidate,
 } from "./activePromotions.js";
 export {

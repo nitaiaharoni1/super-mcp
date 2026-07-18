@@ -1,8 +1,8 @@
 import { query } from "@super-mcp/db";
-import { applyPromoToUnitPrice, cityMatchKeys, displayCity } from "@super-mcp/shared";
+import { cityMatchKeys, displayCity } from "@super-mcp/shared";
 import { geoBoundingBoxSql, haversineKmSql } from "../../lib/geo.js";
 import { resolveRadiusKm } from "../../lib/defaults.js";
-import { getActivePromotionsForListings, pickPromoForStore } from "../promotions/index.js";
+import { getActivePromotionsForListings, pickBestPromoForStore } from "../promotions/index.js";
 import { buildProductLink } from "../productLinks/index.js";
 import type {
   GetProductPricesParams,
@@ -79,19 +79,15 @@ export async function getProductPrices(
 
   const mapped = res.rows.map((r) => {
     const listPrice = Number(r.price);
-    const promo = pickPromoForStore(promoMap.get(r.listing_id), r.store_id, r.chain_id);
+    const promo = pickBestPromoForStore(promoMap.get(r.listing_id), r.store_id, r.chain_id, listPrice, 1);
     let effectivePrice = listPrice;
     let promoApplied = false;
     let promoDescription: string | null = null;
 
     if (promo) {
-      const applied = applyPromoToUnitPrice(listPrice, 1, promo.mechanic);
-      // Never let a misparsed mechanic raise the price above the unpromoted total.
-      if (applied.applied && applied.effectiveTotal < listPrice * 1) {
-        effectivePrice = Math.round(applied.effectiveTotal * 100) / 100;
-        promoApplied = true;
-        promoDescription = promo.description;
-      }
+      effectivePrice = Math.round(promo.effectiveTotal * 100) / 100;
+      promoApplied = true;
+      promoDescription = promo.candidate.description;
     }
 
     return {

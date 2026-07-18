@@ -1,5 +1,5 @@
 import { query, sqlNormalizeGtin } from "@super-mcp/db";
-import type { PromoMechanicType, RawPromoRecord } from "@super-mcp/shared";
+import { applyPromoToUnitPrice, type PromoMechanicType, type RawPromoRecord } from "@super-mcp/shared";
 
 export interface PromoCandidate {
   listingId: string;
@@ -46,7 +46,11 @@ export async function getActivePromotionsForListings(
        )
      WHERE l.id = ANY($1::uuid[])
        AND pr.start_ts <= now() AND pr.end_ts >= now()
-       AND ($2::boolean IS TRUE OR pr.club_only = false)`,
+       AND ($2::boolean IS TRUE OR pr.club_only = false)
+     -- Stable ordering so map insertion order is deterministic regardless of
+     -- Postgres row order; pickBestPromoForStore still picks by price, this is
+     -- only a defensive tie-break for equal-effective promos.
+     ORDER BY pr.promo_code, pr.store_id NULLS LAST`,
     [listingIds, includeClub],
   );
 
@@ -63,21 +67,56 @@ export async function getActivePromotionsForListings(
       },
     };
     const list = map.get(row.listing_id) ?? [];
-    list.push(candidate);
+    // The item_code join can fan the same promo onto a listing multiple times;
+    // collapse to one candidate per (promo_code, store_id).
+    if (!list.some((c) => c.promoCode === candidate.promoCode && c.storeId === candidate.storeId)) {
+      list.push(candidate);
+    }
     map.set(row.listing_id, list);
   }
   return map;
 }
 
-/** Prefers a store-specific promo over a chain-wide one (store_id IS NULL) for the same listing. */
-export function pickPromoForStore(
+/** A promo choice with its computed effective total for a given list price and quantity. */
+export interface PickedPromo {
+  candidate: PromoCandidate;
+  effectiveTotal: number;
+}
+
+/**
+ * Picks the promo that yields the LOWEST effective total for this store — what a
+ * shopper actually pays at checkout — instead of the first store-specific row in
+ * arbitrary DB order. Eligible = store-specific for THIS store, or chain-wide
+ * (store_id IS NULL) for this chain. Only promos that actually apply and reduce
+ * the price below list are considered. Deterministic: ties break by promo_code asc.
+ */
+export function pickBestPromoForStore(
   candidates: PromoCandidate[] | undefined,
   storeId: string,
   chainId: string,
-): PromoCandidate | null {
+  listPrice: number,
+  qty: number,
+): PickedPromo | null {
   if (!candidates || candidates.length === 0) return null;
-  const storeSpecific = candidates.find((c) => c.storeId === storeId);
-  if (storeSpecific) return storeSpecific;
-  const chainWide = candidates.find((c) => c.storeId === null && c.chainId === chainId);
-  return chainWide ?? null;
+  const baseline = listPrice * qty;
+  let best: PickedPromo | null = null;
+
+  for (const candidate of candidates) {
+    const eligible =
+      candidate.storeId === storeId || (candidate.storeId === null && candidate.chainId === chainId);
+    if (!eligible) continue;
+
+    const applied = applyPromoToUnitPrice(listPrice, qty, candidate.mechanic);
+    if (!applied.applied || applied.effectiveTotal >= baseline) continue;
+
+    if (
+      best === null ||
+      applied.effectiveTotal < best.effectiveTotal ||
+      (applied.effectiveTotal === best.effectiveTotal &&
+        candidate.promoCode < best.candidate.promoCode)
+    ) {
+      best = { candidate, effectiveTotal: applied.effectiveTotal };
+    }
+  }
+  return best;
 }

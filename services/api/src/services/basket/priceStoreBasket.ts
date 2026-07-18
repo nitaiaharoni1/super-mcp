@@ -1,6 +1,6 @@
-import { applyPromoToUnitPrice, resolvePurchaseQty } from "@super-mcp/shared";
+import { resolvePurchaseQty } from "@super-mcp/shared";
 import { listStores } from "../stores/index.js";
-import { getActivePromotionsForListings, pickPromoForStore } from "../promotions/index.js";
+import { getActivePromotionsForListings, pickBestPromoForStore } from "../promotions/index.js";
 import { buildProductLink } from "../productLinks/index.js";
 import {
   fallbackCandidate,
@@ -103,18 +103,21 @@ export function priceStoreBasket(
 
     const listPrice = Number(matched.priceRow.price);
     if (storeCurrency === null) storeCurrency = matched.priceRow.currency;
-    const promo = pickPromoForStore(promoMap.get(matched.listing.id), store.id, store.chainId);
+    const promo = pickBestPromoForStore(
+      promoMap.get(matched.listing.id),
+      store.id,
+      store.chainId,
+      listPrice,
+      matched.qty,
+    );
     let lineTotal = Math.round(listPrice * matched.qty * 100) / 100;
     let promoApplied = false;
     let promoDescription: string | null = null;
 
     if (promo) {
-      const applied = applyPromoToUnitPrice(listPrice, matched.qty, promo.mechanic);
-      if (applied.applied && applied.effectiveTotal < listPrice * matched.qty) {
-        lineTotal = Math.round(applied.effectiveTotal * 100) / 100;
-        promoApplied = true;
-        promoDescription = promo.description;
-      }
+      lineTotal = Math.round(promo.effectiveTotal * 100) / 100;
+      promoApplied = true;
+      promoDescription = promo.candidate.description;
     }
 
     const substituted = isLineSubstituted(item, matched.candidate.productId);
