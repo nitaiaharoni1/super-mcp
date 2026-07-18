@@ -44,6 +44,7 @@ function makeCandidate(
     sizeUnit: "unit",
     hasPrice: true,
     hasLocalPrice: opts.hasLocalPrice ?? candidateIndex % 2 === 0,
+    productClass: null,
     ...(opts.intentTier !== undefined ? { intentTier: opts.intentTier } : {}),
   };
 }

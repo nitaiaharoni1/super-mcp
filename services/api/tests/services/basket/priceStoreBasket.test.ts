@@ -44,6 +44,7 @@ describe("priceStoreBasket", () => {
           sizeUnit: null,
           hasPrice: false,
           hasLocalPrice: false,
+          productClass: null,
         },
         {
           productId: "plausible-but-unapproved",
@@ -54,6 +55,7 @@ describe("priceStoreBasket", () => {
           sizeUnit: null,
           hasPrice: true,
           hasLocalPrice: true,
+          productClass: null,
         },
       ],
       primaryProductId: "safe",
@@ -126,6 +128,7 @@ describe("priceStoreBasket", () => {
           sizeUnit: null,
           hasPrice: true,
           hasLocalPrice: true,
+          productClass: null,
         },
       ],
       primaryProductId: "prod",

@@ -130,6 +130,7 @@ async function resolveDirectItem(
           sizeUnit: row.size_unit,
           hasPrice: true,
           hasLocalPrice: true,
+          productClass: null,
         },
       ],
     };

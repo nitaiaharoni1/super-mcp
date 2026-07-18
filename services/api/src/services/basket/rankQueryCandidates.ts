@@ -139,6 +139,19 @@ export function rankQueryCandidates(
     vectorDistance: hit.vectorDistance ?? null,
     lexicalScore: hit.lexicalScore ?? null,
   });
+  // Same product_class the semantic gate reads (profile.attributes.product_class);
+  // sourcing it here keeps equivalence classes aligned with the gate's notion of class.
+  const productClassFor = (hit: SearchProductHit): string | null => {
+    if (!ontology) return null;
+    const profile = mergeProfileWithCurrentOntology(
+      hit.name,
+      profiles.get(hit.id),
+      ontology,
+      mergedProfileCache,
+      hit.id,
+    );
+    return profile.attributes?.product_class ?? null;
+  };
 
   let ranked: Array<SearchProductHit & { intentTier?: 1 | 2 | 3 | 0 }>;
   const gateById = new Map<
@@ -324,7 +337,9 @@ export function rankQueryCandidates(
     resolvedBy: decision.autoPrice ? "query" : "unresolved",
     confidence: decision.confidence,
     lowConfidence: decision.lowConfidence,
-    candidates: shortlist.map(hitToCandidate),
+    candidates: shortlist.map((hit) =>
+      hitToCandidate(hit, productClassFor(hit)),
+    ),
     primaryProductId: lexicalPrimary?.id ?? chosen.id,
     primaryName: lexicalPrimary?.name ?? chosen.name,
     substitution,

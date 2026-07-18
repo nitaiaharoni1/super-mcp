@@ -36,6 +36,7 @@ function makeCandidate(productId: string, name: string, score = 0.5) {
     sizeUnit: null,
     hasPrice: true,
     hasLocalPrice: true,
+    productClass: null,
   };
 }
 

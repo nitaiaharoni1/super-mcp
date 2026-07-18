@@ -45,6 +45,8 @@ export interface BasketCandidate {
   sizeUnit: string | null;
   hasPrice: boolean;
   hasLocalPrice: boolean;
+  /** Semantic product-class of the candidate (from its profile), or null when unclassified. */
+  productClass: string | null;
   intentTier?: 1 | 2 | 3 | 0;
 }
 

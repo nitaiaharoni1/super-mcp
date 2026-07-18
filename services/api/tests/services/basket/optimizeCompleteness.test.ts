@@ -47,6 +47,7 @@ function makeResolvedItem(index: number, resolved: boolean): ResolvedItem {
         sizeUnit: null,
         hasPrice: true,
         hasLocalPrice: true,
+        productClass: null,
       },
     ],
     primaryProductId: null,

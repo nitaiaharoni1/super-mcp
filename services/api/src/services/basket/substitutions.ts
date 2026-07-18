@@ -129,5 +129,6 @@ export function fallbackCandidate(item: ResolvedItem): BasketCandidate {
     sizeUnit: null,
     hasPrice: true,
     hasLocalPrice: true,
+    productClass: null,
   };
 }

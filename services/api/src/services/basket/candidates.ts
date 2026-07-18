@@ -4,6 +4,7 @@ import type { BasketCandidate } from "./types.js";
 
 export function hitToCandidate(
   hit: SearchProductHit & { intentTier?: 1 | 2 | 3 | 0 },
+  productClass: string | null = null,
 ): BasketCandidate {
   return {
     productId: hit.id,
@@ -14,6 +15,7 @@ export function hitToCandidate(
     sizeUnit: hit.sizeUnit,
     hasPrice: hit.hasPrice,
     hasLocalPrice: hit.hasLocalPrice ?? hit.hasPrice,
+    productClass,
     intentTier: hit.intentTier,
   };
 }
