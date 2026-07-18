@@ -187,12 +187,20 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
       (id): id is string => Boolean(id),
     ),
   );
-  const stores = (input.verbose ?? false)
+  const verbose = input.verbose ?? false;
+  const stores = verbose
     ? trimmed
     : trimmed.map((s) => (recommendedIds.has(s.storeId) ? s : { ...s, lines: [] }));
 
+  // Non-verbose: also drop per-item candidate lists. They are the largest single
+  // contributor to the payload, and they're redundant here — needs_confirmation
+  // lines already carry their option list in `questions`, and resolved lines
+  // don't need a candidate list. Applied AFTER questions/substitutions consumed
+  // the candidates above. multiStore.lines are kept (they ARE the recommendation).
+  const items = verbose ? itemStatuses : itemStatuses.map((s) => ({ ...s, candidates: [] }));
+
   return {
-    items: itemStatuses,
+    items,
     stores,
     storesCompared: storeResults.length,
     storesTruncated: storeResults.length > trimmed.length,

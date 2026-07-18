@@ -171,6 +171,18 @@ describe("optimizeBasket verbose flag", () => {
     for (const s of nonRecommended) expect(s.lines).toHaveLength(0);
   });
 
+  it("non-verbose strips per-item candidates (questions carry the option list)", async () => {
+    const result = await optimizeBasket(optimizeInput(false));
+    for (const item of result.items) {
+      expect(item.candidates).toHaveLength(0);
+    }
+  });
+
+  it("verbose keeps per-item candidates", async () => {
+    const result = await optimizeBasket(optimizeInput(true));
+    expect(result.items.some((item) => item.candidates.length > 0)).toBe(true);
+  });
+
   it("non-verbose multi-line, 12-store payload stays under the 15KB budget", async () => {
     // The same basket verbose is the ~50KB-class response non-verbose slims down.
     const verboseSize = JSON.stringify(await optimizeBasket(optimizeInput(true))).length;
