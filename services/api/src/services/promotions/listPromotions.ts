@@ -73,13 +73,16 @@ export async function listPromotions(params: ListPromotionsParams): Promise<Prom
      FROM promotion pr
      JOIN chain c ON c.id = pr.chain_id
      LEFT JOIN promotion_item pi ON pi.promotion_id = pr.id
-     WHERE ($1::uuid IS NULL OR pr.store_id = $1)
+     WHERE ($1::uuid IS NULL
+        OR pr.store_id = $1
+        OR (pr.store_id IS NULL
+            AND pr.chain_id = (SELECT chain_id FROM store WHERE id = $1)))
        AND (
          $2::uuid IS NULL OR EXISTS (
            SELECT 1 FROM promotion_item pi2
            JOIN listing l2 ON l2.chain_id = pr.chain_id
              AND l2.item_code <> ''
-             AND (l2.item_code = pi2.item_code OR l2.item_code = regexp_replace(pi2.item_code, '\D', '', 'g'))
+             AND (l2.item_code = pi2.item_code OR l2.item_code = regexp_replace(pi2.item_code, '\\D', '', 'g'))
            WHERE pi2.promotion_id = pr.id AND l2.product_id = $2
          )
        )
