@@ -2,6 +2,12 @@ import { Client } from "basic-ftp";
 
 export type FtpConnectFn = (client: Client) => Promise<void>;
 
+interface Waiter {
+  resolve: (client: Client) => void;
+  reject: (err: Error) => void;
+  timer: NodeJS.Timeout;
+}
+
 /**
  * Pool of basic-ftp clients. One download at a time per connection
  * (FTP data channels are not safely multiplexed on a single login).
@@ -10,7 +16,7 @@ export class FtpPool {
   private idle: Client[] = [];
   private live = 0;
   private closed = false;
-  private waiters: Array<(client: Client) => void> = [];
+  private waiters: Waiter[] = [];
 
   constructor(
     private readonly maxSize: number,
@@ -61,8 +67,13 @@ export class FtpPool {
       }
     }
 
-    return new Promise<Client>((resolve) => {
-      this.waiters.push(resolve);
+    return new Promise<Client>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const i = this.waiters.findIndex((w) => w.timer === timer);
+        if (i >= 0) this.waiters.splice(i, 1);
+        reject(new Error("ftp pool acquire timeout"));
+      }, this.timeoutMs);
+      this.waiters.push({ resolve, reject, timer });
     });
   }
 
@@ -79,7 +90,8 @@ export class FtpPool {
     }
     const waiter = this.waiters.shift();
     if (waiter) {
-      waiter(client);
+      clearTimeout(waiter.timer);
+      waiter.resolve(client);
       return;
     }
     this.idle.push(client);
@@ -91,14 +103,19 @@ export class FtpPool {
     if (!this.waiters.length || this.live >= this.maxSize) return;
     const waiter = this.waiters.shift();
     if (!waiter) return;
-    void this.acquire().then(waiter, (err) => {
-      console.warn(
-        JSON.stringify({
-          event: "ftp_pool_acquire_failed",
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    });
+    clearTimeout(waiter.timer);
+    void this.acquire().then(
+      (client) => waiter.resolve(client),
+      (err) => {
+        console.warn(
+          JSON.stringify({
+            event: "ftp_pool_acquire_failed",
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        waiter.reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
   }
 
   close(): void {
@@ -112,6 +129,9 @@ export class FtpPool {
     }
     this.idle = [];
     this.live = 0;
-    this.waiters = [];
+    for (const w of this.waiters.splice(0)) {
+      clearTimeout(w.timer);
+      w.reject(new Error("FtpPool is closed"));
+    }
   }
 }
