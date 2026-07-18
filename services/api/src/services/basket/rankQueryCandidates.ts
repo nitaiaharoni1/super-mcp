@@ -20,7 +20,7 @@ import {
   DEFAULT_CANDIDATE_LIMIT,
   SEMANTIC_CANDIDATE_LIMIT,
 } from "./constants.js";
-import { buildEquivalenceSet } from "./equivalence.js";
+import { buildEquivalenceSet, buildSameNameEquivalents } from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
@@ -417,6 +417,33 @@ export function rankQueryCandidates(
         resolutionStatus: "resolved",
         equivalents,
       };
+    }
+  }
+
+  // Auto-resolved commodity: attach an equivalence set so per-chain pricing can
+  // use each chain's own equivalent SKU. Produce is fragmented into per-chain
+  // non-GTIN product_ids (e.g. 'עגבניות' is 3 single-chain products), so without
+  // this an auto-resolved commodity is locked to one chain and coverage never
+  // improves — the whole point of per-chain pricing. Unlike the needs_confirmation
+  // upgrade above, an auto-resolved line has NO human oversight, and productClass
+  // is coarse ('beverage' lumps every red wine together), so we additionally
+  // require an equivalent to share the primary's normalized name — genuinely
+  // fungible (identical generic produce), never a different wine/brand.
+  if (
+    decision.status === "resolved" &&
+    risk.kind === "commodity" &&
+    base.productId != null &&
+    shortlist[0] != null &&
+    !isVectorOnlyHit(shortlist[0])
+  ) {
+    const primary = candidates.find((c) => c.productId === base.productId) ?? candidates[0]!;
+    const equivalents = buildSameNameEquivalents(
+      primary,
+      candidates,
+      searchConfig?.maxEquivalents ?? 5,
+    );
+    if (equivalents.length >= 2) {
+      return { ...base, equivalents };
     }
   }
 

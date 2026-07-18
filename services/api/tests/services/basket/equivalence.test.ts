@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEquivalenceSet } from "../../../src/services/basket/equivalence.js";
+import { buildEquivalenceSet, buildSameNameEquivalents } from "../../../src/services/basket/equivalence.js";
 import type { BasketCandidate } from "../../../src/services/basket/types.js";
 
 const cand = (over: Partial<BasketCandidate>): BasketCandidate => ({
@@ -53,5 +53,53 @@ describe("buildEquivalenceSet", () => {
       { packTolerance: 0.5, maxEquivalents: 5 },
     );
     expect(set.map((c) => c.name)).toEqual(["עגבניות חממה", "within-tolerance"]);
+  });
+});
+
+describe("buildSameNameEquivalents", () => {
+  const c = (over: Partial<BasketCandidate>): BasketCandidate => ({
+    productId: crypto.randomUUID(),
+    name: "עגבניות",
+    score: 0.9,
+    matchedVia: "product",
+    sizeQty: 1000,
+    sizeUnit: "g",
+    hasPrice: true,
+    hasLocalPrice: true,
+    productClass: "produce",
+    intentTier: null, // fragmented produce SKUs are tier-null yet fungible
+    ...over,
+  });
+
+  it("groups identical-name per-chain SKUs even when intentTier is null", () => {
+    const top = c({});
+    const set = buildSameNameEquivalents(
+      top,
+      [top, c({}), c({}), c({ name: "עגבניות מרוסקות" })], // crushed = different name, excluded
+      5,
+    );
+    expect(set).toHaveLength(3);
+    expect(new Set(set.map((x) => x.name))).toEqual(new Set(["עגבניות"]));
+  });
+
+  it("never groups a different-name product sharing only a coarse class (wine)", () => {
+    const wine = c({ name: "יין אדום אמרונה קורט", productClass: "beverage", sizeUnit: "ml", sizeQty: 750 });
+    const set = buildSameNameEquivalents(
+      wine,
+      [wine, c({ name: "יין אדום מרלו", productClass: "beverage", sizeUnit: "ml", sizeQty: 750 })],
+      5,
+    );
+    expect(set).toEqual([wine]); // no cross-wine substitution
+  });
+
+  it("excludes a same-name SKU with a different unit", () => {
+    const top = c({});
+    const set = buildSameNameEquivalents(top, [top, c({ sizeUnit: "unit" })], 5);
+    expect(set).toHaveLength(1);
+  });
+
+  it("returns only the top pick when it has no product class", () => {
+    const top = c({ productClass: null });
+    expect(buildSameNameEquivalents(top, [top, c({ productClass: null })], 5)).toEqual([top]);
   });
 });
