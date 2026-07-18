@@ -92,6 +92,14 @@ describe("xml parsers", () => {
     expect(prices[1]?.price).toBeCloseTo(32.08);
   });
 
+  it("falls back to the feed's published date (not the ingest clock) when PriceUpdateDate is missing", () => {
+    const xml = `<?xml version="1.0"?><Root><ChainId>7290027600007</ChainId><StoreId>001</StoreId>
+<Items><Item><ItemCode>7290000173199</ItemCode><ItemName>x</ItemName><ItemPrice>5.00</ItemPrice></Item></Items></Root>`;
+    const published = new Date("2026-07-16T03:00:00Z");
+    const prices = parsePricesXml(xml, "7290027600007", "001", published);
+    expect(prices[0]?.ts.toISOString()).toBe(published.toISOString());
+  });
+
   it("parses promos with n_for_price", () => {
     const promos = parsePromosXml(promosXml, "7290058140886", "001");
     expect(promos[0]?.mechanic.type).toBe("n_for_price");

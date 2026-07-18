@@ -9,7 +9,9 @@ import {
 } from "@super-mcp/shared";
 import { decodeFeedBytes, parseFeedXml } from "../../xml/index.js";
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+// This file is at src/sources/fixture/, one level deeper than src/pipeline/,
+// so it needs five `..` to reach the repo root (where data/fixtures lives).
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 interface FixtureEntry {
   kind: FeedFile["kind"];
@@ -78,7 +80,7 @@ export function createFixtureAdapter(): SourceAdapter {
 
     async *parse(blob: RawBlob): AsyncIterable<RawRecord> {
       const xml = decodeFeedBytes(blob.bytes);
-      yield* parseFeedXml(xml, blob.file.kind, blob.file.chainId, blob.file.storeId);
+      yield* parseFeedXml(xml, blob.file.kind, blob.file.chainId, blob.file.storeId, blob.file.publishedAt);
     },
   };
 }

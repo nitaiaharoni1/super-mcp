@@ -6,6 +6,7 @@ export function parsePricesXml(
   xml: string,
   chainId: string,
   storeId: string,
+  fallbackTs?: Date,
 ): RawPriceRecord[] {
   const doc = feedParser.parse(xml);
   const root = doc.Root ?? doc.Items ?? doc;
@@ -38,8 +39,9 @@ export function parsePricesXml(
       unitPrice: num(it.UnitOfMeasurePrice),
       allowDiscount: text(it.AllowDiscount) === "1" || text(it.AllowDiscount).toLowerCase() === "true",
       currency: "ILS",
-      // Missing PriceUpdateDate → ingest clock (true UTC instant), not a fake IL wall time.
-      ts: parseIlDate(text(it.PriceUpdateDate)) ?? new Date(),
+      // Missing PriceUpdateDate → the feed's published date (stable across
+      // re-ingests), else the ingest clock as a last resort.
+      ts: parseIlDate(text(it.PriceUpdateDate)) ?? fallbackTs ?? new Date(),
       raw: it,
     });
   }

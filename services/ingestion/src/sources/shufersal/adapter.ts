@@ -157,7 +157,7 @@ export function createShufersalAdapter(): SourceAdapter {
 
     async *parse(blob: RawBlob): AsyncIterable<RawRecord> {
       const xml = decodeFeedBytes(blob.bytes);
-      yield* parseFeedXml(xml, blob.file.kind, blob.file.chainId, blob.file.storeId);
+      yield* parseFeedXml(xml, blob.file.kind, blob.file.chainId, blob.file.storeId, blob.file.publishedAt);
     },
   };
 }

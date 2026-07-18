@@ -205,7 +205,7 @@ export function createCerberusAdapter(
 
     async *parse(blob: RawBlob): AsyncIterable<RawRecord> {
       const xml = decodeFeedBytes(blob.bytes);
-      const records = parseFeedXml(xml, blob.file.kind, blob.file.chainId, blob.file.storeId);
+      const records = parseFeedXml(xml, blob.file.kind, blob.file.chainId, blob.file.storeId, blob.file.publishedAt);
       for (const r of records) yield r;
     },
   };

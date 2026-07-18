@@ -118,6 +118,7 @@ export function parsePromosXml(
   xml: string,
   chainId: string,
   storeId: string,
+  fallbackTs?: Date,
 ): RawPromoRecord[] {
   const doc = feedParser.parse(xml);
   const root = (doc.Root ?? doc.Promotions ?? doc.Chain ?? doc) as Record<string, unknown>;
@@ -173,7 +174,7 @@ export function parsePromosXml(
       startTs,
       endTs: endTs.getTime() < startTs.getTime() ? PROMO_END_FALLBACK : endTs,
       clubOnly: Boolean(clubId && clubId !== "0"),
-      ts: new Date(),
+      ts: fallbackTs ?? new Date(),
       raw: p,
     });
   }
