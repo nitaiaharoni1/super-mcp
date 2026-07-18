@@ -73,6 +73,11 @@ export async function reapReclassifiedListing(
   client?: PoolClient,
 ): Promise<void> {
   if (currentItemCode === otherItemCode) return;
+  // A GTIN classification flip always involves an 8+ digit key on the other
+  // side (isGtinItem requires it). A short digit key here means the item was
+  // never GTIN-classified — deleting would hit an unrelated internal-code
+  // listing and cascade-wipe its price history.
+  if (otherItemCode.replace(/\D/g, "").length < 8) return;
   const q = client ?? getPool();
   // promotion_item.listing_id references listing(id) with no ON DELETE clause (defaults to
   // RESTRICT), so clear any dangling reference first or the DELETE throws a FK violation.
