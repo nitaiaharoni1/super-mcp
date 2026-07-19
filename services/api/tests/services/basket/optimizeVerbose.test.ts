@@ -115,6 +115,7 @@ describe("optimizeBasket verbose flag", () => {
         zip: null,
         lat: null,
         lng: null,
+        geoSource: null,
         distanceKm: si + 1,
       })),
     );
@@ -135,9 +136,12 @@ describe("optimizeBasket verbose flag", () => {
     const result = await optimizeBasket(optimizeInput(false));
 
     const recommendedIds = new Set(
-      [result.recommendations.cheapest?.storeId, result.recommendations.bestNearby?.storeId].filter(
-        (id): id is string => Boolean(id),
-      ),
+      [
+        result.recommendations.cheapest?.storeId,
+        result.recommendations.bestNearby?.storeId,
+        result.recommendations.bestInStore?.storeId,
+        result.recommendations.bestOrderable?.storeId,
+      ].filter((id): id is string => Boolean(id)),
     );
     expect(recommendedIds.size).toBeGreaterThan(0);
 
@@ -162,9 +166,12 @@ describe("optimizeBasket verbose flag", () => {
   it("defaults to non-verbose (lines stripped on non-recommended stores)", async () => {
     const result = await optimizeBasket(optimizeInput());
     const recommendedIds = new Set(
-      [result.recommendations.cheapest?.storeId, result.recommendations.bestNearby?.storeId].filter(
-        (id): id is string => Boolean(id),
-      ),
+      [
+        result.recommendations.cheapest?.storeId,
+        result.recommendations.bestNearby?.storeId,
+        result.recommendations.bestInStore?.storeId,
+        result.recommendations.bestOrderable?.storeId,
+      ].filter((id): id is string => Boolean(id)),
     );
     const nonRecommended = result.stores.filter((s) => !recommendedIds.has(s.storeId));
     expect(nonRecommended.length).toBeGreaterThan(0);

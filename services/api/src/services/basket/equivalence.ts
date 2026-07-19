@@ -47,6 +47,41 @@ function stem(t0: string): string {
   return t;
 }
 
+// Utensil / container / device / toy nouns. When one of these LEADS a product
+// name, the product IS that thing (a pasta spoon, a water gun, a paper holder, a
+// milk frother, a fruit juicer) — not the commodity the query named. Normalized,
+// unstemmed forms as they appear after tokenization.
+const NON_COMMODITY_LEADERS: ReadonlySet<string> = new Set([
+  // utensils / containers / devices / toys
+  "כף", "כפית", "מזלג", "סכין", "אקדח", "משחק", "אחסונית", "מסחטת", "מסחטה",
+  "מטחנת", "מטחנה", "מועך", "מקציף", "כד", "מסננת", "מכשיר", "מתקן", "סיר",
+  "מחבת", "צלחת", "קולפן", "מברשת", "מגירת", "קנקן", "בקבוקון", "קערת", "כוסון",
+  "כוס", "פלסט",
+  // "derived product OF X" (vinegar/juice/powder/concentrate of X ≠ X)
+  "חומץ", "מיץ", "אבקת", "תרכיז",
+]);
+
+/**
+ * The query's HEAD (first content token) must lead the primary name — appear
+ * within its first two tokens (allowing one leading BRAND / cut descriptor).
+ * Blocks two failure modes: the query word as a trailing MODIFIER ("חלב" →
+ * "בריסטה מקציף חלב", a frother), and a leading utensil/container/device noun
+ * ("פסטה" → "כף פסטה", a pasta spoon; "מים" → "אקדח מים", a water gun). Legit
+ * brand/cut-led names ("תנובה חלב 3%", "סטייק פרגיות עוף") still pass.
+ */
+export function queryHeadAnchored(queryText: string, primaryName: string): boolean {
+  const q = tokenizeNormalized(normalizeEmbedInput(queryText));
+  if (q.length === 0) return true;
+  const head = stem(q[0]!);
+  const nameRaw = tokenizeNormalized(normalizeEmbedInput(primaryName));
+  const first2 = nameRaw.slice(0, 2).map(stem);
+  const idx = first2.indexOf(head);
+  if (idx === -1) return false;
+  // head at position 1 behind a utensil/container/device leader → not the commodity
+  if (idx === 1 && nameRaw[0] && NON_COMMODITY_LEADERS.has(nameRaw[0])) return false;
+  return true;
+}
+
 /**
  * Does every query token appear in the name, tolerant of Hebrew plural/singular?
  * Compares STEMS (final-letter normalized, one plural/feminine suffix stripped),

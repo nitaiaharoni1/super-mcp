@@ -50,6 +50,8 @@ export interface StoreSummary {
   zip: string | null;
   lat: number | null;
   lng: number | null;
+  /** Provenance of lat/lng: address | feed | city_centroid | null. */
+  geoSource: string | null;
   distanceKm: number | null;
 }
 
@@ -64,6 +66,7 @@ interface StoreRow {
   zip: string | null;
   lat: number | null;
   lng: number | null;
+  geo_source: string | null;
   distance_km: number | null;
 }
 
@@ -79,6 +82,7 @@ function mapStore(row: StoreRow): StoreSummary {
     zip: row.zip,
     lat: row.lat,
     lng: row.lng,
+    geoSource: row.geo_source,
     distanceKm: row.distance_km != null ? Number(row.distance_km) : null,
   };
 }
@@ -119,7 +123,7 @@ export async function listStores(params: ListStoresParams): Promise<StoreSummary
 
   const res = await query<StoreRow>(
     `SELECT st.id, st.chain_id, c.name_he AS chain_name, st.store_code, st.name,
-            st.address, st.city, st.zip, st.lat, st.lng, ${distanceSelect}
+            st.address, st.city, st.zip, st.lat, st.lng, st.geo_source, ${distanceSelect}
      FROM store st
      JOIN chain c ON c.id = st.chain_id
      ${whereClause}

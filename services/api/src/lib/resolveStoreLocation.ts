@@ -9,11 +9,23 @@ import { resolveRadiusKm } from "./defaults.js";
 export type StoreLocationScope = "unscoped" | "city" | "near" | "city_near";
 export type StoreLocationPrecision = "none" | "city" | "radius";
 
+/** Degrees — ~1m at Israeli latitudes; used to detect shared city centroids. */
+const COORD_EPSILON = 1e-5;
+
+const CENTROID_WARNING =
+  "Distance ranking suppressed: store coordinates are city-level centroids, not branch addresses.";
+
 export interface StoreLocationMetadata {
   scope: StoreLocationScope;
   precision: StoreLocationPrecision;
   fallbackApplied: boolean;
   warning: string | null;
+  /**
+   * False when a near-scope query only has city_centroid (or identically shared)
+   * coordinates — distance ranking must not treat those as branch addresses.
+   * True when near was not requested, or at least one store has address/feed geo.
+   */
+  distanceReliable: boolean;
   requested: {
     city: string | null;
     near: GeoPoint | null;
@@ -36,12 +48,62 @@ function requestedMetadata(params: ListStoresParams): StoreLocationMetadata {
     precision: params.near ? "radius" : params.city ? "city" : "none",
     fallbackApplied: false,
     warning: null,
+    // Near not requested → distance is irrelevant / reliable by default.
+    distanceReliable: !params.near,
     requested: {
       city: params.city ?? null,
       near: params.near ?? null,
       radiusKm: params.radiusKm ?? null,
     },
   };
+}
+
+function isReliableGeoSource(geoSource: string | null): boolean {
+  return geoSource === "address" || geoSource === "feed";
+}
+
+function isCentroidOrUnknown(geoSource: string | null): boolean {
+  return geoSource === "city_centroid" || geoSource == null;
+}
+
+function coordsMatch(a: StoreSummary, b: StoreSummary): boolean {
+  if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return false;
+  return Math.abs(a.lat - b.lat) <= COORD_EPSILON && Math.abs(a.lng - b.lng) <= COORD_EPSILON;
+}
+
+/**
+ * When near is requested and stores are returned, decide whether distance
+ * ranking is honest and whether to warn about city-level centroids.
+ */
+function applyNearDistanceHonesty(
+  stores: StoreSummary[],
+  location: StoreLocationMetadata,
+): StoreLocationMetadata {
+  if (!location.requested.near) return location;
+
+  const hasReliable = stores.some((s) => isReliableGeoSource(s.geoSource));
+  if (hasReliable) {
+    return { ...location, distanceReliable: true };
+  }
+
+  const withCoords = stores.filter(hasValidStoreCoordinates);
+  const allCityCentroid =
+    withCoords.length > 0 && withCoords.every((s) => s.geoSource === "city_centroid");
+  const allSharedCentroid =
+    withCoords.length > 1 &&
+    withCoords.every((s) => isCentroidOrUnknown(s.geoSource) && coordsMatch(s, withCoords[0]!));
+
+  if (allCityCentroid || allSharedCentroid) {
+    return {
+      ...location,
+      distanceReliable: false,
+      // City-level points aren't branch-radius precision.
+      precision: "city",
+      warning: location.warning ?? CENTROID_WARNING,
+    };
+  }
+
+  return { ...location, distanceReliable: false };
 }
 
 /**
@@ -80,7 +142,9 @@ export async function resolveStoreLocation(
 ): Promise<ResolvedStoreLocation> {
   const stores = await loadStores(params);
   const location = requestedMetadata(params);
-  if (stores.length > 0) return { stores, location };
+  if (stores.length > 0) {
+    return { stores, location: applyNearDistanceHonesty(stores, location) };
+  }
 
   if (params.city && params.near) {
     const cityParams: ListStoresParams = {
@@ -97,6 +161,8 @@ export async function resolveStoreLocation(
           scope: "city",
           precision: "city",
           fallbackApplied: true,
+          // Fell back off near — distance ranking is no longer near-based.
+          distanceReliable: true,
           warning:
             "Nearby precision unavailable because matching city branches lack valid coordinates; results use city scope.",
         },

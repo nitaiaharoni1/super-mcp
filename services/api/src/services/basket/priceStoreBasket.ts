@@ -182,7 +182,8 @@ export function priceStoreBasket(
     chainName: store.chainName,
     city: store.city,
     address: store.address,
-    distanceKm: store.distanceKm,
+    // City-centroid points are not branch addresses — don't expose a fake km.
+    distanceKm: isBranchDistanceReliable(store.geoSource) ? store.distanceKm : null,
     currency,
     total,
     itemsFound: lines.length,
@@ -192,7 +193,17 @@ export function priceStoreBasket(
   };
 }
 
-export function buildCheapestRecommendation(top: BasketStoreResult): BasketRecommendation {
+/** Address/feed coords are branch-level; city_centroid/null are not. */
+function isBranchDistanceReliable(geoSource: string | null | undefined): boolean {
+  return geoSource === "address" || geoSource === "feed";
+}
+
+export type RecommendationKind = "cheapest" | "bestNearby" | "bestInStore" | "bestOrderable";
+
+export function buildCheapestRecommendation(
+  top: BasketStoreResult,
+  kind: RecommendationKind = "cheapest",
+): BasketRecommendation {
   return {
     storeId: top.storeId,
     storeName: top.storeName,
@@ -203,9 +214,30 @@ export function buildCheapestRecommendation(top: BasketStoreResult): BasketRecom
     itemsFound: top.itemsFound,
     itemsRequested: top.itemsRequested,
     distanceKm: top.distanceKm,
-    reason:
-      top.missingItems.length === 0
-        ? "Lowest total among nearby stores that carry the full basket (promos applied)."
-        : `Lowest total among nearby stores; missing ${top.missingItems.length} of ${top.itemsRequested} items.`,
+    reason: recommendationReason(top, kind),
   };
+}
+
+function recommendationReason(top: BasketStoreResult, kind: RecommendationKind): string {
+  const missing =
+    top.missingItems.length === 0
+      ? "carries the full priced basket"
+      : `missing ${top.missingItems.length} of ${top.itemsRequested} items`;
+  switch (kind) {
+    case "cheapest":
+      return top.missingItems.length === 0
+        ? "Lowest total among nearby stores that carry the full basket (promos applied)."
+        : `Lowest total among nearby stores meeting the coverage floor; ${missing}.`;
+    case "bestNearby":
+    case "bestInStore":
+      return `Best in-store pick within a 1-line coverage band of the max; ${missing}.`;
+    case "bestOrderable": {
+      const orderable = top.lines.filter((l) => l.link != null).length;
+      return `Best online-orderable pick (${orderable} linked lines) within a 1-line orderable-coverage band; ${missing}.`;
+    }
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
 }

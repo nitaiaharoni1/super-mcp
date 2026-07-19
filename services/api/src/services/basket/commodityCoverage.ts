@@ -1,6 +1,7 @@
 import { query } from "@super-mcp/db";
 import { mapPool, normalizeEmbedInput, normalizeMeasure, tokenizeNormalized } from "@super-mcp/shared";
 import { queryTokensSatisfied } from "./equivalence.js";
+import { loadProductClasses } from "./productClasses.js";
 import type { BasketCandidate, BasketItemInput, ResolvedItem } from "./types.js";
 
 /** Bounded concurrency for the per-line coverage queries (DB-heavy). */
@@ -57,6 +58,15 @@ async function fetchCarriedClassPeers(
   return res.rows;
 }
 
+export interface FilterClassPeersOptions {
+  /**
+   * When false, skip query-token matching (class+variant SQL + unit still apply).
+   * Used for product_id/gtin-only lines where queryText is the primary product
+   * name — brand/chain tokens like "שופרסל" must not block other chains' peers.
+   */
+  requireQueryTokens?: boolean;
+}
+
 /**
  * Keep same-class, same-variant peers that also satisfy the query (relevance) and
  * unit. Class+variant were enforced in SQL; here we hold query SPECIFICITY
@@ -67,9 +77,11 @@ export function filterClassPeers(
   queryText: string,
   primary: BasketCandidate,
   rows: CarriedProductRow[],
+  opts: FilterClassPeersOptions = {},
 ): CarriedProductRow[] {
+  const requireQueryTokens = opts.requireQueryTokens !== false;
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
-  if (queryTokens.length === 0) return [];
+  if (requireQueryTokens && queryTokens.length === 0) return [];
   const primaryMeasure = primary.sizeUnit ? normalizeMeasure(1, primary.sizeUnit) : null;
   const primaryCanonUnit =
     primaryMeasure && !primaryMeasure.unparseable ? primaryMeasure.unit : null;
@@ -77,7 +89,7 @@ export function filterClassPeers(
   const out: CarriedProductRow[] = [];
   for (const row of rows) {
     if (seen.has(row.product_id)) continue;
-    if (!queryTokensSatisfied(queryTokens, row.name)) continue;
+    if (requireQueryTokens && !queryTokensSatisfied(queryTokens, row.name)) continue;
     if (primaryCanonUnit && row.size_unit) {
       const m = normalizeMeasure(row.size_qty ?? 1, row.size_unit);
       if (!m.unparseable && m.unit !== primaryCanonUnit) continue;
@@ -89,14 +101,57 @@ export function filterClassPeers(
   return out;
 }
 
+/** Query text for peer filtering: prefer the line's free-text query, else primary name. */
+export function coverageQueryText(
+  item: BasketItemInput | undefined,
+  primary: BasketCandidate,
+): string {
+  const q = item?.query?.trim();
+  return q || primary.name;
+}
+
 /**
- * Broaden auto-resolved commodity lines to the SKUs the in-scope stores actually
+ * Lines eligible for class-gated coverage broadening: auto-resolved query lines
+ * with free text, plus confirmed product_id / gtin lines (name used when query
+ * is absent).
+ */
+export function isCoverageTarget(r: ResolvedItem, items: BasketItemInput[]): boolean {
+  if (r.productId == null) return false;
+  switch (r.resolvedBy) {
+    case "query":
+      return r.resolutionStatus === "resolved" && Boolean(items[r.index]?.query);
+    case "product_id":
+    case "gtin":
+      // Direct resolves often omit resolutionStatus; treat confident product hits as resolved.
+      return r.resolutionStatus === "resolved" || !r.lowConfidence;
+    case "unresolved":
+      return false;
+    default: {
+      const _exhaustive: never = r.resolvedBy;
+      return _exhaustive;
+    }
+  }
+}
+
+function applyClassInfo(primary: BasketCandidate, info: { l1: string; l2: string | null; l3: string | null; variant: string | null; brand: string | null }): void {
+  primary.classL1 = info.l1;
+  primary.classL2 = info.l2;
+  primary.classL3 = info.l3;
+  primary.variant = info.variant;
+  primary.brandExtracted = info.brand;
+  if (!primary.productClass) primary.productClass = info.l1;
+}
+
+/**
+ * Broaden resolved commodity lines to the SKUs the in-scope stores actually
  * carry. Loose produce/deli goods fragment into a per-chain product id (no shared
  * barcode), so the in-memory shortlist sees only a few, leaving most chains
  * showing not_carried_by_chain even though they stock the item. This runs one
- * class-scoped query per resolved, CLASSIFIED, free-text line against the in-scope
- * stores and attaches the carried same-class SKUs as equivalents. Purely additive;
- * only touches resolved query lines whose primary has an LLM class (migration 017).
+ * class-scoped query per resolved, CLASSIFIED line (free-text query, confirmed
+ * product_id, or gtin) against the in-scope stores and attaches the carried
+ * same-class SKUs as equivalents. Purely additive; only touches lines whose
+ * primary has (or can load) an LLM class (migration 017). For product_id-only
+ * lines, peer filtering uses the primary product name when no query is present.
  */
 export async function enrichCommodityCoverage(
   items: BasketItemInput[],
@@ -104,23 +159,42 @@ export async function enrichCommodityCoverage(
   storeIds: string[],
 ): Promise<void> {
   if (storeIds.length === 0) return;
-  const targets = resolved.filter(
-    (r) =>
-      r.resolvedBy === "query" &&
-      r.resolutionStatus === "resolved" &&
-      r.productId != null &&
-      Boolean(items[r.index]?.query),
-  );
+  const targets = resolved.filter((r) => isCoverageTarget(r, items));
   if (targets.length === 0) return;
+
+  // Batch-load classes for primaries that arrived without classL1 (common on
+  // product_id / gtin paths when resolve didn't stamp, or stale candidates).
+  const missingClassIds = [
+    ...new Set(
+      targets.flatMap((item) => {
+        const primary = item.candidates.find((c) => c.productId === item.productId);
+        return primary && !primary.classL1 && item.productId ? [item.productId] : [];
+      }),
+    ),
+  ];
+  const classMap =
+    missingClassIds.length > 0 ? await loadProductClasses(missingClassIds) : new Map();
 
   await mapPool(targets, COVERAGE_CONCURRENCY, async (item) => {
     const primary = item.candidates.find((c) => c.productId === item.productId);
-    // Only class-gated broadening; an unclassified primary keeps today's behavior.
-    if (!primary?.classL1) return;
-    const queryText = items[item.index]!.query!;
+    if (!primary) return;
+
+    if (!primary.classL1) {
+      const info = item.productId ? classMap.get(item.productId) : undefined;
+      if (!info?.l1) return;
+      applyClassInfo(primary, info);
+    }
+
+    const input = items[item.index];
+    const hasFreeTextQuery = Boolean(input?.query?.trim());
+    const queryText = coverageQueryText(input, primary);
 
     const rows = await fetchCarriedClassPeers(primary, storeIds);
-    const peers = filterClassPeers(queryText, primary, rows);
+    // product_id/gtin-only: class+variant+unit gate peers; do not require every
+    // token of the primary's branded name to appear on other chains' SKUs.
+    const peers = filterClassPeers(queryText, primary, rows, {
+      requireQueryTokens: hasFreeTextQuery,
+    });
     if (peers.length === 0) return;
 
     const existing = new Map<string, BasketCandidate>();

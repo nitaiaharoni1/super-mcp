@@ -165,10 +165,19 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
   // that still need a human decision are returned inline as `questions`.
   const picks = pickRecommendations(storeResults, {
     distancePenaltyPerKm: input.distancePenaltyPerKm ?? DEFAULT_DISTANCE_PENALTY_PER_KM,
+    distanceReliable: location.distanceReliable,
   });
   const recommendations: BasketRecommendations = {
-    cheapest: picks.cheapest ? buildCheapestRecommendation(picks.cheapest) : null,
-    bestNearby: picks.bestNearby ? buildCheapestRecommendation(picks.bestNearby) : null,
+    cheapest: picks.cheapest ? buildCheapestRecommendation(picks.cheapest, "cheapest") : null,
+    bestNearby: picks.bestNearby
+      ? buildCheapestRecommendation(picks.bestNearby, "bestNearby")
+      : null,
+    bestInStore: picks.bestInStore
+      ? buildCheapestRecommendation(picks.bestInStore, "bestInStore")
+      : null,
+    bestOrderable: picks.bestOrderable
+      ? buildCheapestRecommendation(picks.bestOrderable, "bestOrderable")
+      : null,
   };
 
   // Top-level cheapest kept for backward-compat: stores[0] is coverage-first
@@ -190,9 +199,12 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
   // except the recommended ones. missingItems is kept everywhere (small, needed
   // for coverage reasoning).
   const recommendedIds = new Set(
-    [recommendations.cheapest?.storeId, recommendations.bestNearby?.storeId].filter(
-      (id): id is string => Boolean(id),
-    ),
+    [
+      recommendations.cheapest?.storeId,
+      recommendations.bestNearby?.storeId,
+      recommendations.bestInStore?.storeId,
+      recommendations.bestOrderable?.storeId,
+    ].filter((id): id is string => Boolean(id)),
   );
   const verbose = input.verbose ?? false;
   const stores = verbose
@@ -293,7 +305,12 @@ function emptyBasketResult(
     storesCompared: 0,
     storesTruncated: false,
     cheapest: null,
-    recommendations: { cheapest: null, bestNearby: null },
+    recommendations: {
+      cheapest: null,
+      bestNearby: null,
+      bestInStore: null,
+      bestOrderable: null,
+    },
     multiStore: null,
     completeness,
     questions: buildPrepareQuestions(inputItems, itemStatuses, DEFAULT_PREPARE_OPTIONS_LIMIT),

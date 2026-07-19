@@ -109,6 +109,7 @@ describe("prepareBasket", () => {
         zip: null,
         lat: null,
         lng: null,
+        geoSource: null,
         distanceKm: 1,
       },
     ]);

@@ -34,8 +34,8 @@ export interface BasketOptimizeInput extends BasketLocationInput {
   distancePenaltyPerKm?: number;
   /**
    * When false (default), per-store `lines` are dropped from every store except
-   * the recommended ones (recommendations.cheapest/bestNearby) to keep the
-   * response small; `missingItems` is always kept. Set true for full detail.
+   * the recommended ones (cheapest/bestNearby/bestInStore/bestOrderable) to keep
+   * the response small; `missingItems` is always kept. Set true for full detail.
    */
   verbose?: boolean;
 }
@@ -178,13 +178,20 @@ export interface BasketRecommendation {
 }
 
 export interface BasketRecommendations {
-  /** Lowest total among compared stores. */
+  /** Lowest total among near-best-covering stores (coverage floor). */
   cheapest: BasketRecommendation | null;
   /**
-   * Most lines covered; ties broken by total + a per-km distance penalty. The
-   * store you'd actually go to when no single store carries the full basket.
+   * Within a 1-line coverage band of the max, prefer lower total (+ distance when
+   * reliable). Primary "where should I go" pick; matches bestInStore.
    */
   bestNearby: BasketRecommendation | null;
+  /** Same as bestNearby — physical in-store visit recommendation. */
+  bestInStore: BasketRecommendation | null;
+  /**
+   * Within a 1-line band of max orderable coverage (priced lines with a non-null
+   * storefront link). Null when no store has orderable lines.
+   */
+  bestOrderable: BasketRecommendation | null;
 }
 
 export interface MultiStoreLine {
@@ -265,9 +272,9 @@ export interface BasketOptimizeResult {
    */
   cheapest: BasketRecommendation | null;
   /**
-   * Coverage-first (`bestNearby`) and lowest-total (`cheapest`) store picks. The
-   * "even if it's not the cheapest, where should I actually go" answer lives in
-   * `bestNearby`; both share the BasketRecommendation shape.
+   * Store picks: `cheapest` (lowest total under a coverage floor), `bestNearby` /
+   * `bestInStore` (1-line coverage band + cost), and `bestOrderable` (same band
+   * on linked lines). All share the BasketRecommendation shape.
    */
   recommendations: BasketRecommendations;
   /** Per-item cheapest across stores (may require multiple trips). */

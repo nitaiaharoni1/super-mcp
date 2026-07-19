@@ -42,7 +42,7 @@ const CHAIN_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const storeId = (chain: "a" | "b", i: number) =>
   `${chain === "a" ? "1" : "2"}1111111-1111-4111-8111-${String(i).padStart(12, "0")}`;
 const productId = (chain: "a" | "b" | "shared", i: number) =>
-  `${chain === "a" ? "a0" : chain === "b" ? "b0" : "c0"}000000-0000-4000-8000-${String(i).padStart(10, "0")}`;
+  `${chain === "a" ? "a0" : chain === "b" ? "b0" : "c0"}000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
 const listingId = (chain: "a" | "b", i: number) =>
   `${chain === "a" ? "d" : "e"}4444444-4444-4444-8444-${String(i).padStart(12, "0")}`;
 
@@ -230,6 +230,7 @@ function stores() {
     zip: null,
     lat: null,
     lng: null,
+    geoSource: null,
     distanceKm: 1 + si * 0.3,
   }));
   const b = Array.from({ length: B_STORES }, (_, si) => ({
@@ -243,6 +244,7 @@ function stores() {
     zip: null,
     lat: null,
     lng: null,
+    geoSource: null,
     distanceKm: 2 + si * 0.3,
   }));
   return [...a, ...b];
@@ -333,6 +335,8 @@ describe("BBQ golden — the 2026-07-17 trace becomes the regression bar", () =>
       [
         nonVerbose.recommendations.cheapest?.storeId,
         nonVerbose.recommendations.bestNearby?.storeId,
+        nonVerbose.recommendations.bestInStore?.storeId,
+        nonVerbose.recommendations.bestOrderable?.storeId,
       ].filter((id): id is string => Boolean(id)),
     );
     for (const s of nonVerbose.stores) {

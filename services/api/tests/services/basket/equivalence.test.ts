@@ -2,10 +2,40 @@ import { describe, expect, it } from "vitest";
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  queryHeadAnchored,
   queryTokensSatisfied,
   variantConflict,
 } from "../../../src/services/basket/equivalence.js";
 import type { BasketCandidate } from "../../../src/services/basket/types.js";
+
+describe("queryHeadAnchored", () => {
+  it("blocks a query word that is a trailing MODIFIER (חלב → milk frother)", () => {
+    expect(queryHeadAnchored("חלב", "בריסטה מקציף חלב")).toBe(false);
+  });
+  it("passes when the query head leads the name (חומוס)", () => {
+    expect(queryHeadAnchored("חומוס", "חומוס גדול שופרסל 1 ק\"ג")).toBe(true);
+  });
+  it("passes brand-led names (one leading brand token allowed)", () => {
+    expect(queryHeadAnchored("חלב", "תנובה חלב 3%")).toBe(true);
+    expect(queryHeadAnchored("פרגיות עוף", "סטייק פרגיות עוף טרי")).toBe(true);
+  });
+  it("is plural/singular tolerant on the head", () => {
+    expect(queryHeadAnchored("עגבניות", "עגבניה חממה")).toBe(true);
+  });
+  it("blocks a utensil/container/toy leader (pasta spoon, water gun)", () => {
+    expect(queryHeadAnchored("פסטה", "כף פסטה")).toBe(false);
+    expect(queryHeadAnchored("מים", "אקדח מים")).toBe(false);
+    expect(queryHeadAnchored("נייר טואלט", "אחסונית נייר טואלט")).toBe(false);
+  });
+  it("blocks a derived-product leader (apple vinegar, orange juice)", () => {
+    expect(queryHeadAnchored("תפוחים", "חומץ תפוחים אולד דאט")).toBe(false);
+    expect(queryHeadAnchored("תפוזים", "מיץ תפוזים סחוט")).toBe(false);
+  });
+  it("still passes a genuine brand/cut leader", () => {
+    expect(queryHeadAnchored("חלב", "תנובה חלב 3%")).toBe(true);
+    expect(queryHeadAnchored("פרגיות עוף", "סטייק פרגיות עוף טרי")).toBe(true);
+  });
+});
 
 describe("queryTokensSatisfied (morphology-tolerant)", () => {
   it("matches Hebrew plural query against singular name and vice versa", () => {
