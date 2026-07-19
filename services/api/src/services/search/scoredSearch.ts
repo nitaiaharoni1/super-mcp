@@ -425,7 +425,21 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
 
   // Fail-fast product-only probe (no listing CTE, no trigram %).
   const exactHits = await tryExactProbe(params, config);
-  if (exactHits) {
+  // A generic commodity term ("חומוס") exact-matches a swarm of single-chain orphan
+  // SKUs that nobody nearby stocks, while the widely-carried product ("חומוס מסעדות
+  // צבר") is not an exact-name match and never enters the probe. When the request is
+  // location-scoped and NOT ONE exact hit is locally available, don't accept the
+  // probe — fall through to the lexical/listing search that surfaces the products
+  // stores actually carry. This is safe now that basket resolution classifies
+  // candidates: the wider pool (e.g. roasted-chickpea "חומוס קלוי") is separated by
+  // its class label, so it can't be mistaken for the spread. Unscoped, or when any
+  // exact hit is local, the fast path stands.
+  const locationScoped = Boolean(
+    params.city || params.near || (params.storeIds && params.storeIds.length > 0),
+  );
+  const exactProbeUsable =
+    exactHits != null && !(locationScoped && exactHits.every((h) => !h.hasLocalPrice));
+  if (exactHits && exactProbeUsable) {
     console.log(
       JSON.stringify({
         event: "semantic_search",

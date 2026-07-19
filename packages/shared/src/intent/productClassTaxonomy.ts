@@ -135,6 +135,31 @@ export const ALL_L3: readonly string[] = Object.values(TAXONOMY_L3).flat();
 /** Sentinel a classifier may use when no L3 family applies. Stored as NULL. */
 export const L3_NONE = "none";
 
+/**
+ * Cross-cutting VARIANT — the axis L3 can't express: two products of the same L3
+ * that a shopper would NOT accept as substitutes (Coke `regular` vs `diet_zero`,
+ * tomato `regular` vs `cherry_grape`, `regular` vs `organic` at a different price).
+ * A generic line defaults to `regular` (cheapest); an explicit query token
+ * (זירו/אורגני/שרי) requires the matching variant. `regular` is the unmarked
+ * default and the sentinel for "no special variant".
+ */
+export const VARIANTS: readonly string[] = [
+  "regular",
+  "diet_zero",
+  "sugar_free",
+  "decaf",
+  "organic",
+  "premium",
+  "baby_mini",
+  "cherry_grape",
+  "sliced_prepared",
+  "whole_wheat",
+  "lactose_free",
+  "spicy",
+  "other",
+];
+export const VARIANT_DEFAULT = "regular";
+
 const L2_TO_L1 = new Map<string, string>();
 for (const [l1, l2s] of Object.entries(TAXONOMY_L2)) for (const l2 of l2s) L2_TO_L1.set(l2, l1);
 const L3_TO_L2 = new Map<string, string>();

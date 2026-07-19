@@ -59,6 +59,10 @@ export interface BasketCandidate {
   classL1?: string | null;
   classL2?: string | null;
   classL3?: string | null;
+  /** Cross-cutting variant (migration 018): regular/diet_zero/cherry_grape/organic/... */
+  variant?: string | null;
+  /** Brand pulled from the name when product.brand was NULL (migration 018). */
+  brandExtracted?: string | null;
   intentTier?: 1 | 2 | 3 | 0;
 }
 

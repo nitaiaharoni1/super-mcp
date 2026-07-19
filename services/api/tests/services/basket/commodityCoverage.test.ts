@@ -4,7 +4,7 @@ import type { BasketCandidate } from "../../../src/services/basket/types.js";
 
 const primary = (over: Partial<BasketCandidate>): BasketCandidate => ({
   productId: "primary",
-  name: "עגבניות",
+  name: "מלפפונים",
   score: 0.9,
   matchedVia: "product",
   sizeQty: null,
@@ -14,7 +14,8 @@ const primary = (over: Partial<BasketCandidate>): BasketCandidate => ({
   productClass: "produce",
   classL1: "produce",
   classL2: "vegetable_fresh",
-  classL3: "tomato",
+  classL3: "cucumber",
+  variant: "regular",
   ...over,
 });
 
@@ -25,54 +26,37 @@ const row = (id: string, name: string, size_unit: string | null = "kg", size_qty
   size_unit,
 });
 
+// filterClassPeers now only holds query SPECIFICITY (morphology-tolerant) + unit;
+// class and variant are filtered in SQL (fetchCarriedClassPeers).
 describe("filterClassPeers", () => {
-  it("keeps same-commodity per-chain twins that add only size/packaging", () => {
+  it("keeps per-chain twins across Hebrew plural/singular (מלפפונים↔מלפפון)", () => {
     const kept = filterClassPeers(
-      "עגבניות",
+      "מלפפונים",
       primary({}),
-      [row("a", "עגבניות"), row("b", "עגבניות ארוז 1 קג"), row("c", "עגבניות שטופות")],
+      [row("a", "מלפפון"), row("b", "מלפפון ארוז"), row("c", "מלפפונים")],
     );
     expect(kept.map((r) => r.product_id).sort()).toEqual(["a", "b", "c"]);
   });
 
-  it("excludes a different variety within the same class (cherry tomato)", () => {
-    const kept = filterClassPeers("עגבניות", primary({}), [row("a", "עגבניות"), row("cherry", "עגבניות שרי שטוף ארוז")]);
-    expect(kept.map((r) => r.product_id)).toEqual(["a"]);
-  });
-
-  it("excludes a diet/zero variety for a generic cola line", () => {
-    const cola = primary({ name: "קוקה קולה", sizeUnit: "ml", classL1: "beverage", classL2: "soda", classL3: "cola" });
+  it("holds query specificity: a cabernet line excludes merlot", () => {
+    const wine = primary({ name: "יין אדום קברנה", sizeUnit: "ml", classL3: "red_wine" });
     const kept = filterClassPeers(
-      "קוקה קולה",
-      cola,
-      [row("reg", "קוקה קולה בקבוק", "ml", 1500), row("zero", "קוקה קולה זירו פחית", "ml", 330)],
+      "יין אדום קברנה",
+      wine,
+      [row("cab", "יין אדום קברנה סוביניון", "ml", 750), row("merlot", "יין אדום מרלו", "ml", 750)],
     );
-    expect(kept.map((r) => r.product_id)).toEqual(["reg"]);
+    expect(kept.map((r) => r.product_id)).toEqual(["cab"]);
   });
 
-  it("excludes organic/premium tiers (not neutral)", () => {
-    const kept = filterClassPeers(
-      "פלפל",
-      primary({ name: "פלפל אדום", classL3: "pepper_bell" }),
-      [row("reg", "פלפל אדום"), row("org", "פלפל אדום אורגני")],
-    );
-    expect(kept.map((r) => r.product_id)).toEqual(["reg"]);
-  });
-
-  it("keeps a more specific primary's per-chain twins (פלפל אדום)", () => {
-    const kept = filterClassPeers(
-      "פלפל",
-      primary({ name: "פלפל אדום", classL3: "pepper_bell" }),
-      [row("a", "פלפל אדום"), row("b", "פלפל אדום קלוף")],
-    );
-    expect(kept.map((r) => r.product_id).sort()).toEqual(["a", "b"]);
-  });
-
-  it("requires every query token to be present", () => {
-    const kept = filterClassPeers("פלפל אדום", primary({ name: "פלפל אדום", classL3: "pepper_bell" }), [
-      row("a", "פלפל אדום"),
-      row("green", "פלפל ירוק"),
+  it("excludes a different unit", () => {
+    const kept = filterClassPeers("מלח גס", primary({ name: "מלח גס", classL3: "salt", sizeUnit: "g" }), [
+      row("a", "מלח גס 1 קג", "g", 1000),
+      row("u", "מלח גס יחידה", "unit", 1),
     ]);
     expect(kept.map((r) => r.product_id)).toEqual(["a"]);
+  });
+
+  it("returns [] on an empty query", () => {
+    expect(filterClassPeers("", primary({}), [row("a", "מלפפון")])).toEqual([]);
   });
 });

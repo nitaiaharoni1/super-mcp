@@ -15,6 +15,50 @@ function classesConflict(a: BasketCandidate, b: BasketCandidate): boolean {
   return compareClassPaths(classPathOf(a), classPathOf(b)) === "different";
 }
 
+/**
+ * The two carry DIFFERENT labeled variants (regular vs diet_zero, regular vs
+ * cherry_grape, regular vs organic) — not substitutes. The primary's variant
+ * reflects the query (a generic line ranks a `regular` SKU on top; "עגבניות שרי"
+ * ranks a `cherry_grape` one), so "same variant as the primary" both keeps a
+ * generic line on regular and honors an explicit variety. Unknown on either side
+ * is not a conflict. Replaces the old NEUTRAL_TOKENS / preserved-word variety guards.
+ */
+export function variantConflict(a: BasketCandidate, b: BasketCandidate): boolean {
+  return Boolean(a.variant && b.variant && a.variant !== b.variant);
+}
+
+// Hebrew final letters -> medial form, then strip ONE plural/feminine suffix, so
+// a query token and a name token reduce to the SAME stem across morphology:
+//   מלפפונים→מלפפונ, מלפפון→מלפפונ ; עגבניות→עגבני, עגבניה→עגבני ; בצלים→בצל, בצל→בצל.
+// Stem EQUALITY (not prefix) keeps specificity — בצל≠בצלצל (onion vs onion-rings),
+// קברנה≠מרלו — while healing plural/singular.
+const FINAL_FORMS: Record<string, string> = { ך: "כ", ם: "מ", ן: "נ", ף: "פ", ץ: "צ" };
+// Suffixes in MEDIAL form (compared after the token's final letters are folded),
+// so the plural ים (final mem) is written ימ here. NOT "יות" — the י usually
+// belongs to the stem (עגבניות→עגבני via "ות", not עגבנ). Longest first.
+const NOUN_SUFFIXES = ["ות", "ימ", "ה", "ת"];
+function stem(t0: string): string {
+  const t = t0.replace(/[ךםןףץ]/g, (c) => FINAL_FORMS[c] ?? c);
+  if (t.length > 4) {
+    for (const suf of NOUN_SUFFIXES) {
+      if (t.endsWith(suf) && t.length - suf.length >= 3) return t.slice(0, -suf.length);
+    }
+  }
+  return t;
+}
+
+/**
+ * Does every query token appear in the name, tolerant of Hebrew plural/singular?
+ * Compares STEMS (final-letter normalized, one plural/feminine suffix stripped),
+ * so מלפפונים↔מלפפון and עגבניות↔עגבניה match while query SPECIFICITY holds — a
+ * cabernet or brand token still has to be present, and near-lookalikes (בצל vs
+ * בצלצלים) do not collapse together.
+ */
+export function queryTokensSatisfied(queryTokens: string[], name: string): boolean {
+  const nameStems = new Set(tokenizeNormalized(normalizeEmbedInput(name)).map(stem));
+  return queryTokens.every((qt) => nameStems.has(stem(qt)));
+}
+
 // Preserved/prepared forms that are a DIFFERENT product from the fresh staple,
 // even though the name shares the query token: pickled/soured/canned, sliced/
 // chopped/grated deli cuts, and lime (a different fruit from lemon). Grouping
@@ -60,47 +104,6 @@ export function hasUnrequestedPreservedForm(queryTokens: Set<string>, candidateN
   return false;
 }
 
-export interface EquivalenceOptions {
-  /** Relative size divergence allowed vs the top pick (0.5 = ±50%). */
-  packTolerance: number;
-  maxEquivalents: number;
-}
-
-/**
- * Candidates a store may price interchangeably for this line. Strictly
- * narrower than the shortlist: gate tier 1-2, identical product class to the
- * top pick, same canonical unit, pack size within tolerance. An unclassified
- * top pick gets NO equivalents — widening without a class signal is exactly
- * the un-gated substitution that was removed for picking wrong products.
- */
-export function buildEquivalenceSet(
-  top: BasketCandidate,
-  shortlist: BasketCandidate[],
-  opts: EquivalenceOptions,
-): BasketCandidate[] {
-  if (!top.productClass) return [top];
-  // A preserved form (pickled/sliced/…) the PRIMARY itself doesn't have is a
-  // different product — e.g. resolving fresh "מלפפונים" must not price a chain's
-  // "מלפפונים בייבי כבושי" as its equivalent. Anchor on the top pick's tokens.
-  const topTokens = new Set(tokenizeNormalized(normalizeEmbedInput(top.name)));
-  const out: BasketCandidate[] = [top];
-  for (const c of shortlist) {
-    if (out.length > opts.maxEquivalents) break;
-    if (c.productId === top.productId) continue;
-    if (c.intentTier == null || c.intentTier < 1 || c.intentTier > 2) continue;
-    if (c.productClass !== top.productClass) continue;
-    if (classesConflict(top, c)) continue;
-    if (hasUnrequestedPreservedForm(topTokens, c.name)) continue;
-    if ((c.sizeUnit ?? null) !== (top.sizeUnit ?? null)) continue;
-    if (top.sizeQty != null && c.sizeQty != null && top.sizeQty > 0) {
-      const div = Math.abs(c.sizeQty - top.sizeQty) / top.sizeQty;
-      if (div > opts.packTolerance) continue;
-    }
-    out.push(c);
-  }
-  return out;
-}
-
 /**
  * Interchangeable SKUs for an AUTO-RESOLVED commodity line, so per-chain pricing
  * can pick the CHEAPEST across chains (the default when the user didn't name a
@@ -124,19 +127,23 @@ export function buildCommodityEquivalents(
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
   if (queryTokens.length === 0) return [top];
   const queryTokenSet = new Set(queryTokens);
+  const bothLabeled = (c: BasketCandidate) => Boolean(top.classL1 && c.classL1);
   const out: BasketCandidate[] = [top];
   for (const c of shortlist) {
     if (out.length > maxEquivalents) break;
     if (c.productId === top.productId) continue;
     if (c.productClass !== top.productClass) continue;
-    if (classesConflict(top, c)) continue;
+    if (classesConflict(top, c)) continue; // different L3 (onion≠scallion, lemon≠lime)
+    if (variantConflict(top, c)) continue; // regular≠cherry/zero/organic
     if ((c.sizeUnit ?? null) !== (top.sizeUnit ?? null)) continue;
     if (top.sizeQty != null && c.sizeQty != null && top.sizeQty > 0) {
       if (Math.abs(c.sizeQty - top.sizeQty) / top.sizeQty > packTolerance) continue;
     }
-    const nameTokens = new Set(tokenizeNormalized(normalizeEmbedInput(c.name)));
-    if (!queryTokens.every((t) => nameTokens.has(t))) continue;
-    if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) continue;
+    // Query specificity (morphology-tolerant). The preserved-form word list is only
+    // a fallback for UNLABELED pairs — class+variant already separate pickled/sliced
+    // when both are classified.
+    if (!queryTokensSatisfied(queryTokens, c.name)) continue;
+    if (!bothLabeled(c) && hasUnrequestedPreservedForm(queryTokenSet, c.name)) continue;
     out.push(c);
   }
   return out;
@@ -182,14 +189,14 @@ export function buildAvailabilityEquivalents(
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
   if (queryTokens.length === 0) return [];
   const queryTokenSet = new Set(queryTokens);
-  // Query-safe, locally-available, non-penalized, non-rejected pool in rank order.
+  // Query-safe (morphology-tolerant), locally-available, non-penalized pool in rank
+  // order. Preserved-word guard is a fallback only for unlabeled candidates.
   const pool = candidates.filter((c) => {
     if (!c.hasLocalPrice) return false;
     if (opts.penaltyOf(c.productId) >= opts.penaltyBlock) return false;
     if (c.intentTier === 0) return false;
-    if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) return false;
-    const nameTokens = new Set(tokenizeNormalized(normalizeEmbedInput(c.name)));
-    return queryTokens.every((t) => nameTokens.has(t));
+    if (!c.classL1 && hasUnrequestedPreservedForm(queryTokenSet, c.name)) return false;
+    return queryTokensSatisfied(queryTokens, c.name);
   });
   if (pool.length < 2) return [];
   const primary = pool[0]!;
@@ -203,6 +210,7 @@ export function buildAvailabilityEquivalents(
     }
     if (primary.productClass && c.productClass && primary.productClass !== c.productClass) continue;
     if (classesConflict(primary, c)) continue;
+    if (variantConflict(primary, c)) continue;
     out.push(c);
   }
   return out.length >= 2 ? out : [];

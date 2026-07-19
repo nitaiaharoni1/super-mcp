@@ -6,7 +6,6 @@ import {
   profileFromText,
   rankDeterministicCandidates,
   resolvePurchaseQty,
-  type ClassPath,
   type OntologySnapshot,
   type RetrievalEvidence,
   type SemanticProfile,
@@ -17,6 +16,7 @@ import {
 } from "../../lib/features.js";
 import type { SearchProductHit } from "../search/types.js";
 import { hitToCandidate } from "./candidates.js";
+import type { ProductClassInfo } from "./productClasses.js";
 import {
   DEFAULT_CANDIDATE_LIMIT,
   SEMANTIC_CANDIDATE_LIMIT,
@@ -60,7 +60,7 @@ export interface RankQueryOptions {
    */
   mergedProfileCache?: Map<string, SemanticProfile>;
   /** Offline LLM taxonomy paths keyed by product id (migration 017). */
-  classMap?: Map<string, ClassPath>;
+  classMap?: Map<string, ProductClassInfo>;
 }
 
 function mergeProfileWithCurrentOntology(

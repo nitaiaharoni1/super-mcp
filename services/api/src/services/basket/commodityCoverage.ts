@@ -1,5 +1,6 @@
 import { query } from "@super-mcp/db";
 import { mapPool, normalizeEmbedInput, normalizeMeasure, tokenizeNormalized } from "@super-mcp/shared";
+import { queryTokensSatisfied } from "./equivalence.js";
 import type { BasketCandidate, BasketItemInput, ResolvedItem } from "./types.js";
 
 /** Bounded concurrency for the per-line coverage queries (DB-heavy). */
@@ -16,11 +17,13 @@ interface CarriedProductRow {
 
 /**
  * Products actually priced in the in-scope stores that share the primary's
- * commodity CLASS (matched at the primary's deepest known level: L3 else L2 else
- * L1) AND still contain every query token — class rules out cross-category drift
- * (allspice for pepper, canned/pickled for fresh, lime for lemon), the query
- * tokens rule out brand/variety drift within a class (עלית צ'יקו for טסטרס צ'ויס).
- * Only classified products qualify, so unknown-class noise is excluded by design.
+ * commodity CLASS (deepest known level: L3 else L2 else L1) AND its VARIANT
+ * (regular/cherry_grape/diet_zero/organic...). Class rules out cross-category
+ * drift (allspice for pepper, canned/pickled for fresh, lime for lemon); variant
+ * rules out same-class variety drift (cherry tomato / Coke Zero / organic under a
+ * generic line) — this is what the old NEUTRAL_TOKENS word list did by hand.
+ * Peers whose variant is NULL (unclassified) are allowed and filtered by the
+ * query-token check downstream. Only classified products qualify.
  */
 async function fetchCarriedClassPeers(
   primary: BasketCandidate,
@@ -36,6 +39,10 @@ async function fetchCarriedClassPeers(
     conds.push(`m.class_l3 = $${params.length + 1}`);
     params.push(primary.classL3);
   }
+  if (primary.variant) {
+    conds.push(`(m.variant = $${params.length + 1} OR m.variant IS NULL)`);
+    params.push(primary.variant);
+  }
   const res = await query<CarriedProductRow>(
     `SELECT DISTINCT ON (l.product_id) l.product_id, p.name, p.size_qty, p.size_unit
        FROM product p
@@ -49,39 +56,11 @@ async function fetchCarriedClassPeers(
   return res.rows;
 }
 
-// Size / packaging / grade / freshness words that don't change WHAT the product
-// is. A peer may add only these to the primary's name; a new CONTENT token means a
-// different variety within the same class (עגבניות->עגבניות שרי cherry,
-// קוקה קולה->זירו, פלפל אדום->פאלרמו, בצל->גבישי בצל granules) and is excluded.
-const NEUTRAL_TOKENS: ReadonlySet<string> = new Set([
-  "ארוז", "ארוזה", "ארוזים", "ארוזות", "שקית", "מארז", "אריזה", "קופסה", "קופסא",
-  "בקבוק", "פחית", "מגש", "חבילה", "יחידה", "יח", "במשקל", "תפזורת", "משקל",
-  "גרם", "גר", "קג", "קילו", "קילוגרם", "ליטר", "מל", "ק", "ג",
-  "טרי", "טרייה", "טריה", "שטוף", "שטופה", "שטופים", "שטופות", "קלוף", "קלופה", "קלופים", "נקי",
-  // Kosher marks are ubiquitous and not a price tier; organic/premium ARE a
-  // pricier variety and must NOT be treated as neutral (else cheapest-per-store
-  // is forced onto an organic SKU when a regular one exists elsewhere).
-  "מהדרין", "כשר", "בדץ",
-  "של", "עם", "ה",
-]);
-
-function contentTokens(name: string): Set<string> {
-  const out = new Set<string>();
-  for (const t of tokenizeNormalized(normalizeEmbedInput(name))) {
-    if (NEUTRAL_TOKENS.has(t)) continue;
-    if (/^\d+([.,]\d+)?$/.test(t)) continue;
-    out.add(t);
-  }
-  return out;
-}
-
 /**
- * Keep class peers that are the SAME product as the primary, only differing in
- * size/packaging. Guards: every query token present (relevance), unit agrees, and
- * the peer adds no content word beyond the primary's name (the brand/variety guard
- * that stops cheapest-per-store from picking cherry tomatoes / Coke Zero / onion
- * granules under a generic line). Anchored on the primary's name, not the query,
- * so a specific primary (פלפל אדום) still gathers its per-chain twins.
+ * Keep same-class, same-variant peers that also satisfy the query (relevance) and
+ * unit. Class+variant were enforced in SQL; here we hold query SPECIFICITY
+ * (morphology-tolerant, so plural/singular don't break it, but a cabernet or a
+ * brand token is still required) and unit agreement.
  */
 export function filterClassPeers(
   queryText: string,
@@ -90,7 +69,6 @@ export function filterClassPeers(
 ): CarriedProductRow[] {
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
   if (queryTokens.length === 0) return [];
-  const primaryContent = contentTokens(primary.name);
   const primaryMeasure = primary.sizeUnit ? normalizeMeasure(1, primary.sizeUnit) : null;
   const primaryCanonUnit =
     primaryMeasure && !primaryMeasure.unparseable ? primaryMeasure.unit : null;
@@ -98,17 +76,7 @@ export function filterClassPeers(
   const out: CarriedProductRow[] = [];
   for (const row of rows) {
     if (seen.has(row.product_id)) continue;
-    const nameTokens = new Set(tokenizeNormalized(normalizeEmbedInput(row.name)));
-    if (!queryTokens.every((t) => nameTokens.has(t))) continue;
-    // No new content word beyond the primary: peer content ⊆ primary content.
-    let extraContent = false;
-    for (const t of contentTokens(row.name)) {
-      if (!primaryContent.has(t)) {
-        extraContent = true;
-        break;
-      }
-    }
-    if (extraContent) continue;
+    if (!queryTokensSatisfied(queryTokens, row.name)) continue;
     if (primaryCanonUnit && row.size_unit) {
       const m = normalizeMeasure(row.size_qty ?? 1, row.size_unit);
       if (!m.unparseable && m.unit !== primaryCanonUnit) continue;
@@ -174,6 +142,8 @@ export async function enrichCommodityCoverage(
         classL1: primary.classL1,
         classL2: primary.classL2,
         classL3: primary.classL3,
+        variant: primary.variant,
+        brandExtracted: primary.brandExtracted,
         intentTier: primary.intentTier,
       });
     }

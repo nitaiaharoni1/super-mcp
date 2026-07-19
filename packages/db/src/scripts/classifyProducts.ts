@@ -7,6 +7,8 @@ import {
   TAXONOMY_L1,
   TAXONOMY_L2,
   TAXONOMY_L3,
+  VARIANTS,
+  VARIANT_DEFAULT,
   isValidClassPath,
   mapPool,
 } from "@super-mcp/shared";
@@ -125,6 +127,15 @@ Rules:
   * לימון -> fruit_fresh/lemon ; ליים -> fruit_fresh/lime ; מלח לימון (citric acid) -> pantry_dry/spices_seasoning.
   * מלח גס/שולחן -> pantry_dry/salt_sugar/salt.
 - פיקדון/deposit/gift card/service fee -> non_food_other.
+- variant: the cross-cutting form a shopper would NOT accept as a plain substitute.
+  Default "regular" for a normal product. Use: diet_zero (דיאט/זירו/zero), sugar_free
+  (ללא סוכר), decaf (נטול קפאין), organic (אורגני/ביו), premium (פרימיום/מובחר/בוטיק),
+  baby_mini (בייבי/מיני), cherry_grape (שרי/מיני tomatoes/ענבניות), sliced_prepared
+  (פרוס/קצוץ/מגורד/מרוסק ready-cut), whole_wheat (מלא/כוסמין), lactose_free (ללא לקטוז),
+  spicy (חריף/פיקנטי). A plain product with none of these -> "regular".
+- brand: the manufacturer/brand as it appears in the NAME (e.g. "קפה נמס טסטרס צ'ויס"
+  -> "טסטרס צ'ויס"; "קוקה קולה" -> "קוקה קולה"; "עגבניות" -> ""). Empty string if no
+  brand is present (loose produce, generic items). Do NOT invent a brand.
 Taxonomy (l1 > l2 > [l3 options]):
 `;
 
@@ -133,6 +144,8 @@ interface ClassResult {
   l1: string;
   l2: string;
   l3: string;
+  variant: string;
+  brand: string;
   confidence: string;
 }
 
@@ -154,9 +167,11 @@ function buildRequestBody(names: string[]): unknown {
             l1: { type: "STRING", enum: [...TAXONOMY_L1] },
             l2: { type: "STRING", enum: [...ALL_L2, L3_NONE] },
             l3: { type: "STRING", enum: [...ALL_L3, L3_NONE] },
+            variant: { type: "STRING", enum: [...VARIANTS] },
+            brand: { type: "STRING" },
             confidence: { type: "STRING", enum: ["high", "medium", "low"] },
           },
-          required: ["i", "l1", "l2", "l3", "confidence"],
+          required: ["i", "l1", "l2", "l3", "variant", "brand", "confidence"],
         },
       },
     },
@@ -241,14 +256,18 @@ async function upsertBatch(
   for (const row of rows) {
     const l2 = row.r.l2 === L3_NONE ? null : row.r.l2;
     const l3 = row.r.l3 === L3_NONE ? null : row.r.l3;
+    const variant = row.r.variant && row.r.variant.trim() ? row.r.variant : VARIANT_DEFAULT;
+    const brand = row.r.brand && row.r.brand.trim() ? row.r.brand.trim() : null;
     values.push(
-      `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, 'llm', $${p++}, $${p++}, now())`,
+      `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, 'llm', $${p++}, $${p++}, now())`,
     );
     params.push(
       row.productId,
       row.r.l1,
       l2,
       l3,
+      variant,
+      brand,
       CONF_MAP[row.r.confidence] ?? 0.5,
       row.model,
       row.name,
@@ -256,10 +275,11 @@ async function upsertBatch(
   }
   await pool.query(
     `INSERT INTO product_class_map
-       (product_id, class_l1, class_l2, class_l3, confidence, source, model, input_name, classified_at)
+       (product_id, class_l1, class_l2, class_l3, variant, brand_extracted, confidence, source, model, input_name, classified_at)
      VALUES ${values.join(", ")}
      ON CONFLICT (product_id) DO UPDATE SET
        class_l1 = EXCLUDED.class_l1, class_l2 = EXCLUDED.class_l2, class_l3 = EXCLUDED.class_l3,
+       variant = EXCLUDED.variant, brand_extracted = EXCLUDED.brand_extracted,
        confidence = EXCLUDED.confidence, source = EXCLUDED.source, model = EXCLUDED.model,
        input_name = EXCLUDED.input_name, classified_at = now()`,
     params,
@@ -273,7 +293,7 @@ async function main(): Promise<void> {
 
   const names = await selectDistinctNames(args);
   console.log(`[classify] ${names.length} distinct names to classify`);
-  if (args.out) writeFileSync(args.out, "name,l1,l2,l3,confidence\n");
+  if (args.out) writeFileSync(args.out, "name,l1,l2,l3,variant,brand,confidence\n");
 
   const batches: NameRow[][] = [];
   for (let i = 0; i < names.length; i += args.batchSize) {
@@ -305,8 +325,8 @@ async function main(): Promise<void> {
       }
       dist.set(r.l1, (dist.get(r.l1) ?? 0) + 1);
       if (args.out) {
-        const q = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
-        csvLines.push(`${q(batch[j]!.name)},${r.l1},${r.l2},${r.l3},${r.confidence}`);
+        const q = (s: string) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+        csvLines.push(`${q(batch[j]!.name)},${r.l1},${r.l2},${r.l3},${r.variant},${q(r.brand)},${r.confidence}`);
       }
       for (const productId of batch[j]!.productIds) {
         upserts.push({ productId, name: batch[j]!.name, r, model: args.model });
