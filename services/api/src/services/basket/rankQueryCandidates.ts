@@ -284,6 +284,7 @@ export function rankQueryCandidates(
           : 3,
       penaltyScore: ontology ? (gateById.get(hit.id)?.penaltyScore ?? 0) : 0,
       classPath: classMap?.get(hit.id),
+      variant: classMap?.get(hit.id)?.variant ?? null,
       profile: ontology
         ? mergeProfileWithCurrentOntology(
             hit.name,

@@ -36,6 +36,8 @@ export type ResolutionCandidate = Pick<SearchProductHit, "id" | "name" | "matche
   hasLocalPrice?: boolean;
   /** Offline LLM taxonomy path (migration 017), for hierarchical distinguishability. */
   classPath?: ClassPath;
+  /** Labeled variant (migration 018): a rival of a different variant is distinguishable. */
+  variant?: string | null;
   profile?: SemanticProfile;
 };
 
@@ -143,6 +145,10 @@ function profilesDisagreeOnFormClass(
  * behavior. Compared at the DEEPEST level both carry.
  */
 function classesDistinguish(a: ResolutionCandidate, b: ResolutionCandidate): boolean {
+  // A labeled variant mismatch (regular vs baby_mini/diet_zero/cherry_grape) makes
+  // the rival a DIFFERENT product, not a confusable near-twin — so a generic line
+  // ("מלפפונים") isn't blocked from auto-resolving by "מלפפונים בייבי".
+  if (a.variant && b.variant && a.variant !== b.variant) return true;
   if (!a.classPath || !b.classPath) return false;
   return compareClassPaths(a.classPath, b.classPath) === "different";
 }
