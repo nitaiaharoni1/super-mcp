@@ -120,9 +120,11 @@ export function registerBasketTools(server: McpServer): void {
         "One-shot: prices the safely-resolved lines immediately and returns any lines that still need " +
         "confirmation as `questions` (same shape as prepare_basket) — no separate prepare call required. " +
         "Totals cover the resolved subset (see completeness.totalsArePartial); re-call with `product_id` " +
-        "answers to the questions to finalize. Returns `recommendations` with cheapest (lowest total) and " +
-        "bestNearby (most items covered, ties broken by total + distance — the store you'd actually go to), " +
-        "multiStore (cheapest-per-item), " +
+        "answers to the questions to finalize (keep the original `query` on the line when you have it — " +
+        "helps per-chain equivalent coverage). Returns `recommendations` with cheapest (lowest total under a " +
+        "coverage floor), bestNearby/bestInStore (within a 1-line coverage band of the max, then total + distance " +
+        "when location.distanceReliable — the store you'd actually visit), bestOrderable (same band on lines with " +
+        "a storefront link), multiStore (cheapest-per-item), " +
         `top stores (default 5), and questions. Requires city and/or near (default ${DEFAULT_RADIUS_KM}km). ` +
         "By default (verbose=false) per-store `lines` are included only for the recommended stores to keep the " +
         "response small (missingItems is always kept); set verbose=true for full per-store line detail. " +
@@ -148,13 +150,15 @@ export function registerBasketTools(server: McpServer): void {
           .max(100)
           .optional()
           .describe(
-            "Shekels of 'cost' per km when ranking recommendations.bestNearby (default 3). Higher favors closer stores when coverage ties.",
+            "Shekels of 'cost' per km when ranking bestNearby/bestInStore/bestOrderable (default 3). " +
+              "Ignored when location.distanceReliable is false (city-centroid coordinates).",
           ),
         verbose: z
           .boolean()
           .optional()
           .describe(
-            "Default false. When false, per-store `lines` are returned only for the recommended stores (missingItems always kept); set true for full per-store line detail.",
+            "Default false. When false, per-store `lines` are returned only for recommended stores " +
+              "(cheapest/bestNearby/bestInStore/bestOrderable; missingItems always kept); set true for full detail.",
           ),
       },
     },

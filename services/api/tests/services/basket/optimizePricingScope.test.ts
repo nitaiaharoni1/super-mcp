@@ -92,6 +92,7 @@ describe("optimizeBasket pricing scope", () => {
         zip: null,
         lat: null,
         lng: null,
+        geoSource: null,
         distanceKm: 1,
       },
     ]);

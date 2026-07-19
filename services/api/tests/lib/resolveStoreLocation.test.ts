@@ -14,6 +14,7 @@ function store(overrides: Partial<StoreSummary> = {}): StoreSummary {
     zip: null,
     lat: null,
     lng: null,
+    geoSource: null,
     distanceKm: null,
     ...overrides,
   };
@@ -123,5 +124,68 @@ describe("resolveStoreLocation", () => {
     expect(result.location.scope).toBe("near");
     expect(result.location.fallbackApplied).toBe(false);
     expect(result.location.warning).toBe("no stores within 5km");
+  });
+
+  it("marks distanceReliable true when near is not requested", async () => {
+    const loadStores = vi.fn().mockResolvedValue([store({ city: "Herzliya" })]);
+    const result = await resolveStoreLocation({ city: "Herzliya" }, loadStores);
+    expect(result.location.distanceReliable).toBe(true);
+    expect(result.location.warning).toBeNull();
+  });
+
+  it("suppresses distance ranking when every geocoded store is a city_centroid", async () => {
+    const loadStores = vi.fn().mockResolvedValue([
+      store({
+        id: "11111111-1111-4111-8111-111111111111",
+        lat: 32.16,
+        lng: 34.84,
+        geoSource: "city_centroid",
+        distanceKm: 1.2,
+      }),
+      store({
+        id: "22222222-2222-4222-8222-222222222222",
+        lat: 32.16,
+        lng: 34.84,
+        geoSource: "city_centroid",
+        distanceKm: 1.2,
+      }),
+    ]);
+
+    const result = await resolveStoreLocation(
+      { near: { lat: 32.17, lng: 34.85 }, radiusKm: 10 },
+      loadStores,
+    );
+
+    expect(result.location.distanceReliable).toBe(false);
+    expect(result.location.precision).toBe("city");
+    expect(result.location.warning).toMatch(/city-level centroids/i);
+  });
+
+  it("keeps distanceReliable when at least one store has address geo", async () => {
+    const loadStores = vi.fn().mockResolvedValue([
+      store({
+        id: "11111111-1111-4111-8111-111111111111",
+        lat: 32.16,
+        lng: 34.84,
+        geoSource: "city_centroid",
+        distanceKm: 2,
+      }),
+      store({
+        id: "22222222-2222-4222-8222-222222222222",
+        lat: 32.165,
+        lng: 34.845,
+        geoSource: "address",
+        distanceKm: 0.4,
+      }),
+    ]);
+
+    const result = await resolveStoreLocation(
+      { city: "Herzliya", near: { lat: 32.17, lng: 34.85 }, radiusKm: 5 },
+      loadStores,
+    );
+
+    expect(result.location.distanceReliable).toBe(true);
+    expect(result.location.precision).toBe("radius");
+    expect(result.location.warning).toBeNull();
   });
 });

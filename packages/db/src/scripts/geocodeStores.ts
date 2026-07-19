@@ -1,6 +1,7 @@
 import {
   canonicalizeCity,
   centroidForCity,
+  cityMatchKeys,
   normalizeStoreCoordinates,
   type StoreCoordinates,
 } from "@super-mcp/shared";
@@ -16,6 +17,9 @@ import { closePool, getPool } from "../client/index.js";
  *   --mode=address: geocode the store's full street address via OSM Nominatim
  *     and upgrade to address-level precision when the result is sane (in Israel
  *     bounds and within ~15km of the city centroid). Rate-limited (≥1s/call).
+ *   --city=<name>: optional city filter (Hebrew/English/code); matches via
+ *     cityMatchKeys so aliases resolve to the same stores.
+ *   --limit=N / --dry-run: cap rows / skip writes.
  */
 
 type Mode = "centroid" | "address";
@@ -29,10 +33,16 @@ interface StoreRow {
   geo_source: string | null;
 }
 
-function parseArgs(argv: string[]): { mode: Mode; limit: number | null; dryRun: boolean } {
+function parseArgs(argv: string[]): {
+  mode: Mode;
+  limit: number | null;
+  dryRun: boolean;
+  city: string | null;
+} {
   let mode: Mode = "centroid";
   let limit: number | null = null;
   let dryRun = false;
+  let city: string | null = null;
   for (const arg of argv) {
     if (arg.startsWith("--mode=")) {
       const value = arg.slice("--mode=".length);
@@ -43,11 +53,25 @@ function parseArgs(argv: string[]): { mode: Mode; limit: number | null; dryRun: 
     } else if (arg.startsWith("--limit=")) {
       limit = Number(arg.slice("--limit=".length));
       if (!Number.isFinite(limit) || limit <= 0) throw new Error(`invalid --limit`);
+    } else if (arg.startsWith("--city=")) {
+      city = arg.slice("--city=".length).trim();
+      if (!city) throw new Error(`invalid --city`);
     } else if (arg === "--dry-run") {
       dryRun = true;
     }
   }
-  return { mode, limit, dryRun };
+  return { mode, limit, dryRun, city };
+}
+
+/** SQL fragment + params for optional city filter via cityMatchKeys. */
+function cityFilterClause(
+  city: string | null,
+  startParam: number,
+): { sql: string; params: string[][] } {
+  if (!city) return { sql: "", params: [] };
+  const keys = cityMatchKeys(city);
+  if (keys.length === 0) throw new Error(`--city=${city} produced no match keys`);
+  return { sql: ` AND city = ANY($${startParam}::text[])`, params: [keys] };
 }
 
 /** Haversine distance in km between two WGS84 points. */
@@ -65,14 +89,20 @@ function distanceKm(a: StoreCoordinates, b: StoreCoordinates): number {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** Tier 1: stamp every ungeocoded store with its city centroid. */
-async function runCentroid(limit: number | null, dryRun: boolean): Promise<void> {
+async function runCentroid(
+  limit: number | null,
+  dryRun: boolean,
+  city: string | null,
+): Promise<void> {
   const pool = getPool();
+  const cityFilter = cityFilterClause(city, 1);
   const res = await pool.query<StoreRow>(
     `SELECT id, city, address, lat, lng, geo_source
        FROM store
-      WHERE lat IS NULL OR lng IS NULL
+      WHERE (lat IS NULL OR lng IS NULL)${cityFilter.sql}
       ORDER BY id
       ${limit ? `LIMIT ${limit}` : ""}`,
+    cityFilter.params,
   );
 
   let updated = 0;
@@ -106,6 +136,7 @@ async function runCentroid(limit: number | null, dryRun: boolean): Promise<void>
     JSON.stringify({
       event: "geocode_centroid",
       dryRun,
+      city,
       scanned: res.rows.length,
       updated,
       unmapped,
@@ -119,18 +150,7 @@ interface NominatimHit {
   lon: string;
 }
 
-/** Query OSM Nominatim for a single street address; returns null on no hit. */
-async function geocodeAddress(
-  address: string,
-  city: string,
-): Promise<StoreCoordinates | null> {
-  const params = new URLSearchParams({
-    format: "json",
-    countrycodes: "il",
-    limit: "1",
-    street: address,
-    city,
-  });
+async function nominatimSearch(params: URLSearchParams): Promise<StoreCoordinates | null> {
   const url = `https://nominatim.openstreetmap.org/search?${params.toString()}`;
   const resp = await fetch(url, {
     headers: {
@@ -146,20 +166,56 @@ async function geocodeAddress(
 }
 
 /**
+ * Query OSM Nominatim for a store address. Tries structured street+city first,
+ * then a free-text "address, city" query (mall names like קניון ארנה often need
+ * the free-text path).
+ */
+async function geocodeAddress(
+  address: string,
+  city: string,
+): Promise<StoreCoordinates | null> {
+  const structured = await nominatimSearch(
+    new URLSearchParams({
+      format: "json",
+      countrycodes: "il",
+      limit: "1",
+      street: address,
+      city,
+    }),
+  );
+  if (structured) return structured;
+  await sleep(1100);
+  return nominatimSearch(
+    new URLSearchParams({
+      format: "json",
+      countrycodes: "il",
+      limit: "1",
+      q: `${address}, ${city}`,
+    }),
+  );
+}
+
+/**
  * Tier 2: upgrade centroid rows to address-level precision. Only accepts a
  * Nominatim hit that passes the Israel-bounds guard AND lands within ~15km of
  * the store's city centroid (guards against Nominatim resolving to the wrong
  * town or a namesake street elsewhere).
  */
-async function runAddress(limit: number | null, dryRun: boolean): Promise<void> {
+async function runAddress(
+  limit: number | null,
+  dryRun: boolean,
+  city: string | null,
+): Promise<void> {
   const pool = getPool();
+  const cityFilter = cityFilterClause(city, 1);
   const res = await pool.query<StoreRow>(
     `SELECT id, city, address, lat, lng, geo_source
        FROM store
       WHERE address IS NOT NULL
-        AND (geo_source IS NULL OR geo_source = 'city_centroid')
+        AND (geo_source IS NULL OR geo_source = 'city_centroid')${cityFilter.sql}
       ORDER BY id
       ${limit ? `LIMIT ${limit}` : ""}`,
+    cityFilter.params,
   );
 
   let upgraded = 0;
@@ -204,6 +260,7 @@ async function runAddress(limit: number | null, dryRun: boolean): Promise<void> 
     JSON.stringify({
       event: "geocode_address",
       dryRun,
+      city,
       scanned: res.rows.length,
       upgraded,
       skipped,
@@ -212,11 +269,11 @@ async function runAddress(limit: number | null, dryRun: boolean): Promise<void> 
 }
 
 async function main(): Promise<void> {
-  const { mode, limit, dryRun } = parseArgs(process.argv.slice(2));
+  const { mode, limit, dryRun, city } = parseArgs(process.argv.slice(2));
   if (mode === "address") {
-    await runAddress(limit, dryRun);
+    await runAddress(limit, dryRun, city);
   } else {
-    await runCentroid(limit, dryRun);
+    await runCentroid(limit, dryRun, city);
   }
   await closePool();
 }

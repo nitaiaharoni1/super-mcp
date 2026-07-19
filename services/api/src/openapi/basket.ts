@@ -75,14 +75,15 @@ export const basketOptimizeRequestSchema = {
       maximum: 100,
       default: 3,
       description:
-        "Shekels of 'cost' per km when ranking recommendations.bestNearby (default 3). Higher favors closer stores when coverage ties.",
+        "Shekels of 'cost' per km when ranking bestNearby/bestInStore/bestOrderable (default 3). " +
+        "Ignored when location.distanceReliable is false (city-centroid coordinates).",
     },
     verbose: {
       type: "boolean",
       default: false,
       description:
         "When false (default), per-store `lines` are omitted for every store except the recommended ones " +
-        "(recommendations.cheapest/bestNearby) to keep the response small; `missingItems` is always kept. " +
+        "(cheapest/bestNearby/bestInStore/bestOrderable) to keep the response small; `missingItems` is always kept. " +
         "Set true for full per-store line detail.",
     },
   },
@@ -256,7 +257,7 @@ export const basketOptimizeResponseSchema = {
       type: "array",
       description:
         "Per-store breakdowns. Unless verbose=true, `lines` is empty for every store except the recommended " +
-        "ones (recommendations.cheapest/bestNearby) to keep the response small; `missingItems` is always present.",
+        "ones (cheapest/bestNearby/bestInStore/bestOrderable) to keep the response small; `missingItems` is always present.",
       items: {
         type: "object",
         properties: {
@@ -290,18 +291,28 @@ export const basketOptimizeResponseSchema = {
     recommendations: {
       type: "object",
       description:
-        "Two complementary store picks. `cheapest` = lowest total. `bestNearby` = most items covered, " +
-        "ties broken by total + a per-km distance penalty (distance_penalty_per_km) — the store to actually go to " +
-        "when no single store carries the full basket. Both share the recommendation shape; either may be null.",
+        "Store picks. `cheapest` = lowest total among stores meeting an ~80% coverage floor. " +
+        "`bestNearby` / `bestInStore` = within a 1-line coverage band of the max, then total + distance " +
+        "(distance ignored when location.distanceReliable is false) — the store to actually visit. " +
+        "`bestOrderable` = same band on lines with a non-null storefront link. All share the recommendation shape; any may be null.",
       properties: {
         cheapest: {
           ...basketRecommendationSchema,
-          description: "Lowest total among compared stores.",
+          description: "Lowest total among stores meeting the coverage floor.",
         },
         bestNearby: {
           ...basketRecommendationSchema,
           description:
-            "Most items covered; ties broken by total + distance penalty. The 'where should I actually go' answer.",
+            "Within a 1-line coverage band of the max; prefer lower total (+ distance when reliable). Matches bestInStore.",
+        },
+        bestInStore: {
+          ...basketRecommendationSchema,
+          description: "Physical visit pick; same store as bestNearby.",
+        },
+        bestOrderable: {
+          ...basketRecommendationSchema,
+          description:
+            "Within a 1-line band of max orderable coverage (priced lines with link != null). Null if none are orderable.",
         },
       },
     },

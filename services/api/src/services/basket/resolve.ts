@@ -8,13 +8,14 @@ import {
 } from "../search/index.js";
 import { toSearchLocationParams } from "../search/locationScope.js";
 import { hitToCandidate } from "./candidates.js";
-import { loadProductClasses } from "./productClasses.js";
+import { loadProductClasses, type ProductClassInfo } from "./productClasses.js";
 import { rankQueryCandidates } from "./rankQueryCandidates.js";
 import {
   searchQueryItem,
   type QuerySearchContext,
 } from "./resolveQuery.js";
 import type {
+  BasketCandidate,
   BasketItemInput,
   ResolvedItem,
   ResolveLocationScope,
@@ -47,6 +48,13 @@ type Phase1Query = {
 
 type Phase1Result = Phase1Direct | Phase1Query;
 
+type ProductRow = {
+  id: string;
+  name: string;
+  size_qty: number | null;
+  size_unit: string | null;
+};
+
 function validateItem(index: number, item: BasketItemInput): ValidatedItem {
   const hasQty = item.qty != null && Number.isFinite(item.qty) && item.qty > 0;
   const hasAmount = item.amount != null && Number.isFinite(item.amount) && item.amount > 0;
@@ -69,9 +77,104 @@ function validateItem(index: number, item: BasketItemInput): ValidatedItem {
   };
 }
 
+/** One batched product lookup for every product_id line in the basket. */
+async function loadProductsById(productIds: string[]): Promise<Map<string, ProductRow>> {
+  const map = new Map<string, ProductRow>();
+  if (productIds.length === 0) return map;
+  const res = await query<ProductRow>(
+    `SELECT id, name, size_qty, size_unit FROM product WHERE id = ANY($1::uuid[])`,
+    [productIds],
+  );
+  for (const row of res.rows) map.set(row.id, row);
+  return map;
+}
+
+function stampCandidateClass(candidate: BasketCandidate, info: ProductClassInfo): void {
+  candidate.classL1 = info.l1;
+  candidate.classL2 = info.l2;
+  candidate.classL3 = info.l3;
+  candidate.variant = info.variant;
+  candidate.brandExtracted = info.brand;
+  if (!candidate.productClass) candidate.productClass = info.l1;
+}
+
+function stampDirectResolvedClasses(
+  resolved: ResolvedItem,
+  classMap: Map<string, ProductClassInfo>,
+): void {
+  if (!resolved.productId) return;
+  const info = classMap.get(resolved.productId);
+  if (!info) return;
+  for (const c of resolved.candidates) {
+    if (c.productId === resolved.productId) stampCandidateClass(c, info);
+  }
+}
+
+function resolveProductIdItem(
+  validated: ValidatedItem,
+  row: ProductRow | undefined,
+): ResolvedItem {
+  const { index, item, amount, unit } = validated;
+  const base = {
+    index,
+    amount,
+    unit,
+    primaryProductId: null as string | null,
+    primaryName: null as string | null,
+    substitution: null,
+  };
+  if (!row) {
+    return {
+      ...base,
+      qty: item.qty ?? item.amount ?? 1,
+      qtyMode: "legacy_packs",
+      productId: null,
+      name: null,
+      resolvedBy: "unresolved",
+      confidence: null,
+      lowConfidence: true,
+      candidates: [],
+    };
+  }
+  const purchase = resolvePurchaseQty({
+    packQty: item.qty,
+    amount: item.amount,
+    unit: item.unit,
+    productSizeQty: row.size_qty,
+    productSizeUnit: row.size_unit,
+    productName: row.name,
+  });
+  return {
+    ...base,
+    qty: purchase.qty,
+    qtyMode: purchase.mode,
+    productId: row.id,
+    name: row.name,
+    resolvedBy: "product_id",
+    confidence: 1,
+    lowConfidence: false,
+    candidates: [
+      {
+        productId: row.id,
+        name: row.name,
+        score: 1,
+        matchedVia: "product",
+        sizeQty: row.size_qty,
+        sizeUnit: row.size_unit,
+        // Direct product_id resolution hasn't checked local price yet; do not
+        // fabricate availability.
+        hasPrice: false,
+        hasLocalPrice: false,
+        productClass: null,
+      },
+    ],
+  };
+}
+
 async function resolveDirectItem(
   validated: ValidatedItem,
-  location?: ResolveLocationScope,
+  location: ResolveLocationScope | undefined,
+  productById: Map<string, ProductRow>,
 ): Promise<ResolvedItem> {
   const { index, item, amount, unit } = validated;
   const base = {
@@ -84,59 +187,7 @@ async function resolveDirectItem(
   };
 
   if (item.productId) {
-    const res = await query<{
-      id: string;
-      name: string;
-      size_qty: number | null;
-      size_unit: string | null;
-    }>(`SELECT id, name, size_qty, size_unit FROM product WHERE id = $1`, [item.productId]);
-    const row = res.rows[0];
-    if (!row) {
-      return {
-        ...base,
-        qty: item.qty ?? item.amount ?? 1,
-        qtyMode: "legacy_packs",
-        productId: null,
-        name: null,
-        resolvedBy: "unresolved",
-        confidence: null,
-        lowConfidence: true,
-        candidates: [],
-      };
-    }
-    const purchase = resolvePurchaseQty({
-      packQty: item.qty,
-      amount: item.amount,
-      unit: item.unit,
-      productSizeQty: row.size_qty,
-      productSizeUnit: row.size_unit,
-      productName: row.name,
-    });
-    return {
-      ...base,
-      qty: purchase.qty,
-      qtyMode: purchase.mode,
-      productId: row.id,
-      name: row.name,
-      resolvedBy: "product_id",
-      confidence: 1,
-      lowConfidence: false,
-      candidates: [
-        {
-          productId: row.id,
-          name: row.name,
-          score: 1,
-          matchedVia: "product",
-          sizeQty: row.size_qty,
-          sizeUnit: row.size_unit,
-          // Direct product_id resolution hasn't checked local price yet; do not
-          // fabricate availability.
-          hasPrice: false,
-          hasLocalPrice: false,
-          productClass: null,
-        },
-      ],
-    };
+    return resolveProductIdItem(validated, productById.get(item.productId));
   }
 
   if (item.gtin) {
@@ -197,6 +248,12 @@ export async function resolveItems(
 
   const validated = items.map((item, index) => validateItem(index, item));
 
+  // Batch every product_id lookup into one SELECT before phase-1 concurrency.
+  const productIdsToLoad = [
+    ...new Set(validated.flatMap((v) => (v.item.productId ? [v.item.productId] : []))),
+  ];
+  const productById = await loadProductsById(productIdsToLoad);
+
   // Phase 1: product_id/gtin resolve + query search (bounded concurrency).
   const phase1 = await mapPool(
     validated,
@@ -217,26 +274,37 @@ export async function resolveItems(
           ctx,
         };
       }
-      const resolved = await resolveDirectItem(entry, searchLocation);
+      const resolved = await resolveDirectItem(entry, searchLocation, productById);
       return { kind: "direct", index: entry.index, resolved };
     },
   );
 
   // Phase 2: union candidate IDs and load semantic profiles once.
   const queryPhases = phase1.filter((row): row is Phase1Query => row.kind === "query");
+  const directPhases = phase1.filter((row): row is Phase1Direct => row.kind === "direct");
   const needsProfiles = queryPhases.some((row) => row.ctx.ontology != null);
+  const directProductIds = directPhases.flatMap((row) =>
+    row.resolved.productId ? [row.resolved.productId] : [],
+  );
   const candidateIds = [
-    ...new Set(queryPhases.flatMap((row) => row.ctx.hits.map((hit) => hit.id))),
+    ...new Set([
+      ...queryPhases.flatMap((row) => row.ctx.hits.map((hit) => hit.id)),
+      ...directProductIds,
+    ]),
   ];
   let profiles = new Map<string, SemanticProfile | Partial<SemanticProfile>>();
   let profileBatchMs = 0;
   if (needsProfiles) {
     const profileStarted = Date.now();
-    const loaded = await loadSemanticProfiles(candidateIds, activeOntologyVersion());
+    // Profiles are only needed for query ranking — keep the batch to query hits.
+    const queryCandidateIds = [
+      ...new Set(queryPhases.flatMap((row) => row.ctx.hits.map((hit) => hit.id))),
+    ];
+    const loaded = await loadSemanticProfiles(queryCandidateIds, activeOntologyVersion());
     profiles = loaded ?? new Map();
     profileBatchMs = Date.now() - profileStarted;
   }
-  // Offline LLM taxonomy (migration 017) for every candidate id, one batched read.
+  // Offline LLM taxonomy (migration 017) for every candidate + direct product id.
   const classMap = await loadProductClasses(candidateIds);
 
   // Phase 3: rank/decide each query line from the shared profile Map.
@@ -246,6 +314,7 @@ export async function resolveItems(
   const resolved = new Array<ResolvedItem>(items.length);
   for (const row of phase1) {
     if (row.kind === "direct") {
+      stampDirectResolvedClasses(row.resolved, classMap);
       resolved[row.index] = row.resolved;
       continue;
     }

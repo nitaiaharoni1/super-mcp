@@ -25,6 +25,11 @@ export const storeSchema = {
     zip: { type: "string", nullable: true },
     lat: { type: "number", nullable: true },
     lng: { type: "number", nullable: true },
+    geoSource: {
+      type: "string",
+      nullable: true,
+      description: "Provenance of lat/lng: address, feed, city_centroid, or null.",
+    },
     distanceKm: { type: "number", nullable: true },
   },
 };
@@ -36,6 +41,12 @@ export const storeLocationMetadataSchema = {
     precision: { type: "string", enum: ["none", "city", "radius"] },
     fallbackApplied: { type: "boolean" },
     warning: { type: "string", nullable: true },
+    distanceReliable: {
+      type: "boolean",
+      description:
+        "False when near-scope results only have city_centroid (or identically shared) coordinates; " +
+        "distance ranking is suppressed. True when near was not requested or at least one store has address/feed geo.",
+    },
     requested: {
       type: "object",
       properties: {

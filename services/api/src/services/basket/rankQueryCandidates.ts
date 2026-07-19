@@ -24,6 +24,7 @@ import {
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  queryHeadAnchored,
 } from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
@@ -269,7 +270,7 @@ export function rankQueryCandidates(
       seen.add(hit.id);
     }
   }
-  const decision = decideResolution(
+  let decision = decideResolution(
     item.query ?? "",
     shortlist.map((hit) => ({
       ...hit,
@@ -311,6 +312,28 @@ export function rankQueryCandidates(
   const chosen = decision.productId
     ? (shortlist.find((hit) => hit.id === decision.productId) ?? shortlist[0])
     : shortlist[0];
+  // Modifier-trap guard at the DECISION level (covers the normal auto-resolve
+  // path, not just the needs_confirmation overrides): a strong lexical/name match
+  // can still resolve a line to a product where the query word is a trailing
+  // MODIFIER — "שמן" (oil) → "עגבניות מיובשות שמן" (sun-dried tomatoes in oil),
+  // "סבון" (soap) → "משחק בועות סבון" (a bubble toy). If the pick isn't
+  // head-anchored, drop to needs_confirmation so the user decides.
+  if (
+    decision.status === "resolved" &&
+    chosen &&
+    item.query &&
+    !queryHeadAnchored(item.query, chosen.name)
+  ) {
+    decision = {
+      status: "needs_confirmation",
+      productId: null,
+      name: null,
+      confidenceLabel: null,
+      confidence: null,
+      lowConfidence: true,
+      autoPrice: false,
+    };
+  }
   if (!chosen) {
     return {
       qty: item.qty ?? item.amount ?? 1,
@@ -365,7 +388,12 @@ export function rankQueryCandidates(
     hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
   );
   // BasketCandidate drops brand; the risk classifier needs it, so keep the raw
-  // hit brand keyed by product id.
+  // hit brand keyed by product id. NOTE: we deliberately do NOT fall back to the
+  // LLM brand_extracted here. The commodity+variant+query-token path already pins
+  // a brand query (query tokens must appear in the equivalent's name) AND keeps
+  // it regular (variant), which is strictly better than the legacy brand-pin
+  // downgrade — routing more lines through brand-pin regressed cola→diet and cut
+  // auto-resolve 16→13/18. brand_extracted stays stored for future use.
   const shortlistBrandById = new Map<string, string | null>(
     shortlist.map((hit) => [hit.id, hit.brand ?? null]),
   );
@@ -411,7 +439,8 @@ export function rankQueryCandidates(
     risk.kind === "commodity" &&
     candidates[0] != null &&
     shortlist[0] != null &&
-    !isVectorOnlyHit(shortlist[0])
+    !isVectorOnlyHit(shortlist[0]) &&
+    queryHeadAnchored(item.query ?? "", candidates[0].name)
   ) {
     const equivalents = buildCommodityEquivalents(
       candidates[0],
@@ -458,7 +487,7 @@ export function rankQueryCandidates(
       penaltyBlock: searchConfig?.penaltyBlockThreshold ?? 1,
       penaltyOf: (id) => gateById.get(id)?.penaltyScore ?? 0,
     });
-    if (equivalents.length >= 2) {
+    if (equivalents.length >= 2 && queryHeadAnchored(item.query ?? "", equivalents[0]!.name)) {
       const top = equivalents[0]!;
       return {
         ...base,

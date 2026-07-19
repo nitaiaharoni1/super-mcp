@@ -17,6 +17,7 @@ const STORE = {
   zip: null,
   lat: null,
   lng: null,
+  geoSource: null,
   distanceKm: null,
 } as const;
 
