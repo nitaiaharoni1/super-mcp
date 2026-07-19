@@ -39,10 +39,11 @@ async function fetchCarriedClassPeers(
     conds.push(`m.class_l3 = $${params.length + 1}`);
     params.push(primary.classL3);
   }
-  if (primary.variant) {
-    conds.push(`(m.variant = $${params.length + 1} OR m.variant IS NULL)`);
-    params.push(primary.variant);
-  }
+  // EXACT variant match (default a stale/unknown primary to regular). A NULL peer
+  // variant is NOT a wildcard: a stale row (classified before the variant pass)
+  // whose name implies שרי/דיאט/אורגני would otherwise group into a generic line.
+  conds.push(`m.variant = $${params.length + 1}`);
+  params.push(primary.variant ?? "regular");
   const res = await query<CarriedProductRow>(
     `SELECT DISTINCT ON (l.product_id) l.product_id, p.name, p.size_qty, p.size_unit
        FROM product p
