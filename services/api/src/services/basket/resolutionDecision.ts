@@ -2,6 +2,7 @@ import {
   compareClassPaths,
   isDominantPhraseMatch,
   normalizeEmbedInput,
+  queryTokensSatisfied,
   tokenizeNormalized,
   type ClassPath,
   type RetrievalEvidence,
@@ -9,6 +10,7 @@ import {
   type SemanticSearchConfig,
 } from "@super-mcp/shared";
 import type { SearchProductHit } from "../search/types.js";
+import { queryHeadAnchored } from "./equivalence.js";
 import type { ResolutionStatus } from "./types.js";
 
 export interface ResolutionDecision {
@@ -24,7 +26,7 @@ export interface ResolutionDecision {
 
 /** Ranked candidate input for resolution (SearchProductHit-shaped). */
 export type ResolutionCandidate = Pick<SearchProductHit, "id" | "name" | "matchedVia" | "vectorDistance"> & {
-  /** Fused RRF score — ignored for auto-resolve; kept for compat only. */
+  /** Fused RRF score — ignored for auto-resolve gates (ranking only). */
   score?: number;
   lexicalScore?: number | null;
   evidence?: RetrievalEvidence;
@@ -69,16 +71,18 @@ function hasDominantPhrase(candidate: ResolutionCandidate): boolean {
  * Prefer evidence-based dominance; else certify a short (≤3-token) product name
  * only when every query token is a *whole* token of the name. A mid-word
  * continuation must never certify: "קרח" must not make "קרחון לימון" safe.
+ * Utensil/opener leaders ("חולץ יין" for query "יין") are never safe to auto-price.
  */
 function nameIsQuerySafe(candidate: ResolutionCandidate, queryText: string): boolean {
+  if (!queryHeadAnchored(queryText, candidate.name)) return false;
   if (hasDominantPhrase(candidate)) return true;
   const nameTokens = tokenizeNormalized(normalizeEmbedInput(candidate.name));
   // Blocks incidental host names like "לחם מחמצת עם בצלים" (4+ tokens).
   if (nameTokens.length === 0 || nameTokens.length > 3) return false;
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
-  return queryTokens.length > 0 && queryTokens.every((qt) => nameTokens.includes(qt));
+  // Morphology-tolerant: בצלים↔בצל, פיתות↔פיתה (exact token includes was too strict).
+  return queryTokens.length > 0 && queryTokensSatisfied(queryTokens, candidate.name);
 }
-
 function hasDeterministicEvidence(
   candidate: ResolutionCandidate,
   config: SemanticSearchConfig,

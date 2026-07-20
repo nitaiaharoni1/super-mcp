@@ -2,6 +2,7 @@ import { query } from "@super-mcp/db";
 import {
   DEFAULT_SEMANTIC_SEARCH_CONFIG,
   cityMatchKeys,
+  expandHebrewQueryVariants,
   expandQueryAliases,
   isDominantPhraseMatch,
   normalizeGtin,
@@ -220,6 +221,24 @@ function isLexicalStrong(hit: SearchProductHit | undefined): boolean {
   );
 }
 
+/**
+ * When the request is location-scoped, a strong product-only phrase hit (e.g.
+ * "חומוס קלוי" for query "חומוס") must not skip the listing ILIKE pass — chain
+ * listing names ("סלט חומוס אחלה") often carry the locally-stocked commodity
+ * while product names are snack/orphan collisions. Early-return only for a
+ * locally-priced exact product name; otherwise continue to listing fallback.
+ * Unscoped requests keep the existing strong-evidence short-circuit.
+ */
+export function canEarlyReturnLexical(
+  hits: SearchProductHit[],
+  locationScoped: boolean,
+): boolean {
+  const top = hits[0];
+  if (!isLexicalStrong(top)) return false;
+  if (!locationScoped) return true;
+  return hits.some((h) => Boolean(h.evidence?.exactName && h.hasLocalPrice));
+}
+
 async function searchLexicalOnce(
   params: SearchProductsParams,
   config: SemanticSearchConfig,
@@ -333,9 +352,15 @@ async function searchLexical(
   const includeListing = opts?.includeListing !== false;
   const candidateLimit = config.lexicalLimit;
   const originalQuery = (params.originalQuery ?? params.q ?? "").trim();
-  const variants = opts?.ontology
-    ? expandQueryAliases(originalQuery, opts.ontology, 4)
-    : [originalQuery];
+  // Ontology aliases (בצלים→בצל when listed) plus morphology singulars
+  // (לימונים→לימון) so FTS/ILIKE recall can surface products that stem-match
+  // but do not share a substring with the plural query.
+  const variants = [
+    ...(opts?.ontology
+      ? expandQueryAliases(originalQuery, opts.ontology, 4)
+      : [originalQuery]),
+    ...expandHebrewQueryVariants(originalQuery, 4),
+  ];
   const unique = [...new Set(variants.map((v) => v.trim()).filter(Boolean))];
   const primary = await searchLexicalOnce(
     { ...params, q: originalQuery || params.q, originalQuery },
@@ -348,14 +373,19 @@ async function searchLexical(
     },
   );
   const primaryTop = primary[0];
+  const morphExpanding = unique.some((v) => v !== originalQuery);
+  // Exact product name for the raw query (e.g. a SKU literally named "לימונים")
+  // may skip expansion. A mere phrase hit ("ארק לימונים") must NOT — plurals need
+  // the singular surface probe ("לימון") which FTS/ILIKE cannot see otherwise.
   const primaryStrong = Boolean(
     primaryTop &&
       (primaryTop.evidence?.exactName ||
-        (primaryTop.evidence?.exactPhrase &&
+        (!morphExpanding &&
+          primaryTop.evidence?.exactPhrase &&
           isDominantPhraseMatch(primaryTop.name, primaryTop.evidence))),
   );
-  // If the original query already has a dominant exact hit, skip alias expansion
-  // (expansion to singular forms can surface junk listing collisions).
+  // If the original query already has a dominant exact hit, skip alias/morphology
+  // expansion (expansion to singular forms can surface junk listing collisions).
   if (unique.length <= 1 || primaryStrong) {
     const limited = primary.slice(0, candidateLimit);
     return applyFinalLimit
@@ -434,11 +464,18 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
   // candidates: the wider pool (e.g. roasted-chickpea "חומוס קלוי") is separated by
   // its class label, so it can't be mistaken for the spread. Unscoped, or when any
   // exact hit is local, the fast path stands.
+  //
+  // Also: a strong plural *prefix* hit ("לימונים ארוזים") must not skip morphology
+  // expansion to the singular surface form ("לימון") that FTS/ILIKE cannot see.
   const locationScoped = Boolean(
     params.city || params.near || (params.storeIds && params.storeIds.length > 0),
   );
+  const morphNeedsExpansion =
+    q !== "" && expandHebrewQueryVariants(q, 4).some((v) => v !== q);
   const exactProbeUsable =
-    exactHits != null && !(locationScoped && exactHits.every((h) => !h.hasLocalPrice));
+    exactHits != null &&
+    !(locationScoped && exactHits.every((h) => !h.hasLocalPrice)) &&
+    !(morphNeedsExpansion && !exactHits.some((h) => h.evidence?.exactName));
   if (exactHits && exactProbeUsable) {
     console.log(
       JSON.stringify({
@@ -495,7 +532,7 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
     includeListing: false,
     ontology,
   });
-  if (isLexicalStrong(lexical[0])) {
+  if (canEarlyReturnLexical(lexical, locationScoped)) {
     console.log(
       JSON.stringify({
         event: "semantic_search",
@@ -514,7 +551,8 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
     return orderByLocationStock(lexical, finalLimit);
   }
 
-  // Weak first pass → fuzzy lexical WITH listing (full candidate limit) before / with vector.
+  // Weak / location-scoped first pass → fuzzy lexical WITH listing before vector.
+  // Location scope often needs listing names to surface the SKUs stores carry.
   const fuzzyLexical = await searchLexical(params, config, {
     applyFinalLimit: false,
     includeFuzzy: true,
@@ -522,7 +560,7 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
     ontology,
   });
   lexical = mergeLexicalHits([...lexical, ...fuzzyLexical], config.lexicalLimit);
-  if (isLexicalStrong(lexical[0])) {
+  if (canEarlyReturnLexical(lexical, locationScoped) || isLexicalStrong(lexical[0])) {
     console.log(
       JSON.stringify({
         event: "semantic_search",
@@ -632,5 +670,6 @@ export async function searchProducts(params: SearchProductsParams): Promise<Prod
     categoryL2: hit.categoryL2,
     sizeQty: hit.sizeQty,
     sizeUnit: hit.sizeUnit,
+    pieceCount: hit.pieceCount,
   }));
 }

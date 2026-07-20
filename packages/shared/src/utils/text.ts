@@ -10,9 +10,6 @@ export function scrubOptionalText(value: string | null | undefined): string | un
   return cleaned.length ? cleaned : undefined;
 }
 
-/** @deprecated Use scrubOptionalText — kept for ingest call sites. */
-export const scrubString = scrubOptionalText;
-
 /** Recursively strip NUL bytes from JSON-like promo params. */
 export function scrubJson(value: unknown): unknown {
   if (typeof value === "string") return scrubNullChars(value);

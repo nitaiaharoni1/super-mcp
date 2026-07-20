@@ -72,6 +72,37 @@ describe("decideResolution", () => {
     expect(d.productId).toBeNull();
   });
 
+  it("does not auto-resolve a wine corkscrew for bare יין", () => {
+    const d = decideResolution(
+      "יין",
+      [
+        hit({
+          id: "corkscrew",
+          name: "חולץ יין",
+          lexicalScore: 0.95,
+          hasLocalPrice: true,
+          evidence: {
+            exactPhrase: true,
+            exactName: false,
+            queryTokenCount: 1,
+            matchedTokenCount: 1,
+            lexicalScore: 0.95,
+          },
+        }),
+        hit({
+          id: "wine",
+          name: "יין קברנה סוביניון 750 מ\"ל",
+          lexicalScore: 0.88,
+          hasLocalPrice: true,
+          evidence: { lexicalScore: 0.88, queryTokenCount: 1, matchedTokenCount: 1 },
+        }),
+      ],
+      config,
+    );
+    expect(d.autoPrice).toBe(false);
+    expect(d.productId).not.toBe("corkscrew");
+  });
+
   it("margin check considers every strong rival in the shortlist, not just [1]", () => {
     // A chosen at [0]; a comparable near-twin C at [2] from a different product
     // line (different name / product id) must trigger confirmation.
@@ -397,6 +428,31 @@ describe("decideResolution", () => {
     expect(d.status).toBe("needs_confirmation");
     expect(d.autoPrice).toBe(false);
     expect(d.productId).toBeNull();
+  });
+
+  it("auto-resolves short names via stemmed query tokens (בצלים↔בצל)", () => {
+    const d = decideResolution(
+      "בצלים",
+      [
+        hit({
+          id: "onion",
+          name: "בצל אדום",
+          lexicalScore: 0.95,
+          intentTier: 1,
+          evidence: {
+            exactPhrase: false,
+            exactName: false,
+            queryTokenCount: 1,
+            matchedTokenCount: 1,
+            lexicalScore: 0.95,
+          },
+        }),
+      ],
+      config,
+    );
+    expect(d.status).toBe("resolved");
+    expect(d.productId).toBe("onion");
+    expect(d.autoPrice).toBe(true);
   });
 });
 

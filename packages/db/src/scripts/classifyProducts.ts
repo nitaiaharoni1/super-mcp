@@ -125,7 +125,10 @@ Rules:
   * חומוס as a ready spread/salad -> spreads_condiments/hummus_tahini_salads/hummus_spread ; dry חומוס/גרגרי חומוס (chickpea grains) -> pantry_dry/legumes_dry ; חומוס קלוי (roasted snack) -> snacks_sweets.
   * בצל (dry onion) -> vegetable_fresh/onion ; בצל ירוק (scallion) -> vegetable_fresh/scallion ; לחם בצל -> bakery/bread.
   * לימון -> fruit_fresh/lemon ; ליים -> fruit_fresh/lime ; מלח לימון (citric acid) -> pantry_dry/spices_seasoning.
+  * אבטיח (watermelon) -> fruit_fresh/watermelon — NEVER melon. מלון (cantaloupe/honeydew) -> fruit_fresh/melon.
   * מלח גס/שולחן -> pantry_dry/salt_sugar/salt.
+  * קפה נמס / טייסטרס / נסקפה instant -> coffee/instant_coffee. קפה טורקי / ground Turkish coffee (no נמס) -> coffee/ground_coffee — NOT instant_coffee.
+  * עוגת לימונים / lemon cake -> bakery/cake ; never fruit_fresh/lemon. לקריץ/סוכריות קולה -> snacks_sweets/candy ; never soda/cola.
 - פיקדון/deposit/gift card/service fee -> non_food_other.
 - variant: the cross-cutting form a shopper would NOT accept as a plain substitute.
   Default "regular" for a normal product. Use: diet_zero (דיאט/זירו/zero), sugar_free

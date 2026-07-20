@@ -63,6 +63,7 @@ interface CandidateRow {
   category_l2: string | null;
   size_qty: number | null;
   size_unit: string | null;
+  piece_count: number | null;
   unit_price: string;
   currency: string;
   store_id: string;
@@ -140,7 +141,8 @@ export async function suggestSubstitutes(
   const res = await query<CandidateRow>(
     `SELECT * FROM (
        SELECT DISTINCT ON (p.id)
-         p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2, p.size_qty, p.size_unit,
+         p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2,
+         p.size_qty, p.size_unit, p.piece_count,
          sp.unit_price, sp.currency, st.id AS store_id, st.name AS store_name,
          st.chain_id, c.name_he AS chain_name, ${loc.distanceSelect},
          similarity(p.name, $2) AS name_sim,
@@ -182,6 +184,7 @@ export async function suggestSubstitutes(
         categoryL2: r.category_l2,
         sizeQty: r.size_qty,
         sizeUnit: r.size_unit,
+        pieceCount: r.piece_count,
       },
       bestUnitPrice,
       unitBasis: unitBasis(r.size_unit),
@@ -222,6 +225,7 @@ export async function suggestSubstitutes(
       categoryL2: product.categoryL2,
       sizeQty: product.sizeQty,
       sizeUnit: product.sizeUnit,
+      pieceCount: product.pieceCount,
     },
     baseline: {
       bestUnitPrice: baselineUnitPrice,

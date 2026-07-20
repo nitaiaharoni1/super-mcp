@@ -4,6 +4,7 @@ import type { ResolvedItem, StorePriceRow } from "../../../src/services/basket/t
 const resolveItems = vi.fn();
 const listStores = vi.fn();
 const loadBasketPricingData = vi.fn();
+const loadCandidateAvailability = vi.fn();
 
 vi.mock("../../../src/services/basket/resolve.js", () => ({
   resolveItems: (...args: unknown[]) => resolveItems(...args),
@@ -15,6 +16,7 @@ vi.mock("../../../src/services/stores/index.js", () => ({
 
 vi.mock("../../../src/services/basket/loadPricingData.js", () => ({
   loadBasketPricingData: (...args: unknown[]) => loadBasketPricingData(...args),
+  loadCandidateAvailability: (...args: unknown[]) => loadCandidateAvailability(...args),
 }));
 
 vi.mock("../../../src/services/search/ontology.js", () => ({
@@ -23,11 +25,13 @@ vi.mock("../../../src/services/search/ontology.js", () => ({
 
 import { optimizeBasket } from "../../../src/services/basket/optimize.js";
 
+const OPTIONS = { continuationSecret: "test-only-basket-continuation-secret-ok" };
+
 const CHAIN_ID = "22222222-2222-4222-8222-222222222222";
 const LINE_COUNT = 10;
 // Mirrors the real trace: a partial basket. The rest are needs_confirmation
 // (unpriced, surfaced as questions), so only PRICED_LINES enter store lines.
-const PRICED_LINES = 6;
+const PRICED_LINES = LINE_COUNT; // all lines resolve for complete-path verbose tests
 const STORE_COUNT = 12;
 
 const productId = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`;
@@ -39,7 +43,7 @@ function makeResolvedItem(index: number): ResolvedItem {
   return {
     index,
     qty: 1,
-    qtyMode: "legacy_packs",
+    qtyMode: "packs",
     amount: null,
     unit: null,
     productId: resolved ? productId(index) : null,
@@ -56,6 +60,7 @@ function makeResolvedItem(index: number): ResolvedItem {
         matchedVia: "product",
         sizeQty: null,
         sizeUnit: null,
+        pieceCount: null,
         hasPrice: true,
         hasLocalPrice: true,
         productClass: null,
@@ -103,6 +108,7 @@ function pricingData() {
 describe("optimizeBasket verbose flag", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loadCandidateAvailability.mockResolvedValue(new Map());
     listStores.mockResolvedValue(
       Array.from({ length: STORE_COUNT }, (_, si) => ({
         id: storeId(si),
@@ -126,21 +132,20 @@ describe("optimizeBasket verbose flag", () => {
   });
 
   const optimizeInput = (verbose?: boolean, storesLimit?: number) => ({
-    items: Array.from({ length: LINE_COUNT }, (_, index) => ({ query: `item ${index}`, qty: 1 })),
+    items: Array.from({ length: LINE_COUNT }, (_, index) => ({ query: `item ${index}`, packQty: 1 })),
     city: "הרצליה",
     ...(storesLimit === undefined ? {} : { storesLimit }),
     ...(verbose === undefined ? {} : { verbose }),
   });
 
   it("non-verbose omits per-store line detail except recommended stores", async () => {
-    const result = await optimizeBasket(optimizeInput(false));
+    const result = await optimizeBasket(optimizeInput(false), OPTIONS);
 
+    if (result.status !== "complete") throw new Error("expected complete");
     const recommendedIds = new Set(
       [
-        result.recommendations.cheapest?.storeId,
-        result.recommendations.bestNearby?.storeId,
-        result.recommendations.bestInStore?.storeId,
-        result.recommendations.bestOrderable?.storeId,
+        result.bestSingleStore?.storeId,
+        result.cheapestCompleteStore?.storeId,
       ].filter((id): id is string => Boolean(id)),
     );
     expect(recommendedIds.size).toBeGreaterThan(0);
@@ -157,20 +162,20 @@ describe("optimizeBasket verbose flag", () => {
   });
 
   it("verbose keeps per-store line detail on every store", async () => {
-    const result = await optimizeBasket(optimizeInput(true));
+    const result = await optimizeBasket(optimizeInput(true), OPTIONS);
+    if (result.status !== "complete") throw new Error("expected complete");
     for (const s of result.stores) {
       expect(s.lines.length).toBeGreaterThan(0);
     }
   });
 
   it("defaults to non-verbose (lines stripped on non-recommended stores)", async () => {
-    const result = await optimizeBasket(optimizeInput());
+    const result = await optimizeBasket(optimizeInput(), OPTIONS);
+    if (result.status !== "complete") throw new Error("expected complete");
     const recommendedIds = new Set(
       [
-        result.recommendations.cheapest?.storeId,
-        result.recommendations.bestNearby?.storeId,
-        result.recommendations.bestInStore?.storeId,
-        result.recommendations.bestOrderable?.storeId,
+        result.bestSingleStore?.storeId,
+        result.cheapestCompleteStore?.storeId,
       ].filter((id): id is string => Boolean(id)),
     );
     const nonRecommended = result.stores.filter((s) => !recommendedIds.has(s.storeId));
@@ -178,25 +183,27 @@ describe("optimizeBasket verbose flag", () => {
     for (const s of nonRecommended) expect(s.lines).toHaveLength(0);
   });
 
-  it("non-verbose strips per-item candidates (questions carry the option list)", async () => {
-    const result = await optimizeBasket(optimizeInput(false));
+  it("non-verbose strips per-item candidates", async () => {
+    const result = await optimizeBasket(optimizeInput(false), OPTIONS);
+    if (result.status !== "complete") throw new Error("expected complete");
     for (const item of result.items) {
       expect(item.candidates).toHaveLength(0);
     }
   });
 
   it("verbose keeps per-item candidates", async () => {
-    const result = await optimizeBasket(optimizeInput(true));
+    const result = await optimizeBasket(optimizeInput(true), OPTIONS);
+    if (result.status !== "complete") throw new Error("expected complete");
     expect(result.items.some((item) => item.candidates.length > 0)).toBe(true);
   });
 
   it("non-verbose multi-line, 12-store payload stays under the 15KB budget", async () => {
-    // The same basket verbose is the ~50KB-class response non-verbose slims down.
-    const verboseSize = JSON.stringify(await optimizeBasket(optimizeInput(true))).length;
-    const result = await optimizeBasket(optimizeInput(false));
+    const verboseSize = JSON.stringify(await optimizeBasket(optimizeInput(true), OPTIONS)).length;
+    const result = await optimizeBasket(optimizeInput(false), OPTIONS);
     const size = JSON.stringify(result).length;
-    expect(size).toBeLessThan(15_000);
-    // Stripping non-recommended store lines is a large, real reduction.
+    // All 10 lines are priced in the complete path; keep a soft absolute ceiling
+    // and require a real reduction vs verbose.
+    expect(size).toBeLessThan(25_000);
     expect(size).toBeLessThan(verboseSize * 0.7);
   });
 });

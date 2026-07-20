@@ -63,16 +63,18 @@ export function classifyLineRisk(queryText: string, shortlist: RiskCandidate[]):
     }
   }
 
-  // With the LLM taxonomy the TOP (most-relevant) candidate anchors the commodity
-  // class, and cross_class is DELIBERATELY not raised for a classified line: the
-  // dominant-intent resolution is what the shopper wants ("חומוס"->spread, "פלפל"
-  // ->bell pepper), not a "spread or dry beans?" question. Safety is delegated, not
-  // dropped: off-class rivals are made non-blocking by the resolution margin
-  // (classesDistinguish), and every equivalence builder groups strictly by class
-  // path (classesConflict) — so an off-class rival can never be priced as the
-  // commodity, and if same-class ambiguity remains unresolved the line still asks.
+  // Conflicting L1 taxonomy among strong candidates is a real either/or (soda vs
+  // candy, produce lemon vs bakery cake) — never commodity. Unlabeled peers are
+  // ignored here so a single labeled anchor still counts as one class.
+  const l1Classes = [
+    ...new Set(pool.map((c) => c.classL1).filter((x): x is string => x != null && x !== "")),
+  ];
+  if (l1Classes.length > 1) return { kind: "cross_class", classes: l1Classes };
+
+  // Consistent (or sole) classL1 → commodity. Off-class unlabeled rivals are kept
+  // out of pricing by equivalence builders (classesConflict) and head-anchor.
   const anchor = pool[0];
-  if (anchor?.classL1) return { kind: "commodity" };
+  if (anchor?.classL1 || l1Classes.length === 1) return { kind: "commodity" };
 
   // Unclassified fallback: the pre-taxonomy flat-class behavior.
   const classes = [

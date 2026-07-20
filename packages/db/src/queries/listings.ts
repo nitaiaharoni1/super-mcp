@@ -14,6 +14,11 @@ export interface UpsertListingInput {
   canonicalQty?: number;
   canonicalUnit?: string;
   measureUnparseable: boolean;
+  isWeighted?: boolean | null;
+  saleBasis?: string | null;
+  pieceCount?: number | null;
+  measureSource?: string | null;
+  measureConfidence?: number | null;
 }
 
 export async function upsertListing(input: UpsertListingInput, client?: PoolClient): Promise<string> {
@@ -21,8 +26,9 @@ export async function upsertListing(input: UpsertListingInput, client?: PoolClie
   const res = await q.query<{ id: string }>(
     `INSERT INTO listing (
        product_id, chain_id, item_code, item_type, is_gtin, name, brand,
-       qty, unit, canonical_qty, canonical_unit, measure_unparseable
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       qty, unit, canonical_qty, canonical_unit, measure_unparseable,
+       is_weighted, sale_basis, piece_count, measure_source, measure_confidence
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      ON CONFLICT (chain_id, item_code) DO UPDATE SET
        product_id = COALESCE(EXCLUDED.product_id, listing.product_id),
        item_type = EXCLUDED.item_type,
@@ -34,6 +40,38 @@ export async function upsertListing(input: UpsertListingInput, client?: PoolClie
        canonical_qty = COALESCE(EXCLUDED.canonical_qty, listing.canonical_qty),
        canonical_unit = COALESCE(EXCLUDED.canonical_unit, listing.canonical_unit),
        measure_unparseable = EXCLUDED.measure_unparseable,
+       is_weighted = COALESCE(EXCLUDED.is_weighted, listing.is_weighted),
+       sale_basis = CASE
+         WHEN EXCLUDED.sale_basis IS NOT NULL
+          AND (listing.sale_basis IS NULL
+               OR COALESCE(EXCLUDED.measure_confidence, 0)
+                    >= COALESCE(listing.measure_confidence, 0))
+         THEN EXCLUDED.sale_basis
+         ELSE COALESCE(listing.sale_basis, EXCLUDED.sale_basis)
+       END,
+       piece_count = CASE
+         WHEN EXCLUDED.piece_count IS NOT NULL
+          AND (listing.piece_count IS NULL
+               OR COALESCE(EXCLUDED.measure_confidence, 0)
+                    >= COALESCE(listing.measure_confidence, 0))
+         THEN EXCLUDED.piece_count
+         ELSE COALESCE(listing.piece_count, EXCLUDED.piece_count)
+       END,
+       measure_source = CASE
+         WHEN EXCLUDED.measure_source IS NOT NULL
+          AND (listing.measure_source IS NULL
+               OR COALESCE(EXCLUDED.measure_confidence, 0)
+                    >= COALESCE(listing.measure_confidence, 0))
+         THEN EXCLUDED.measure_source
+         ELSE COALESCE(listing.measure_source, EXCLUDED.measure_source)
+       END,
+       measure_confidence = CASE
+         WHEN EXCLUDED.measure_confidence IS NOT NULL
+          AND (listing.measure_confidence IS NULL
+               OR EXCLUDED.measure_confidence >= listing.measure_confidence)
+         THEN EXCLUDED.measure_confidence
+         ELSE listing.measure_confidence
+       END,
        updated_at = now()
      RETURNING id`,
     [
@@ -49,6 +87,11 @@ export async function upsertListing(input: UpsertListingInput, client?: PoolClie
       input.canonicalQty ?? null,
       input.canonicalUnit ?? null,
       input.measureUnparseable,
+      input.isWeighted ?? null,
+      input.saleBasis ?? null,
+      input.pieceCount ?? null,
+      input.measureSource ?? null,
+      input.measureConfidence ?? null,
     ],
   );
   return res.rows[0]!.id;

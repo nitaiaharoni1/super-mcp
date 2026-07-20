@@ -48,7 +48,7 @@ curl -s http://localhost:8787/health
 curl -s -H "Authorization: Bearer $KEY" 'http://localhost:8787/v1/products?q=חלב'
 curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"items":[{"query":"חלב","pack_qty":2},{"gtin":"7290112490463","pack_qty":1}],"city":"תל אביב"}' \
-  http://localhost:8787/v1/basket/prepare
+  http://localhost:8787/v1/basket/optimize
 ```
 
 ### Semantic retrieval V2 (generic ontology + pgvector)
@@ -74,11 +74,16 @@ Ingest drains `semantic_index_dirty` before reporting success; failures mark the
 
 Free-text basket lines resolve with **deterministic evidence first** (exact name/phrase, form/class gates); embeddings run only when lexical recall is weak. The API warms the query embedder on boot (fire-and-forget) to cut cold latency on the first basket call.
 
-**Agent / MCP flow (required):** call `prepare_basket` first (resolve near `city`/`near`, safe shopping defaults, no pricing), answer every required `question`, then call `optimize_basket` once with `product_id` on confirmed lines. Questions identify their item and include at most five compact product/pack options. Pricing loads **only safely resolved product IDs** — never the full unconfirmed shortlist.
+**Agent / MCP flow (required):** call `optimize_basket` once with the shopping list near `city`/`near`. If `status` is `needs_confirmation`, answer every required `question` and call again with only `{continuation, answers}` — do not reconstruct items. If `status` is `complete`, use `bestSingleStore` / `cheapestCompleteStore` / `multiStore`. Questions include real nearby availability and at most three compact options. Pricing runs only after confirmation clears.
 
-REST has the same two-step flow: `POST /v1/basket/prepare`, confirm required questions, then `POST /v1/basket/optimize`. Both inputs use `pack_qty` for packs; deprecated `qty` remains accepted but cannot be supplied together with `pack_qty`. Use `amount` + `unit` for weighed goods and natural counts—for example, 20 pitas is `{"amount":20,"unit":"יח"}`, not 20 packs.
+REST is the same single endpoint: `POST /v1/basket/optimize` (initial items+location, or resume with continuation+answers). Use `pack_qty` for shelf packs and `amount` + `unit` for weighed/counted goods — for example, 20 pitas is `{"amount":20,"unit":"יח"}`, not 20 packs. Deprecated `qty` is rejected.
 
-`POST /v1/basket/optimize` returns a `completeness` block: `resolvedLines`, `needsConfirmationLines`, `unresolvedLines`, and `safeResolutionRatio`. When `safeResolutionRatio` is below `minSafeResolutionRatio` (default **0.7**, from ontology config), `cheapest` and `multiStore` are **null** and `totalsArePartial` is **true**.
+Requires `BASKET_CONTINUATION_SECRET` (≥32 bytes) for signed continuations. Live canary:
+
+```bash
+BASKET_CONTINUATION_SECRET=test-only-basket-continuation-secret-ok \
+  pnpm --filter @super-mcp/api canary:basket
+```
 
 | Env | Effect |
 |-----|--------|
@@ -98,7 +103,7 @@ REST has the same two-step flow: `POST /v1/basket/prepare`, confirm required que
 
 ### Deterministic-first basket resolution
 
-Basket free-text resolution prefers **deterministic evidence** (exact name, phrase, token boundaries, ontology gates) and uses embeddings only when lexical recall is weak. Wrong product is worse than unresolved — partial basket totals are labeled honestly when safe resolution is below 70%.
+Basket free-text resolution prefers **deterministic evidence** (exact name, phrase, token boundaries, ontology gates) and uses embeddings only when lexical recall is weak. Wrong product is worse than unresolved — ambiguous lines return `needs_confirmation` instead of silent guesses.
 
 **Apply migration + semantic index (first time or after ontology changes):**
 
@@ -114,7 +119,7 @@ SUPER_MCP_EMBED_BACKEND=hasher pnpm db:benchmark-semantic
 pnpm db:migrate
 SUPER_MCP_EMBED_BACKEND=hasher pnpm db:benchmark-semantic
 pnpm --filter @super-mcp/api dev
-# warm embedder on first request; then prepare, confirm, and optimize the BBQ items
+# warm embedder on first request; then optimize (resume with continuation+answers if needed)
 KEY=$(cat .local/api-key.txt)
 curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"city":"Herzliya","items":[
@@ -123,28 +128,29 @@ curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
     {"query":"אנטרקוט","amount":0.75,"unit":"kg"},
     {"query":"פיתות","amount":20,"unit":"יח"},
     {"query":"חומוס","amount":1.5,"unit":"kg"},
-    {"query":"טחינה","amount":500,"unit":"g"},
+    {"query":"טחינה","amount":0.5,"unit":"kg"},
     {"query":"מלח גס","pack_qty":1},
     {"query":"עגבניות","amount":1,"unit":"kg"},
     {"query":"מלפפונים","amount":1,"unit":"kg"},
-    {"query":"פלפלים","pack_qty":3},
-    {"query":"בצלים","pack_qty":3},
-    {"query":"חסה","pack_qty":1},
-    {"query":"לימונים","pack_qty":4},
-    {"query":"אבטיח","pack_qty":1},
-    {"query":"קולה","pack_qty":2},
-    {"query":"יין","pack_qty":3},
-    {"query":"קפה טייסטרס צ׳ויס","pack_qty":1},
-    {"query":"קרח","pack_qty":1}
+    {"query":"פלפל","amount":3,"unit":"יח"},
+    {"query":"בצל","amount":3,"unit":"יח"},
+    {"query":"חסה","amount":1,"unit":"יח"},
+    {"query":"לימון","amount":4,"unit":"יח"},
+    {"query":"אבטיח","amount":1,"unit":"יח"},
+    {"query":"קוקה קולה 1.5 ליטר","amount":2,"unit":"יח"},
+    {"query":"יין","amount":3,"unit":"יח"},
+    {"query":"טייסטרס צ׳ויס","pack_qty":1},
+    {"query":"שקית קרח","pack_qty":1}
   ]}' \
-  http://localhost:8787/v1/basket/prepare
+  http://localhost:8787/v1/basket/optimize
+# Or: BASKET_CONTINUATION_SECRET=... pnpm --filter @super-mcp/api canary:basket
 ```
 
 Manual success criteria:
 
-- zero forbidden auto-picks (no sausage for `פרגיות`, pickled for `מלפפונים`, limoncello for `לימונים`, popsicles for `קרח`, etc.);
-- `completeness.safeResolutionRatio >= 0.7` or honest partial totals (`totalsArePartial: true`, `cheapest: null`);
-- warm wall clock under 8s for 18 lines.
+- zero forbidden auto-picks (no sausage for `פרגיות`, pickled for `מלפפונים`, limoncello for `לימון`, popsicles for `שקית קרח`, etc.);
+- `status: "complete"` with `bestSingleStore.pricedLines >= 16` after answering any `needs_confirmation` questions, or a confirmation payload with ≤3 questions;
+- warm wall clock under 8s for the initial 18-line call.
 
 | Env | Effect |
 |-----|--------|
@@ -206,12 +212,11 @@ See [docs/folder-conventions.md](./docs/folder-conventions.md) for target folder
 - `GET /v1/products/:id/history`
 - `GET /v1/chains` · `GET /v1/stores` — returns `{ stores, location }` (not a bare array); `?near=` defaults to **10km** radius
 - `GET /v1/promotions`
-- `POST /v1/basket/prepare` — resolves lines and returns safe assumptions plus required confirmation questions
-- `POST /v1/basket/optimize` — requires `city` and/or `near`; response includes `cheapest`, `completeness`, and per-line resolution status
+- `POST /v1/basket/optimize` — resumable: initial `{items, city|near}` or resume `{continuation, answers}`; returns `needs_confirmation` or `complete` with `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
 - `GET /v1/usage`
 
 ## MCP tools
 
-`search_products` · `resolve_products` · `get_product` · `compare_prices` · `suggest_substitutes` · `prepare_basket` · `optimize_basket` · `list_stores` · `get_promotions`
+`search_products` · `resolve_products` · `get_product` · `compare_prices` · `suggest_substitutes` · `optimize_basket` · `list_stores` · `get_promotions`
 
-Shopping lists: call `prepare_basket` with `{query, pack_qty}` or `{query, amount, unit}`, confirm required questions, then call `optimize_basket` once with confirmed `product_id` lines. Do not search each line first.
+Shopping lists: call `optimize_basket` with `{query, pack_qty}` or `{query, amount, unit}`. If confirmation is required, resume with `{continuation, answers}` only. Do not search each line first.

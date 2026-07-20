@@ -11,6 +11,7 @@ export function makeSearchProductHit(
     categoryL2: null,
     sizeQty: null,
     sizeUnit: null,
+    pieceCount: null,
     score: 0.9,
     matchedVia: "product",
     hasPrice: true,

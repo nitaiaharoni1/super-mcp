@@ -22,6 +22,26 @@ describe("classifyLineRisk", () => {
     }
   });
 
+  it("cross_class: conflicting classL1 among strong tiers (even when anchor is labeled)", () => {
+    const risk = classifyLineRisk("קולה", [
+      { productClass: "soft_drink", brand: null, intentTier: 1, classL1: "beverage" },
+      { productClass: "candy", brand: null, intentTier: 1, classL1: "snacks" },
+    ]);
+    expect(risk.kind).toBe("cross_class");
+    if (risk.kind === "cross_class") {
+      expect(risk.classes).toEqual(expect.arrayContaining(["beverage", "snacks"]));
+    }
+  });
+
+  it("commodity: sole labeled classL1 among unlabeled peers is still commodity", () => {
+    expect(
+      classifyLineRisk("חומוס", [
+        { productClass: "spread", brand: null, intentTier: 1, classL1: "pantry" },
+        { productClass: null, brand: null, intentTier: 2, classL1: null },
+      ]).kind,
+    ).toBe("commodity");
+  });
+
   it("brand_pinned: query names a brand -> only exact-brand candidates are safe", () => {
     const risk = classifyLineRisk("קפה טסטרס צויס", [
       { productClass: "instant_coffee", brand: "טסטרס צ'ויס", intentTier: 1 },

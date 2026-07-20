@@ -5,7 +5,9 @@ import { mapProduct } from "./mapProduct.js";
 /** Fetches a canonical product by UUID, including per-chain listings. */
 export async function getProductById(id: string): Promise<ProductDetail | null> {
   const productRes = await query<ProductRow>(
-    `SELECT id, gtin, name, brand, category_l1, category_l2, size_qty, size_unit FROM product WHERE id = $1`,
+    `SELECT id, gtin, name, brand, category_l1, category_l2, size_qty, size_unit, piece_count
+     FROM product
+     WHERE id = $1`,
     [id],
   );
   const row = productRes.rows[0];

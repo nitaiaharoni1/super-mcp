@@ -53,13 +53,14 @@ type ProductRow = {
   name: string;
   size_qty: number | null;
   size_unit: string | null;
+  piece_count: number | null;
 };
 
 function validateItem(index: number, item: BasketItemInput): ValidatedItem {
-  const hasQty = item.qty != null && Number.isFinite(item.qty) && item.qty > 0;
+  const hasQty = item.packQty != null && Number.isFinite(item.packQty) && item.packQty > 0;
   const hasAmount = item.amount != null && Number.isFinite(item.amount) && item.amount > 0;
   if (!hasQty && !hasAmount) {
-    throw new AppError("bad_request", `items[${index}] requires qty or amount`, 400);
+    throw new AppError("bad_request", `items[${index}] requires packQty or amount`, 400);
   }
   if (hasAmount && !(item.unit && item.unit.trim())) {
     throw new AppError(
@@ -82,7 +83,9 @@ async function loadProductsById(productIds: string[]): Promise<Map<string, Produ
   const map = new Map<string, ProductRow>();
   if (productIds.length === 0) return map;
   const res = await query<ProductRow>(
-    `SELECT id, name, size_qty, size_unit FROM product WHERE id = ANY($1::uuid[])`,
+    `SELECT id, name, size_qty, size_unit, piece_count
+     FROM product
+     WHERE id = ANY($1::uuid[])`,
     [productIds],
   );
   for (const row of res.rows) map.set(row.id, row);
@@ -126,8 +129,8 @@ function resolveProductIdItem(
   if (!row) {
     return {
       ...base,
-      qty: item.qty ?? item.amount ?? 1,
-      qtyMode: "legacy_packs",
+      qty: item.packQty ?? item.amount ?? 1,
+      qtyMode: "packs",
       productId: null,
       name: null,
       resolvedBy: "unresolved",
@@ -137,12 +140,13 @@ function resolveProductIdItem(
     };
   }
   const purchase = resolvePurchaseQty({
-    packQty: item.qty,
+    packQty: item.packQty,
     amount: item.amount,
     unit: item.unit,
     productSizeQty: row.size_qty,
     productSizeUnit: row.size_unit,
     productName: row.name,
+    pieceCount: row.piece_count,
   });
   return {
     ...base,
@@ -161,6 +165,7 @@ function resolveProductIdItem(
         matchedVia: "product",
         sizeQty: row.size_qty,
         sizeUnit: row.size_unit,
+        pieceCount: row.piece_count,
         // Direct product_id resolution hasn't checked local price yet; do not
         // fabricate availability.
         hasPrice: false,
@@ -202,8 +207,8 @@ async function resolveDirectItem(
     if (!hit) {
       return {
         ...base,
-        qty: item.qty ?? item.amount ?? 1,
-        qtyMode: "legacy_packs",
+        qty: item.packQty ?? item.amount ?? 1,
+        qtyMode: "packs",
         productId: null,
         name: null,
         resolvedBy: "unresolved",
@@ -213,12 +218,13 @@ async function resolveDirectItem(
       };
     }
     const purchase = resolvePurchaseQty({
-      packQty: item.qty,
+      packQty: item.packQty,
       amount: item.amount,
       unit: item.unit,
       productSizeQty: hit.sizeQty,
       productSizeUnit: hit.sizeUnit,
       productName: hit.name,
+      pieceCount: hit.pieceCount,
     });
     return {
       ...base,

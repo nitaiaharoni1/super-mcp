@@ -20,6 +20,9 @@ export interface BatchProductInput {
   brand: string | null;
   sizeQty: number | null;
   sizeUnit: string | null;
+  /** Optional rollup of pieces-per-pack onto the shared product identity. */
+  pieceCount?: number | null;
+  packMetadataSource?: string | null;
 }
 
 /**
@@ -40,16 +43,21 @@ export async function bulkResolveProducts(
 
   if (gtinRows.length > 0) {
     const res = await q.query<{ id: string; gtin: string }>(
-      `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit)
-       SELECT gtin, NULL, name, brand, size_qty, size_unit
-       FROM unnest($1::text[], $2::text[], $3::text[], $4::double precision[], $5::text[])
-         AS t(gtin, name, brand, size_qty, size_unit)
+      `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit,
+                            piece_count, pack_metadata_source)
+       SELECT gtin, NULL, name, brand, size_qty, size_unit, piece_count, pack_metadata_source
+       FROM unnest(
+         $1::text[], $2::text[], $3::text[], $4::double precision[], $5::text[],
+         $6::double precision[], $7::text[]
+       ) AS t(gtin, name, brand, size_qty, size_unit, piece_count, pack_metadata_source)
        ON CONFLICT (gtin) DO UPDATE SET
          name = CASE WHEN length(EXCLUDED.name) > length(product.name)
                      THEN EXCLUDED.name ELSE product.name END,
          brand = COALESCE(EXCLUDED.brand, product.brand),
          size_qty = COALESCE(EXCLUDED.size_qty, product.size_qty),
          size_unit = COALESCE(EXCLUDED.size_unit, product.size_unit),
+         piece_count = COALESCE(EXCLUDED.piece_count, product.piece_count),
+         pack_metadata_source = COALESCE(EXCLUDED.pack_metadata_source, product.pack_metadata_source),
          updated_at = now()
        RETURNING id, gtin`,
       [
@@ -58,6 +66,8 @@ export async function bulkResolveProducts(
         gtinRows.map((r) => r.brand),
         gtinRows.map((r) => r.sizeQty),
         gtinRows.map((r) => r.sizeUnit),
+        gtinRows.map((r) => r.pieceCount ?? null),
+        gtinRows.map((r) => r.packMetadataSource ?? null),
       ],
     );
     for (const row of res.rows) out.set(row.gtin, row.id);
@@ -65,16 +75,21 @@ export async function bulkResolveProducts(
 
   if (keyRows.length > 0) {
     const res = await q.query<{ id: string; source_key: string }>(
-      `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit)
-       SELECT NULL, source_key, name, brand, size_qty, size_unit
-       FROM unnest($1::text[], $2::text[], $3::text[], $4::double precision[], $5::text[])
-         AS t(source_key, name, brand, size_qty, size_unit)
+      `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit,
+                            piece_count, pack_metadata_source)
+       SELECT NULL, source_key, name, brand, size_qty, size_unit, piece_count, pack_metadata_source
+       FROM unnest(
+         $1::text[], $2::text[], $3::text[], $4::double precision[], $5::text[],
+         $6::double precision[], $7::text[]
+       ) AS t(source_key, name, brand, size_qty, size_unit, piece_count, pack_metadata_source)
        ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO UPDATE SET
          name = CASE WHEN length(EXCLUDED.name) > length(product.name)
                      THEN EXCLUDED.name ELSE product.name END,
          brand = COALESCE(EXCLUDED.brand, product.brand),
          size_qty = COALESCE(EXCLUDED.size_qty, product.size_qty),
          size_unit = COALESCE(EXCLUDED.size_unit, product.size_unit),
+         piece_count = COALESCE(EXCLUDED.piece_count, product.piece_count),
+         pack_metadata_source = COALESCE(EXCLUDED.pack_metadata_source, product.pack_metadata_source),
          updated_at = now()
        RETURNING id, source_key`,
       [
@@ -83,6 +98,8 @@ export async function bulkResolveProducts(
         keyRows.map((r) => r.brand),
         keyRows.map((r) => r.sizeQty),
         keyRows.map((r) => r.sizeUnit),
+        keyRows.map((r) => r.pieceCount ?? null),
+        keyRows.map((r) => r.packMetadataSource ?? null),
       ],
     );
     for (const row of res.rows) out.set(row.source_key, row.id);
@@ -104,11 +121,17 @@ export interface BatchListingInput {
   canonicalQty: number | null;
   canonicalUnit: string | null;
   measureUnparseable: boolean;
+  isWeighted?: boolean | null;
+  saleBasis?: string | null;
+  pieceCount?: number | null;
+  measureSource?: string | null;
+  measureConfidence?: number | null;
 }
 
 /**
  * Bulk listing upsert keyed on (chain_id, item_code). Returns a map from
- * "chainId itemCode" to listing id. Mirrors upsertListing's COALESCE merge.
+ * "chainId itemCode" to listing id. Mirrors upsertListing's COALESCE merge,
+ * with confidence-aware overwrite for pack/sale facts.
  */
 export async function bulkUpsertListings(
   rows: BatchListingInput[],
@@ -121,16 +144,20 @@ export async function bulkUpsertListings(
   const res = await q.query<{ id: string; chain_id: string; item_code: string }>(
     `INSERT INTO listing (
        product_id, chain_id, item_code, item_type, is_gtin, name, brand,
-       qty, unit, canonical_qty, canonical_unit, measure_unparseable
+       qty, unit, canonical_qty, canonical_unit, measure_unparseable,
+       is_weighted, sale_basis, piece_count, measure_source, measure_confidence
      )
      SELECT product_id, chain_id, item_code, item_type, is_gtin, name, brand,
-            qty, unit, canonical_qty, canonical_unit, measure_unparseable
+            qty, unit, canonical_qty, canonical_unit, measure_unparseable,
+            is_weighted, sale_basis, piece_count, measure_source, measure_confidence
      FROM unnest(
        $1::uuid[], $2::text[], $3::text[], $4::int[], $5::boolean[], $6::text[],
        $7::text[], $8::double precision[], $9::text[], $10::double precision[],
-       $11::text[], $12::boolean[]
+       $11::text[], $12::boolean[], $13::boolean[], $14::text[],
+       $15::double precision[], $16::text[], $17::real[]
      ) AS t(product_id, chain_id, item_code, item_type, is_gtin, name, brand,
-            qty, unit, canonical_qty, canonical_unit, measure_unparseable)
+            qty, unit, canonical_qty, canonical_unit, measure_unparseable,
+            is_weighted, sale_basis, piece_count, measure_source, measure_confidence)
      ON CONFLICT (chain_id, item_code) DO UPDATE SET
        product_id = COALESCE(EXCLUDED.product_id, listing.product_id),
        item_type = EXCLUDED.item_type,
@@ -142,6 +169,41 @@ export async function bulkUpsertListings(
        canonical_qty = COALESCE(EXCLUDED.canonical_qty, listing.canonical_qty),
        canonical_unit = COALESCE(EXCLUDED.canonical_unit, listing.canonical_unit),
        measure_unparseable = EXCLUDED.measure_unparseable,
+       -- Always take a non-null feed/backfill is_weighted over a prior NULL.
+       is_weighted = COALESCE(EXCLUDED.is_weighted, listing.is_weighted),
+       -- Confidence-aware overwrite for remaining pack/sale facts; COALESCE
+       -- fallback when confidence is tied or missing.
+       sale_basis = CASE
+         WHEN EXCLUDED.sale_basis IS NOT NULL
+          AND (listing.sale_basis IS NULL
+               OR COALESCE(EXCLUDED.measure_confidence, 0)
+                    >= COALESCE(listing.measure_confidence, 0))
+         THEN EXCLUDED.sale_basis
+         ELSE COALESCE(listing.sale_basis, EXCLUDED.sale_basis)
+       END,
+       piece_count = CASE
+         WHEN EXCLUDED.piece_count IS NOT NULL
+          AND (listing.piece_count IS NULL
+               OR COALESCE(EXCLUDED.measure_confidence, 0)
+                    >= COALESCE(listing.measure_confidence, 0))
+         THEN EXCLUDED.piece_count
+         ELSE COALESCE(listing.piece_count, EXCLUDED.piece_count)
+       END,
+       measure_source = CASE
+         WHEN EXCLUDED.measure_source IS NOT NULL
+          AND (listing.measure_source IS NULL
+               OR COALESCE(EXCLUDED.measure_confidence, 0)
+                    >= COALESCE(listing.measure_confidence, 0))
+         THEN EXCLUDED.measure_source
+         ELSE COALESCE(listing.measure_source, EXCLUDED.measure_source)
+       END,
+       measure_confidence = CASE
+         WHEN EXCLUDED.measure_confidence IS NOT NULL
+          AND (listing.measure_confidence IS NULL
+               OR EXCLUDED.measure_confidence >= listing.measure_confidence)
+         THEN EXCLUDED.measure_confidence
+         ELSE listing.measure_confidence
+       END,
        updated_at = now()
      RETURNING id, chain_id, item_code`,
     [
@@ -157,6 +219,11 @@ export async function bulkUpsertListings(
       rows.map((r) => r.canonicalQty),
       rows.map((r) => r.canonicalUnit),
       rows.map((r) => r.measureUnparseable),
+      rows.map((r) => r.isWeighted ?? null),
+      rows.map((r) => r.saleBasis ?? null),
+      rows.map((r) => r.pieceCount ?? null),
+      rows.map((r) => r.measureSource ?? null),
+      rows.map((r) => r.measureConfidence ?? null),
     ],
   );
   for (const row of res.rows) out.set(`${row.chain_id} ${row.item_code}`, row.id);

@@ -15,6 +15,7 @@ export function hitToCandidate(
     matchedVia: hit.matchedVia,
     sizeQty: hit.sizeQty,
     sizeUnit: hit.sizeUnit,
+    pieceCount: hit.pieceCount,
     hasPrice: hit.hasPrice,
     hasLocalPrice: hit.hasLocalPrice ?? hit.hasPrice,
     // Prefer the LLM taxonomy L1 as the coarse product_class when the ontology

@@ -66,9 +66,9 @@ describe("basket resolve profile batching", () => {
 
   it("calls loadSemanticProfiles once for N query lines", async () => {
     const lines = [
-      { query: "מלפפונים", qty: 1 },
-      { query: "לימונים", qty: 2 },
-      { query: "קרח", qty: 1 },
+      { query: "מלפפונים", packQty: 1 },
+      { query: "לימונים", packQty: 2 },
+      { query: "קרח", packQty: 1 },
     ];
     searchProductsScored.mockImplementation(async ({ q }: { q: string }) => {
       const idByQuery: Record<string, string> = {
@@ -98,7 +98,7 @@ describe("basket resolve profile batching", () => {
       hitFor("gtin-hit", "44444444-4444-4444-8444-444444444444"),
     ]);
 
-    const resolved = await resolveItems([{ gtin: "7290000000000", qty: 1 }]);
+    const resolved = await resolveItems([{ gtin: "7290000000000", packQty: 1 }]);
 
     expect(loadSemanticProfiles).not.toHaveBeenCalled();
     expect(resolved).toHaveLength(1);

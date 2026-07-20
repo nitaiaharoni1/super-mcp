@@ -1,25 +1,23 @@
-export { optimizeBasket, computeBasketCompleteness, resolveBasketLines } from "./optimize.js";
-export { prepareBasket, buildPrepareAssumptions } from "./prepare.js";
+export { optimizeBasket, resolveBasketLines } from "./optimize.js";
+export { buildBasketQuestions, DEFAULT_QUESTION_OPTIONS_LIMIT } from "./questionAvailability.js";
 export { resolveItems } from "./resolve.js";
 
 export type {
-  BasketCandidate,
+  BasketAnswer,
+  BasketCompleteResult,
+  BasketInitialInput,
   BasketItemInput,
   BasketItemStatus,
-  BasketLine,
-  BasketMissingItem,
-  BasketLocationInput,
-  BasketPrepareInput,
-  BasketPrepareQuestion,
-  BasketPrepareQuestionOption,
-  BasketPrepareResult,
-  BasketOptimizeInput,
+  BasketNeedsConfirmationResult,
+  BasketOptimizeOptions,
+  BasketOptimizeRequest,
   BasketOptimizeResult,
-  BasketRecommendation,
-  BasketStoreResult,
-  BasketSubstitutionMeta,
-  MultiStoreLine,
-  MultiStorePlan,
+  BasketQuestion,
+  BasketQuestionOption,
+  BasketResumeInput,
+  BasketSelectionEffect,
+  BasketStorePlan,
+  BasketMultiStorePlan,
   ResolveLocationScope,
   ResolvedBy,
 } from "./types.js";

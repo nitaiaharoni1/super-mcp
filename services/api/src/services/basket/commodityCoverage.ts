@@ -1,6 +1,13 @@
 import { query } from "@super-mcp/db";
-import { mapPool, normalizeEmbedInput, normalizeMeasure, tokenizeNormalized } from "@super-mcp/shared";
-import { queryTokensSatisfied } from "./equivalence.js";
+import {
+  mapPool,
+  normalizeEmbedInput,
+  packSizesCompatible,
+  queryTokensSatisfied,
+  tokenizeNormalized,
+} from "@super-mcp/shared";
+import { queryHeadAnchored } from "./equivalence.js";
+import { buildBasketIntentProfile } from "./intentProfile.js";
 import { loadProductClasses } from "./productClasses.js";
 import type { BasketCandidate, BasketItemInput, ResolvedItem } from "./types.js";
 
@@ -14,6 +21,9 @@ interface CarriedProductRow {
   name: string;
   size_qty: number | null;
   size_unit: string | null;
+  piece_count: number | null;
+  /** Chain that carries a priced listing — used to diversify the capped peer set. */
+  chain_id?: string | null;
 }
 
 /**
@@ -45,14 +55,28 @@ async function fetchCarriedClassPeers(
   // whose name implies שרי/דיאט/אורגני would otherwise group into a generic line.
   conds.push(`m.variant = $${params.length + 1}`);
   params.push(primary.variant ?? "regular");
+  // Cap per chain first so large classes (produce/bakery) don't fill a global
+  // LIMIT with one chain's SKUs before diversifyByChain can help.
   const res = await query<CarriedProductRow>(
-    `SELECT DISTINCT ON (l.product_id) l.product_id, p.name, p.size_qty, p.size_unit
-       FROM product p
-       JOIN product_class_map m ON m.product_id = p.id AND m.input_name = p.name
-       JOIN listing l ON l.product_id = p.id
-       JOIN store_price sp ON sp.listing_id = l.id AND sp.price > 0
-      WHERE sp.store_id = ANY($1::uuid[]) AND ${conds.join(" AND ")}
-      LIMIT 300`,
+    `WITH priced AS (
+       SELECT DISTINCT ON (l.product_id) l.product_id, p.name, p.size_qty, p.size_unit,
+              p.piece_count, l.chain_id, sp.price
+         FROM product p
+         JOIN product_class_map m ON m.product_id = p.id AND m.input_name = p.name
+         JOIN listing l ON l.product_id = p.id
+         JOIN store_price sp ON sp.listing_id = l.id AND sp.price > 0
+        WHERE sp.store_id = ANY($1::uuid[]) AND ${conds.join(" AND ")}
+        ORDER BY l.product_id, sp.price ASC
+     ),
+     ranked AS (
+       SELECT product_id, name, size_qty, size_unit, piece_count, chain_id,
+              row_number() OVER (PARTITION BY chain_id ORDER BY price ASC, product_id) AS rn
+         FROM priced
+     )
+     SELECT product_id, name, size_qty, size_unit, piece_count, chain_id
+       FROM ranked
+      WHERE rn <= 40
+      LIMIT 400`,
     params,
   );
   return res.rows;
@@ -65,6 +89,8 @@ export interface FilterClassPeersOptions {
    * name — brand/chain tokens like "שופרסל" must not block other chains' peers.
    */
   requireQueryTokens?: boolean;
+  /** Override produce/bakery count↔weight policy from intent profile. */
+  allowCountToWeight?: boolean;
 }
 
 /**
@@ -82,21 +108,65 @@ export function filterClassPeers(
   const requireQueryTokens = opts.requireQueryTokens !== false;
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
   if (requireQueryTokens && queryTokens.length === 0) return [];
-  const primaryMeasure = primary.sizeUnit ? normalizeMeasure(1, primary.sizeUnit) : null;
-  const primaryCanonUnit =
-    primaryMeasure && !primaryMeasure.unparseable ? primaryMeasure.unit : null;
+  const allowCountToWeight =
+    opts.allowCountToWeight ??
+    (primary.classL1 === "produce" || primary.classL2 === "pita_flatbread");
   const seen = new Set<string>();
-  const out: CarriedProductRow[] = [];
+  const compatible: CarriedProductRow[] = [];
   for (const row of rows) {
     if (seen.has(row.product_id)) continue;
     if (requireQueryTokens && !queryTokensSatisfied(queryTokens, row.name)) continue;
-    if (primaryCanonUnit && row.size_unit) {
-      const m = normalizeMeasure(row.size_qty ?? 1, row.size_unit);
-      if (!m.unparseable && m.unit !== primaryCanonUnit) continue;
+    // Drop prepared-food hosts that share a produce token (עוגת לימונים).
+    if (requireQueryTokens && !queryHeadAnchored(queryText, row.name)) continue;
+    if (
+      !packSizesCompatible(
+        { sizeQty: primary.sizeQty, sizeUnit: primary.sizeUnit, name: primary.name },
+        { sizeQty: row.size_qty, sizeUnit: row.size_unit, name: row.name },
+        { allowCountToWeight },
+      ).compatible
+    ) {
+      continue;
     }
     seen.add(row.product_id);
+    compatible.push(row);
+  }
+  // Cap peers but prefer chain diversity so one chain's SKU flood doesn't starve
+  // others of equivalents (false not_carried_by_chain).
+  return diversifyByChain(compatible, MAX_COVERAGE_EQUIVALENTS);
+}
+
+/** Round-robin across chains, then fill remaining slots in original order. */
+function diversifyByChain(rows: CarriedProductRow[], max: number): CarriedProductRow[] {
+  if (rows.length <= max) return rows;
+  const byChain = new Map<string, CarriedProductRow[]>();
+  const noChain: CarriedProductRow[] = [];
+  for (const row of rows) {
+    const key = row.chain_id?.trim();
+    if (!key) {
+      noChain.push(row);
+      continue;
+    }
+    const list = byChain.get(key) ?? [];
+    list.push(row);
+    byChain.set(key, list);
+  }
+  const out: CarriedProductRow[] = [];
+  const queues = [...byChain.values()];
+  let progressed = true;
+  while (out.length < max && progressed) {
+    progressed = false;
+    for (const q of queues) {
+      if (out.length >= max) break;
+      const next = q.shift();
+      if (next) {
+        out.push(next);
+        progressed = true;
+      }
+    }
+  }
+  for (const row of noChain) {
+    if (out.length >= max) break;
     out.push(row);
-    if (out.length >= MAX_COVERAGE_EQUIVALENTS) break;
   }
   return out;
 }
@@ -111,9 +181,10 @@ export function coverageQueryText(
 }
 
 /**
- * Lines eligible for class-gated coverage broadening: auto-resolved query lines
- * with free text, plus confirmed product_id / gtin lines (name used when query
- * is absent).
+ * Lines eligible for class stamping + (when free-text query is present) peer
+ * broadening. product_id/gtin lines without a query are still targets so we can
+ * load/stamp class metadata, but enrichCommodityCoverage skips peer fetch for
+ * them — a confirmed branded SKU must not be swapped for class peers.
  */
 export function isCoverageTarget(r: ResolvedItem, items: BasketItemInput[]): boolean {
   if (r.productId == null) return false;
@@ -146,12 +217,14 @@ function applyClassInfo(primary: BasketCandidate, info: { l1: string; l2: string
  * Broaden resolved commodity lines to the SKUs the in-scope stores actually
  * carry. Loose produce/deli goods fragment into a per-chain product id (no shared
  * barcode), so the in-memory shortlist sees only a few, leaving most chains
- * showing not_carried_by_chain even though they stock the item. This runs one
- * class-scoped query per resolved, CLASSIFIED line (free-text query, confirmed
- * product_id, or gtin) against the in-scope stores and attaches the carried
- * same-class SKUs as equivalents. Purely additive; only touches lines whose
- * primary has (or can load) an LLM class (migration 017). For product_id-only
- * lines, peer filtering uses the primary product name when no query is present.
+ * showing not_carried_by_chain even though they stock the item.
+ *
+ * Peer broadening runs only for commodity intent. Exact intent (product_id /
+ * gtin without query, brand/variant pins, or pin confirmation answers) keeps
+ * the confirmed SKU identity — fetching class peers would swap Taster's Choice
+ * for Turkish coffee or Coke Zero for regular Coke. Those lines still get class
+ * metadata stamped when missing; any equivalents already attached earlier in
+ * resolution are left untouched.
  */
 export async function enrichCommodityCoverage(
   items: BasketItemInput[],
@@ -186,14 +259,20 @@ export async function enrichCommodityCoverage(
     }
 
     const input = items[item.index];
-    const hasFreeTextQuery = Boolean(input?.query?.trim());
-    const queryText = coverageQueryText(input, primary);
+    const intent = buildBasketIntentProfile(input, primary);
+    // Exact intent must not broaden to class peers (Turkish coffee ≠ Taster's
+    // Choice; Coke Zero ≠ regular Coke). Keep primary and any equivalents that
+    // already passed query gates.
+    if (intent.mode === "exact") return;
+
+    const queryText = intent.queryText || coverageQueryText(input, primary);
 
     const rows = await fetchCarriedClassPeers(primary, storeIds);
-    // product_id/gtin-only: class+variant+unit gate peers; do not require every
-    // token of the primary's branded name to appear on other chains' SKUs.
+    // Commodity intent: require query tokens so specificity holds (אבטיח≠מלון
+    // even when both are misclassified under the same L3).
     const peers = filterClassPeers(queryText, primary, rows, {
-      requireQueryTokens: hasFreeTextQuery,
+      requireQueryTokens: true,
+      allowCountToWeight: intent.allowCountToWeight,
     });
     if (peers.length === 0) return;
 
@@ -211,6 +290,7 @@ export async function enrichCommodityCoverage(
         matchedVia: "product",
         sizeQty: row.size_qty,
         sizeUnit: row.size_unit,
+        pieceCount: row.piece_count,
         hasPrice: true,
         hasLocalPrice: true,
         productClass: primary.productClass,

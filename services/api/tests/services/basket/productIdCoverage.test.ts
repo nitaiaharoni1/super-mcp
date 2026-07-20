@@ -15,6 +15,7 @@ import type {
 const resolveItems = vi.fn();
 const listStores = vi.fn();
 const loadBasketPricingData = vi.fn();
+const loadCandidateAvailability = vi.fn();
 const enrichCommodityCoverage = vi.fn();
 
 vi.mock("../../../src/services/basket/resolve.js", () => ({
@@ -25,6 +26,7 @@ vi.mock("../../../src/services/stores/index.js", () => ({
 }));
 vi.mock("../../../src/services/basket/loadPricingData.js", () => ({
   loadBasketPricingData: (...args: unknown[]) => loadBasketPricingData(...args),
+  loadCandidateAvailability: (...args: unknown[]) => loadCandidateAvailability(...args),
 }));
 vi.mock("../../../src/services/basket/commodityCoverage.js", () => ({
   enrichCommodityCoverage: (...args: unknown[]) => enrichCommodityCoverage(...args),
@@ -34,6 +36,8 @@ vi.mock("../../../src/services/search/ontology.js", () => ({
 }));
 
 import { optimizeBasket } from "../../../src/services/basket/optimize.js";
+
+const OPTIONS = { continuationSecret: "test-only-basket-continuation-secret-ok" };
 
 const CHAIN_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CHAIN_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -50,6 +54,7 @@ function cand(over: Partial<BasketCandidate> & { productId: string; name: string
     matchedVia: "product",
     sizeQty: 1000,
     sizeUnit: "g",
+    pieceCount: null,
     hasPrice: false,
     hasLocalPrice: false,
     productClass: "produce",
@@ -64,6 +69,7 @@ function cand(over: Partial<BasketCandidate> & { productId: string; name: string
 describe("product_id confirmations still get equivalent coverage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loadCandidateAvailability.mockResolvedValue(new Map());
     listStores.mockResolvedValue([
       {
         id: STORE_A,
@@ -191,16 +197,18 @@ describe("product_id confirmations still get equivalent coverage", () => {
     });
   });
 
-  it("calls enrichCommodityCoverage and prices chain B via the equivalent SKU", async () => {
+  it("product_id + query עגבניות still broadens and prices chain B via equivalent", async () => {
     const result = await optimizeBasket({
       city: "הרצליה",
       near: { lat: 32.1675, lng: 34.8578 },
       items: [{ productId: TOMATO_A, query: "עגבניות", amount: 1, unit: "kg" }],
       verbose: true,
       storesLimit: 0,
-    });
+    }, OPTIONS);
 
     expect(enrichCommodityCoverage).toHaveBeenCalledOnce();
+    const [itemsArg] = enrichCommodityCoverage.mock.calls[0]!;
+    expect(itemsArg[0]).toMatchObject({ productId: TOMATO_A, query: "עגבניות" });
 
     const storeB = result.stores.find((s) => s.storeId === STORE_B);
     expect(storeB).toBeDefined();
@@ -209,8 +217,32 @@ describe("product_id confirmations still get equivalent coverage", () => {
     expect(storeB!.lines[0]!.substituted).toBe(true);
     expect(storeB!.missingItems).toHaveLength(0);
 
-    // Nearer Neve Amal-style store should win bestNearby within the coverage band.
-    expect(result.recommendations.bestNearby?.storeId).toBe(STORE_B);
+    // Nearer Neve Amal-style store should win bestSingleStore within the coverage band.
+    if (result.status !== "complete") throw new Error("expected complete");
+    expect(result.bestSingleStore?.storeId).toBe(STORE_B);
     expect(result.location.distanceReliable).toBe(true);
+  });
+
+  it("still invokes enrich for product_id-only (class stamp; peer pin is inside enrich)", async () => {
+    // Peer broadening is skipped inside enrich when intent.mode === "exact";
+    // optimize still calls enrich so missing class metadata can be stamped.
+    enrichCommodityCoverage.mockImplementation(async () => {
+      /* no equivalents attached — identity pin */
+    });
+
+    const result = await optimizeBasket({
+      city: "הרצליה",
+      near: { lat: 32.1675, lng: 34.8578 },
+      items: [{ productId: TOMATO_A, amount: 1, unit: "kg" }],
+      verbose: true,
+      storesLimit: 0,
+    }, OPTIONS);
+
+    expect(enrichCommodityCoverage).toHaveBeenCalledOnce();
+    const storeA = result.stores.find((s) => s.storeId === STORE_A);
+    expect(storeA?.lines[0]?.productId).toBe(TOMATO_A);
+    const storeB = result.stores.find((s) => s.storeId === STORE_B);
+    // Without equivalents, chain B cannot price the confirmed tomato UUID.
+    expect(storeB == null || storeB.itemsFound === 0 || storeB.missingItems.length > 0).toBe(true);
   });
 });

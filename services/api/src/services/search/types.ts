@@ -59,6 +59,7 @@ export interface SearchHitRow {
   category_l2: string | null;
   size_qty: number | null;
   size_unit: string | null;
+  piece_count: number | null;
   score: string | number;
   matched_via: SearchMatchedVia;
   has_price: boolean;

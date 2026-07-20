@@ -12,6 +12,7 @@ export interface ProductSummary {
   categoryL2: string | null;
   sizeQty: number | null;
   sizeUnit: string | null;
+  pieceCount: number | null;
 }
 
 export interface ProductRow {
@@ -23,6 +24,7 @@ export interface ProductRow {
   category_l2: string | null;
   size_qty: number | null;
   size_unit: string | null;
+  piece_count: number | null;
 }
 
 export interface ProductListing {

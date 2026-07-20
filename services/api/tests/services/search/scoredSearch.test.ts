@@ -310,6 +310,119 @@ describe("searchProductsScored hybrid path", () => {
     expect(searchByQueryVector).not.toHaveBeenCalled();
   });
 
+  it("expands Hebrew plurals so לימונים recalls singular לימון products", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const lemonRow = {
+      id: "lemon-1",
+      gtin: "1",
+      name: "לימון",
+      brand: null,
+      category_l1: "produce",
+      category_l2: null,
+      size_qty: null,
+      size_unit: "kg",
+      score: 1,
+      matched_via: "product" as const,
+      has_price: true,
+      has_local_price: true,
+    };
+    const pluralPackRow = {
+      id: "plural-pack",
+      gtin: "2",
+      name: "לימונים ארוזים",
+      brand: null,
+      category_l1: "produce",
+      category_l2: null,
+      size_qty: 1,
+      size_unit: "kg",
+      score: 0.95,
+      matched_via: "product" as const,
+      has_price: true,
+      has_local_price: true,
+    };
+    // Exact probe would short-circuit on plural-prefix before this fix; lexical
+    // must still expand to singular לימון (works without relying on ontology).
+    query.mockImplementation(async (sql: string, params: unknown[]) => {
+      const searched = String(params[0] ?? "");
+      const isLexical = String(sql).includes("GREATEST");
+      if (!isLexical) {
+        return { rows: searched === "לימונים" ? [pluralPackRow] : [] };
+      }
+      if (searched === "לימון") return { rows: [lemonRow] };
+      return { rows: [] };
+    });
+
+    const hits = await searchProductsScored({ q: "לימונים", limit: 10 });
+
+    expect(hits.map((h) => h.id)).toContain("lemon-1");
+    expect(hits.find((h) => h.id === "lemon-1")?.name).toBe("לימון");
+    const lexicalQs = query.mock.calls
+      .filter(
+        (c) =>
+          typeof c[0] === "string" &&
+          String(c[0]).includes("GREATEST") &&
+          String(c[0]).includes("candidates AS"),
+      )
+      .map((c) => (c[1] as unknown[])[0]);
+    expect(lexicalQs).toContain("לימונים");
+    expect(lexicalQs).toContain("לימון");
+    expect(getQueryEmbedding).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
+  it("still expands to לימון when plural phrase hits (ארק לימונים) look strong", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const arakRow = {
+      id: "arak",
+      gtin: "3",
+      name: "ארק לימונים רביבו 40",
+      brand: null,
+      category_l1: "alcohol",
+      category_l2: null,
+      size_qty: 700,
+      size_unit: "ml",
+      score: 0.9,
+      matched_via: "product" as const,
+      has_price: true,
+      has_local_price: true,
+    };
+    const lemonRow = {
+      id: "lemon-1",
+      gtin: "1",
+      name: "לימון",
+      brand: null,
+      category_l1: "produce",
+      category_l2: null,
+      size_qty: 1000,
+      size_unit: "g",
+      score: 1,
+      matched_via: "product" as const,
+      has_price: true,
+      has_local_price: true,
+    };
+    query.mockImplementation(async (sql: string, params: unknown[]) => {
+      const searched = String(params[0] ?? "");
+      const isLexical = String(sql).includes("GREATEST");
+      if (!isLexical) return { rows: [] };
+      if (searched === "לימונים") return { rows: [arakRow] };
+      if (searched === "לימון") return { rows: [lemonRow] };
+      return { rows: [] };
+    });
+
+    const hits = await searchProductsScored({ q: "לימונים", limit: 10 });
+    expect(hits.map((h) => h.id)).toContain("lemon-1");
+    const lexicalQs = query.mock.calls
+      .filter(
+        (c) =>
+          typeof c[0] === "string" &&
+          String(c[0]).includes("GREATEST") &&
+          String(c[0]).includes("candidates AS"),
+      )
+      .map((c) => (c[1] as unknown[])[0]);
+    expect(lexicalQs).toContain("לימון");
+    log.mockRestore();
+  });
+
   it("keeps a stronger non-local match ahead of local stock", () => {
     const ranked = orderByLocationStock(
       [
@@ -330,5 +443,118 @@ describe("searchProductsScored hybrid path", () => {
     );
 
     expect(ranked.map((hit) => hit.id)).toEqual(["global-stronger", "local-weaker"]);
+  });
+
+  it("location-scoped: strong phrase hit must not skip listing fallback (hummus snack vs spread)", async () => {
+    // Regression: query "חומוס" near a city finds product-name "חומוס קלוי"
+    // (roasted snack) as a strong phrase match and early-returns before the
+    // listing ILIKE pass that would surface "סלט חומוס אחלה" priced locally.
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const snackRow = {
+      id: "snack",
+      gtin: "1",
+      name: "חומוס קלוי",
+      brand: null,
+      category_l1: null,
+      category_l2: null,
+      size_qty: 1000,
+      size_unit: "g",
+      score: 0.9,
+      matched_via: "product" as const,
+      has_price: true,
+      has_local_price: true,
+    };
+    const spreadRow = {
+      id: "spread",
+      gtin: "2",
+      name: "סלט חומוס אחלה 1 ק\"ג",
+      brand: null,
+      category_l1: null,
+      category_l2: null,
+      size_qty: 1000,
+      size_unit: "g",
+      score: 0.92,
+      matched_via: "listing" as const,
+      has_price: true,
+      has_local_price: true,
+    };
+
+    query.mockImplementation(async (sql: string) => {
+      const s = String(sql);
+      if (!s.includes("GREATEST")) return { rows: [] }; // exact probe empty
+      if (s.includes("listing_hit AS")) return { rows: [snackRow, spreadRow] };
+      return { rows: [snackRow] }; // first-pass product-only
+    });
+
+    const hits = await searchProductsScored({
+      q: "חומוס",
+      city: "הרצליה",
+      near: { lat: 32.167, lng: 34.858 },
+      radiusKm: 6,
+      limit: 10,
+    });
+
+    const lexicalCalls = query.mock.calls.filter(
+      (c) =>
+        typeof c[0] === "string" &&
+        String(c[0]).includes("GREATEST") &&
+        String(c[0]).includes("candidates AS"),
+    );
+    expect(lexicalCalls.some((c) => String(c[0]).includes("listing_hit AS"))).toBe(true);
+    expect(hits.map((h) => h.id)).toContain("spread");
+    log.mockRestore();
+  });
+
+  it("location-scoped: strong first-pass with zero local prices continues to listing", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const orphanExact = {
+      id: "orphan",
+      gtin: "1",
+      name: "חומוס",
+      brand: null,
+      category_l1: null,
+      category_l2: null,
+      size_qty: 1,
+      size_unit: "g",
+      score: 1,
+      matched_via: "product" as const,
+      has_price: true,
+      has_local_price: false,
+    };
+    const localListing = {
+      id: "local-spread",
+      gtin: "2",
+      name: "חומוס מסעדות צבר 700 גרם",
+      brand: null,
+      category_l1: null,
+      category_l2: null,
+      size_qty: 700,
+      size_unit: "g",
+      score: 0.92,
+      matched_via: "listing" as const,
+      has_price: true,
+      has_local_price: true,
+    };
+
+    query.mockImplementation(async (sql: string) => {
+      const s = String(sql);
+      if (!s.includes("GREATEST")) return { rows: [orphanExact] }; // exact probe
+      if (s.includes("listing_hit AS")) return { rows: [localListing] };
+      return { rows: [orphanExact] };
+    });
+
+    const hits = await searchProductsScored({
+      q: "חומוס",
+      city: "הרצליה",
+      limit: 10,
+    });
+
+    expect(hits.map((h) => h.id)).toContain("local-spread");
+    expect(
+      query.mock.calls.some(
+        (c) => typeof c[0] === "string" && String(c[0]).includes("listing_hit AS"),
+      ),
+    ).toBe(true);
+    log.mockRestore();
   });
 });

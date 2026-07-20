@@ -215,8 +215,7 @@ GET  /v1/products/:id/substitutes         cheaper similar products by unit price
 GET  /v1/products/:id/history             price trend
 GET  /v1/chains  ·  /v1/stores            chains and (nearby) branches
 GET  /v1/promotions                       active deals
-POST /v1/basket/prepare                   resolve a shopping list (step 1, see §9)
-POST /v1/basket/optimize                  price the confirmed list (step 2, see §9)
+POST /v1/basket/optimize                  resumable shopping list (see §9)
 GET  /v1/usage                            your own usage
 ```
 
@@ -225,11 +224,11 @@ OpenAPI JSON is served at `/openapi.json`; health at `/health`.
 ### MCP (for AI agents)
 
 The MCP server exposes the exact same capabilities as tools, over Streamable HTTP at
-`/mcp`. The nine tools:
+`/mcp`. The tools:
 
 ```
 search_products · resolve_products · get_product · compare_prices ·
-suggest_substitutes · prepare_basket · optimize_basket · list_stores · get_promotions
+suggest_substitutes · optimize_basket · list_stores · get_promotions
 ```
 
 Each tool's description is written *for an LLM* — it says when to use it, what
@@ -308,15 +307,14 @@ agent can explain *why* a price is what it is.
 ## 9. The basket flow (the crown jewel)
 
 This is what the whole system builds toward: an agent hands over a shopping list and a
-location, and gets back the cheapest place (or split of places) to buy it, with promos
-applied and honest handling of anything ambiguous.
+location, and gets back priced store plans with promos applied and honest handling of
+anything ambiguous.
 
-It is deliberately a **two-step, human-in-the-loop flow**, because auto-guessing on an
-18-item list is how you end up buying sausage instead of chicken.
+`optimize_basket` is a **resumable two-state protocol**. Generic lists finish in one
+call; ambiguous lists return questions plus a signed continuation, then finish on a
+second call that must not reconstruct the original items.
 
-### Step 1 — `prepare_basket` (resolve, don't price)
-
-You send raw lines plus a location:
+### Initial call — resolve (and price only when safe)
 
 ```json
 {
@@ -324,73 +322,77 @@ You send raw lines plus a location:
   "items": [
     {"query": "פרגיות", "amount": 1.75, "unit": "kg"},
     {"query": "פיתות",  "amount": 20,   "unit": "יח"},
-    {"query": "קולה",   "pack_qty": 2},
+    {"query": "קוקה קולה 1.5 ליטר", "amount": 2, "unit": "יח"},
     {"query": "מלח גס", "pack_qty": 1}
   ]
 }
 ```
 
-Quantity has two modes: **`pack_qty`** for packaged goods (2 bottles of cola) and
-**`amount` + `unit`** for weighed/counted goods (1.75 kg of chicken, 20 pitas —
-note that's 20 *pieces*, `"unit":"יח"`, not 20 packs). The old `qty` field still works
-but can't be combined with `pack_qty`.
+Quantity modes:
 
-`prepare` finds nearby stores, resolves each line with the deterministic-first engine,
-applies safe shopping defaults, and **returns without any pricing.** For each line it
-reports a resolution status:
+- **`pack_qty`** — number of shelf packs (1 bag of coarse salt).
+- **`amount` + `unit`** — physical need (1.75 kg chicken; 20 pitas as
+  `"amount":20,"unit":"יח"`). Piece counts convert that need into packs
+  (10-pita bag → `qty: 2`, `qtyMode: "packs"`).
+- Deprecated **`qty`** is rejected at the public boundary.
 
-- **`resolved`** — confident single match, safe to auto-price.
-- **`needs_confirmation`** — ambiguous; it returns a `question` naming the item with
-  **at most five** compact product/pack options for the agent to pick from.
-- **`unresolved`** — no safe match found.
+If every line is safe, the response is `status: "complete"` with plans (below).
 
-The agent must answer every required `question` (usually by presenting the options to
-the end user).
-
-### Step 2 — `optimize_basket` (price the confirmed list)
-
-Now the agent calls optimize **once**, passing `product_id` on the lines it confirmed:
+If any line needs a human, the response is `status: "needs_confirmation"`:
 
 ```json
 {
-  "city": "Herzliya",
-  "items": [
-    {"product_id": "…chicken…", "amount": 1.75, "unit": "kg"},
-    {"product_id": "…pita…",    "amount": 20,   "unit": "יח"},
-    {"product_id": "…cola…",    "pack_qty": 2}
+  "status": "needs_confirmation",
+  "continuation": "<opaque HMAC token, ~30 min TTL>",
+  "questions": [
+    {
+      "itemIndex": 2,
+      "id": "basket-item-2-product",
+      "selectionEffect": "pin",
+      "options": [
+        {"productId": "…", "name": "קוקה קולה 1.5L", "nearbyPricedStores": 8}
+      ]
+    }
+  ],
+  "preview": {
+    "resolvedLines": 3,
+    "requestedLines": 4,
+    "candidateStores": 12
+  }
+}
+```
+
+No store plans are returned in this state. Options carry real nearby availability.
+`selectionEffect` is `representative` (keep commodity intent) or `pin` (exact SKU).
+
+### Resume call — answers only
+
+```json
+{
+  "continuation": "<token from needs_confirmation>",
+  "answers": [
+    {"item_index": 2, "product_id": "…chosen…"}
   ]
 }
 ```
 
-**Crucially, pricing loads only the safely-resolved product IDs** — never the full
-unconfirmed shortlist. Then it:
+Do **not** resend items/location. The continuation preserves the original query and
+intent; answers must match offered product IDs.
 
-1. Finds candidate stores near the location.
-2. For each store, prices every line (list price + any applicable promo × quantity).
-3. Builds **`cheapest`**: the single store where the whole basket costs least.
-4. Builds a **`multiStore`** plan: if splitting across a few stores saves meaningfully,
-   it says so, with per-store sub-baskets.
-5. If a store doesn't stock the exact SKU, it may **substitute** a close match (and
-   flags `substituted: true` with a reason), or lists the item as missing — it is
-   never silently dropped.
+### Complete plans
 
-### Honesty: the `completeness` block
+A `status: "complete"` response includes three recommendation meanings:
 
-Every optimize response includes a `completeness` block:
+| Field | Meaning |
+|-------|---------|
+| `bestSingleStore` | Best overall single store (coverage first, then total/distance). |
+| `cheapestCompleteStore` | Cheapest store that can cover every resolvable line, or null. |
+| `multiStore` | Cheapest-per-item across stores, with coverage of what was priced. |
 
-```json
-"completeness": {
-  "resolvedLines": 15,
-  "needsConfirmationLines": 2,
-  "unresolvedLines": 1,
-  "safeResolutionRatio": 0.83
-}
-```
-
-If `safeResolutionRatio` drops below the configured minimum (default **0.7**), the
-system refuses to pretend it has a real answer: **`cheapest` and `multiStore` come
-back `null` and `totalsArePartial` is `true`.** A half-resolved basket produces an
-honest partial result, not a confident-but-wrong total.
+Every plan total includes `pricedLines`, `resolvableLines`, `requestedLines`, and
+`coverageRatio`. Missing lines stay in `missingItems` / `missingItemIndexes` — never
+silently dropped. Chain-local equivalents may substitute (`substituted: true`) when
+the request intent allows commodity matching.
 
 ### Per-item storefront links (the handoff)
 
@@ -458,8 +460,8 @@ If you remember five things about this system:
 3. **Adding a chain = one adapter.** The `RawRecord` contract means schema, API, and
    MCP never change when a new source arrives.
 4. **Wrong is worse than empty.** Deterministic-first resolution, forbidden-match
-   guards, and the `completeness`/`totalsArePartial` honesty block all exist so the
-   system asks or abstains rather than confidently returning the wrong product.
+   guards, and the resumable `needs_confirmation` gate all exist so the system asks
+   or abstains rather than confidently returning the wrong product.
 5. **Everything is dated and metered.** Every price carries freshness; every request is
    logged; every ingestion run reports its health. An agent can always qualify its
    answer, and a broken feed surfaces within one cycle.

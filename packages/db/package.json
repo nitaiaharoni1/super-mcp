@@ -25,6 +25,9 @@
     "check-integrity": "tsx src/scripts/check-integrity.ts",
     "gtin-audit": "tsx src/scripts/gtinAudit.ts",
     "geocode-stores": "tsx src/scripts/geocodeStores.ts",
+    "backfill-pack-metadata": "tsx src/scripts/backfillPackMetadata.ts",
+    "fix-product-classes": "tsx src/scripts/fixProductClasses.ts",
+    "quarantine-gtin-conflicts": "tsx src/scripts/quarantineGtinConflicts.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

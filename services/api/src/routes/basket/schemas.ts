@@ -1,29 +1,27 @@
 import { z } from "zod";
-import { DEFAULT_RADIUS_KM } from "../../lib/defaults.js";
 import { geoQueryFields } from "../shared/schemas.js";
 
 export const basketItemSchema = z
   .object({
     product_id: z.string().uuid().optional(),
-    gtin: z.string().trim().optional(),
-    query: z.string().trim().optional(),
+    gtin: z.string().trim().min(1).optional(),
+    query: z.string().trim().min(1).optional(),
     pack_qty: z.coerce.number().positive().optional(),
-    qty: z.coerce.number().positive().optional(),
     amount: z.coerce.number().positive().optional(),
-    unit: z.string().trim().optional(),
+    unit: z.string().trim().min(1).optional(),
   })
-  .refine((item) => Boolean(item.product_id || item.gtin || item.query), {
-    message: "each item requires one of product_id, gtin, or query",
-  })
-  .refine((item) => item.pack_qty == null || item.qty == null, {
-    message: "pack_qty and deprecated qty are mutually exclusive; supply only one",
-  })
-  .refine((item) => item.pack_qty != null || item.qty != null || item.amount != null, {
-    message: "each item requires pack_qty (pack count) or amount + unit",
-  })
-  .refine((item) => item.amount == null || Boolean(item.unit?.trim()), {
-    message: "amount requires unit (kg, g, L, ml, unit, יח, …)",
-  });
+  .strict()
+  .refine(
+    (item) =>
+      [item.product_id, item.gtin, item.query].filter((value) => value != null).length === 1,
+    "each item requires exactly one identifier: product_id, gtin, or query",
+  )
+  .refine(
+    (item) => Number(item.pack_qty != null) + Number(item.amount != null) === 1,
+    "each item requires exactly one quantity source: pack_qty or amount + unit",
+  )
+  .refine((item) => item.amount == null || item.unit != null, "amount requires unit")
+  .refine((item) => item.amount != null || item.unit == null, "unit requires amount");
 
 export type BasketItemBody = z.infer<typeof basketItemSchema>;
 
@@ -31,16 +29,37 @@ const basketLocationBodyShape = {
   ...geoQueryFields,
 };
 
-export const prepareBasketBodySchema = z.object({
-  items: z.array(basketItemSchema).min(1).max(50),
-  ...basketLocationBodyShape,
-});
+export const basketInitialBodySchema = z
+  .object({
+    items: z.array(basketItemSchema).min(1).max(50),
+    ...basketLocationBodyShape,
+    include_club: z.boolean().optional().default(true),
+    stores_limit: z.coerce.number().int().min(0).max(500).optional(),
+    distance_penalty_per_km: z.coerce.number().min(0).max(100).optional(),
+    verbose: z.coerce.boolean().optional(),
+  })
+  .strict()
+  .refine((body) => Boolean(body.city || body.near), {
+    message: "provide either city or near",
+  });
 
-export const optimizeBasketBodySchema = z.object({
-  items: z.array(basketItemSchema).min(1).max(50),
-  ...basketLocationBodyShape,
-  include_club: z.boolean().optional().default(true),
-  stores_limit: z.coerce.number().int().min(0).max(500).optional(),
-  distance_penalty_per_km: z.coerce.number().min(0).max(100).optional(),
-  verbose: z.coerce.boolean().optional(),
-});
+export const basketResumeBodySchema = z
+  .object({
+    continuation: z.string().min(1),
+    answers: z
+      .array(
+        z
+          .object({
+            item_index: z.number().int().min(0),
+            product_id: z.string().uuid(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+
+export const optimizeBasketBodySchema = z.union([
+  basketResumeBodySchema,
+  basketInitialBodySchema,
+]);

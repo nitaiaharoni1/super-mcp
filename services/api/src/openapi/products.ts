@@ -11,6 +11,7 @@ export const productSchema = {
     categoryL2: { type: "string", nullable: true },
     sizeQty: { type: "number", nullable: true },
     sizeUnit: { type: "string", nullable: true },
+    pieceCount: { type: "number", nullable: true },
   },
 };
 

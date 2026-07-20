@@ -2,9 +2,11 @@ import {
   canonicalItemCode,
   canonicalizeCity,
   computeUnitPrice,
+  inferPackSizeFromName,
   isGtinItem,
   lookupChainNames,
   normalizeGtin,
+  normalizeMeasure,
   scrubJson,
   scrubNullChars,
   scrubOptionalText,
@@ -29,6 +31,115 @@ import { normalizeStoreCode } from "./storeCode.js";
 import { isTransientIngestionError } from "./transient.js";
 
 export { normalizeStoreCode } from "./storeCode.js";
+
+export type SaleBasis = "per_kg" | "per_l" | "per_piece" | "per_pack" | "unknown";
+export type MeasureSource = "feed" | "name_inferred" | "weighted_default" | "unknown";
+
+export interface PackSaleFacts {
+  isWeighted: boolean | null;
+  saleBasis: SaleBasis | null;
+  pieceCount: number | null;
+  measureSource: MeasureSource | null;
+  measureConfidence: number | null;
+}
+
+const NAME_UNIT_PACK_RE = /מארז|\d+(?:\.\d+)?\s*(?:יחידות|יח['׳]?|units?|pcs)/i;
+
+/**
+ * Derive durable pack/sale facts from feed flags + name inference.
+ * Prefer feed unit counts when the canonical unit is `unit` and qty > 1;
+ * otherwise fall back to name-inferred מארז/N יח piece counts.
+ */
+export function derivePackSaleFacts(input: {
+  name: string;
+  isWeighted?: boolean;
+  rawQty?: number;
+  canonicalUnit: string;
+  measureUnparseable: boolean;
+}): PackSaleFacts {
+  const isWeighted = typeof input.isWeighted === "boolean" ? input.isWeighted : null;
+  const inferred = inferPackSizeFromName(input.name);
+  const inferredUnitPack =
+    inferred != null
+      ? normalizeMeasure(inferred.quantity, inferred.unit)
+      : null;
+  const nameUnitPack =
+    inferredUnitPack &&
+    !inferredUnitPack.unparseable &&
+    inferredUnitPack.unit === "unit" &&
+    inferredUnitPack.quantity > 0
+      ? inferredUnitPack.quantity
+      : null;
+  const nameSuggestsUnitPack = NAME_UNIT_PACK_RE.test(input.name) || nameUnitPack != null;
+
+  let pieceCount: number | null = null;
+  let measureSource: MeasureSource | null = null;
+  let measureConfidence: number | null = null;
+
+  const feedUnitCount =
+    input.canonicalUnit === "unit" &&
+    !input.measureUnparseable &&
+    input.rawQty != null &&
+    Number.isFinite(input.rawQty) &&
+    input.rawQty > 0
+      ? input.rawQty
+      : null;
+
+  // Prefer a multi-piece feed count; otherwise use name inference for unit packs
+  // (feed qty=1 often means "one pack", not "one piece").
+  if (feedUnitCount != null && feedUnitCount > 1) {
+    pieceCount = feedUnitCount;
+    measureSource = "feed";
+    measureConfidence = 0.9;
+  } else if (
+    nameUnitPack != null &&
+    (input.canonicalUnit === "unit" || nameSuggestsUnitPack)
+  ) {
+    pieceCount = nameUnitPack;
+    measureSource = "name_inferred";
+    measureConfidence = 0.7;
+  } else if (feedUnitCount != null) {
+    pieceCount = feedUnitCount;
+    measureSource = "feed";
+    measureConfidence = 0.85;
+  }
+
+  let saleBasis: SaleBasis | null = null;
+  if (isWeighted === true) {
+    if (input.canonicalUnit === "g") saleBasis = "per_kg";
+    else if (input.canonicalUnit === "ml") saleBasis = "per_l";
+    else saleBasis = "unknown";
+
+    const usedWeightedDefault =
+      input.rawQty == null || !Number.isFinite(input.rawQty) || input.rawQty <= 0;
+    if (usedWeightedDefault) {
+      measureSource = "weighted_default";
+      measureConfidence = 0.5;
+    } else if (measureSource == null) {
+      measureSource = "feed";
+      measureConfidence = 0.95;
+    }
+  } else if (input.canonicalUnit === "unit") {
+    saleBasis = pieceCount != null && pieceCount > 1 ? "per_pack" : "per_piece";
+    if (measureSource == null) {
+      measureSource = "feed";
+      measureConfidence = 0.85;
+    }
+  } else {
+    saleBasis = "unknown";
+    if (measureSource == null) {
+      measureSource = "unknown";
+    }
+  }
+
+  return {
+    isWeighted,
+    saleBasis,
+    pieceCount,
+    measureSource,
+    measureConfidence,
+  };
+}
 
 export interface NormalizeStats {
   rowsOk: number;
@@ -58,6 +169,11 @@ interface PriceBufferRow {
   measureUnparseable: boolean;
   sizeQty: number | null;
   sizeUnit: string | null;
+  isWeighted: boolean | null;
+  saleBasis: SaleBasis | null;
+  pieceCount: number | null;
+  measureSource: MeasureSource | null;
+  measureConfidence: number | null;
   price: number;
   unitPrice: number | null;
   currency: string;
@@ -151,6 +267,15 @@ export class Normalizer {
           brand: r.brand,
           sizeQty: r.measureUnparseable ? null : r.sizeQty,
           sizeUnit: r.measureUnparseable ? null : r.sizeUnit,
+          pieceCount: r.pieceCount,
+          packMetadataSource:
+            r.pieceCount != null
+              ? r.measureSource === "name_inferred"
+                ? "name_inferred"
+                : r.measureSource === "feed"
+                  ? "feed"
+                  : r.measureSource
+              : null,
         })),
       );
 
@@ -175,6 +300,11 @@ export class Normalizer {
           canonicalQty: r.canonicalQty,
           canonicalUnit: r.canonicalUnit,
           measureUnparseable: r.measureUnparseable,
+          isWeighted: r.isWeighted,
+          saleBasis: r.saleBasis,
+          pieceCount: r.pieceCount,
+          measureSource: r.measureSource,
+          measureConfidence: r.measureConfidence,
         })),
       );
 
@@ -220,6 +350,15 @@ export class Normalizer {
           brand: r.brand ?? undefined,
           sizeQty: r.measureUnparseable ? undefined : r.sizeQty ?? undefined,
           sizeUnit: r.measureUnparseable ? undefined : r.sizeUnit ?? undefined,
+          pieceCount: r.pieceCount,
+          packMetadataSource:
+            r.pieceCount != null
+              ? r.measureSource === "name_inferred"
+                ? "name_inferred"
+                : r.measureSource === "feed"
+                  ? "feed"
+                  : r.measureSource
+              : null,
         });
         await reapReclassifiedListing(r.chainId, r.listingItemCode, r.reapOtherItemCode);
         const listingId = await upsertListing({
@@ -235,6 +374,11 @@ export class Normalizer {
           canonicalQty: r.canonicalQty,
           canonicalUnit: r.canonicalUnit,
           measureUnparseable: r.measureUnparseable,
+          isWeighted: r.isWeighted,
+          saleBasis: r.saleBasis,
+          pieceCount: r.pieceCount,
+          measureSource: r.measureSource,
+          measureConfidence: r.measureConfidence,
         });
         await upsertStorePrice({
           listingId,
@@ -348,6 +492,14 @@ export class Normalizer {
           if (label) this.noteMiss("unit_unparseable", label, { chainId: cleanChainId });
         }
 
+        const packFacts = derivePackSaleFacts({
+          name,
+          isWeighted: record.isWeighted,
+          rawQty: record.qty,
+          canonicalUnit: unit.measure.unit,
+          measureUnparseable: unit.measure.unparseable,
+        });
+
         const chainId = scrubNullChars(record.chainId);
         // Chain-scoped identity for non-GTIN items so they aren't dropped entirely;
         // never merged across chains (SPEC non-goal: no cross-chain match for non-GTIN).
@@ -375,6 +527,11 @@ export class Normalizer {
           measureUnparseable: unit.measure.unparseable,
           sizeQty: unit.measure.quantity,
           sizeUnit: unit.measure.unit,
+          isWeighted: packFacts.isWeighted,
+          saleBasis: packFacts.saleBasis,
+          pieceCount: packFacts.pieceCount,
+          measureSource: packFacts.measureSource,
+          measureConfidence: packFacts.measureConfidence,
           price: record.price,
           unitPrice: unit.pricePerCanonical ?? null,
           currency: record.currency ?? "ILS",

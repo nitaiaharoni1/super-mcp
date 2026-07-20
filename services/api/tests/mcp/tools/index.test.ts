@@ -12,7 +12,7 @@ describe("MCP domain tool registrars", () => {
     expect(typeof registerStoreTools).toBe("function");
   });
 
-  it("registers prepare_basket and optimize_basket", () => {
+  it("registers only optimize_basket for shopping lists", () => {
     const registered: string[] = [];
     const server = {
       registerTool: (_name: string, _def: unknown, _handler: unknown) => {
@@ -22,28 +22,31 @@ describe("MCP domain tool registrars", () => {
 
     registerBasketTools(server);
 
-    expect(registered).toContain("prepare_basket");
-    expect(registered).toContain("optimize_basket");
+    expect(registered).toEqual(["optimize_basket"]);
   });
 
-  it("publishes pack_qty while retaining an exclusive deprecated qty alias", () => {
-    const definitions = new Map<string, { inputSchema: z.ZodObject<{ items: z.ZodType }> }>();
+  it("publishes pack_qty / amount+unit and rejects deprecated qty", () => {
+    const definitions = new Map<string, { inputSchema: z.ZodObject<z.ZodRawShape> }>();
     const server = {
-      registerTool: (name: string, def: { inputSchema: z.ZodObject<{ items: z.ZodType }> }) => {
+      registerTool: (name: string, def: { inputSchema: z.ZodObject<z.ZodRawShape> }) => {
         definitions.set(name, def);
       },
     } as unknown as Parameters<typeof registerBasketTools>[0];
 
     registerBasketTools(server);
 
-    const itemsSchema = definitions.get("prepare_basket")?.inputSchema.shape.items;
+    const itemsSchema = definitions.get("optimize_basket")?.inputSchema.shape.items;
     expect(itemsSchema).toBeDefined();
     expect(itemsSchema?.parse([{ query: "pitas", pack_qty: 2 }])).toEqual([
       { query: "pitas", pack_qty: 2 },
     ]);
+    expect(itemsSchema?.parse([{ query: "pitas", amount: 20, unit: "יח" }])).toEqual([
+      { query: "pitas", amount: 20, unit: "יח" },
+    ]);
+    expect(() => itemsSchema?.parse([{ query: "pitas", qty: 2 }])).toThrow();
     expect(() =>
       itemsSchema?.parse([{ query: "pitas", pack_qty: 2, qty: 2 }]),
-    ).toThrow(/pack_qty.*qty/i);
+    ).toThrow();
   });
 
   it("registers every store tool with a strict schema that rejects unknown args", () => {
@@ -60,26 +63,24 @@ describe("MCP domain tool registrars", () => {
     expect(getPromotions).toBeDefined();
     const schema = getPromotions!.inputSchema;
 
-    // A known-good call passes.
     expect(schema.safeParse({ city: "הרצליה", limit: 10 }).success).toBe(true);
 
-    // Misspelled / unknown args are rejected, not silently dropped.
     const bad = schema.safeParse({ citty: "הרצליה", limit: 10 });
     expect(bad.success).toBe(false);
     if (!bad.success) {
       expect(bad.error.issues.some((i) => i.code === "unrecognized_keys")).toBe(true);
     }
 
-    // Every registered store tool is strict.
     for (const def of definitions.values()) {
       expect(def.inputSchema.safeParse({ __definitely_unknown__: 1 }).success).toBe(false);
     }
   });
 
-  it("directs agents through prepare, confirmation, then optimization", () => {
-    expect(MCP_SERVER_INSTRUCTIONS).toMatch(
-      /prepare_basket.*confirm.*optimize_basket/is,
-    );
+  it("directs agents through resumable optimize_basket confirmation", () => {
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/optimize_basket/i);
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/needs_confirmation/i);
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/continuation/i);
+    expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/prepare_basket/i);
     expect(MCP_SERVER_INSTRUCTIONS).toContain("pack_qty");
     expect(MCP_SERVER_INSTRUCTIONS).toContain("amount=20, unit=יח");
   });

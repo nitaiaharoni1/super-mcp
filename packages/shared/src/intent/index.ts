@@ -1,5 +1,6 @@
 export * from "./semanticMatcher.js";
 export * from "./tokenMatcher.js";
+export * from "./hebrewMorphology.js";
 export * from "./queryProfile.js";
 export * from "./deterministicRank.js";
 export * from "./productIntent.js";

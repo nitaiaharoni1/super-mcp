@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  preferQueryHeadAnchored,
   queryHeadAnchored,
   queryTokensSatisfied,
   variantConflict,
@@ -27,9 +28,28 @@ describe("queryHeadAnchored", () => {
     expect(queryHeadAnchored("מים", "אקדח מים")).toBe(false);
     expect(queryHeadAnchored("נייר טואלט", "אחסונית נייר טואלט")).toBe(false);
   });
+  it("blocks wine openers for bare wine queries", () => {
+    expect(queryHeadAnchored("יין", "חולץ יין")).toBe(false);
+    expect(queryHeadAnchored("יין", "פותחן יין מלצרים")).toBe(false);
+    expect(queryHeadAnchored("יין אדום", "יין קברנה סוביניון")).toBe(true);
+  });
+  it("preferQueryHeadAnchored puts bottles before corkscrews", () => {
+    const ordered = preferQueryHeadAnchored("יין", [
+      { name: "חולץ יין", id: "c" },
+      { name: "יין אדום מונטפולציאנו", id: "w" },
+      { name: "פותחן יין", id: "o" },
+    ]);
+    expect(ordered.map((x) => x.id)).toEqual(["w", "c", "o"]);
+  });
   it("blocks a derived-product leader (apple vinegar, orange juice)", () => {
     expect(queryHeadAnchored("תפוחים", "חומץ תפוחים אולד דאט")).toBe(false);
     expect(queryHeadAnchored("תפוזים", "מיץ תפוזים סחוט")).toBe(false);
+  });
+  it("blocks prepared-food / dessert hosts for produce and cola queries", () => {
+    expect(queryHeadAnchored("לימונים", "עוגת לימונים 600 גרם")).toBe(false);
+    expect(queryHeadAnchored("לימונים", "עוגות לימון")).toBe(false);
+    expect(queryHeadAnchored("קולה", "לקריץ קולה מסוכר במשקל")).toBe(false);
+    expect(queryHeadAnchored("לימונים", "ליקר לימון")).toBe(false);
   });
   it("still passes a genuine brand/cut leader", () => {
     expect(queryHeadAnchored("חלב", "תנובה חלב 3%")).toBe(true);
@@ -41,6 +61,9 @@ describe("queryTokensSatisfied (morphology-tolerant)", () => {
   it("matches Hebrew plural query against singular name and vice versa", () => {
     expect(queryTokensSatisfied(["מלפפונים"], "מלפפון ארוז")).toBe(true);
     expect(queryTokensSatisfied(["עגבניות"], "עגבניה חממה")).toBe(true);
+  });
+  it("matches short pita plurals (פיתות↔פיתה)", () => {
+    expect(queryTokensSatisfied(["פיתות"], "פיתה אסלי")).toBe(true);
   });
   it("still requires a specific token (cabernet) to be present", () => {
     expect(queryTokensSatisfied(["יין", "אדום", "קברנה"], "יין אדום מרלו")).toBe(false);
@@ -59,6 +82,7 @@ describe("variantConflict", () => {
     matchedVia: "product",
     sizeQty: null,
     sizeUnit: null,
+    pieceCount: null,
     hasPrice: true,
     hasLocalPrice: true,
     productClass: null,
@@ -83,6 +107,7 @@ describe("buildCommodityEquivalents", () => {
     matchedVia: "product",
     sizeQty: 1000,
     sizeUnit: "g",
+    pieceCount: null,
     hasPrice: true,
     hasLocalPrice: true,
     productClass: "produce",
@@ -131,15 +156,20 @@ describe("buildCommodityEquivalents", () => {
     expect(set).toHaveLength(1);
   });
 
-  it("excludes a different unit and a different class", () => {
-    const top = c({});
-    const set = buildCommodityEquivalents(
-      top,
-      [top, c({ sizeUnit: "unit" }), c({ productClass: "canned" })],
-      "עגבניות",
-      5,
-    );
-    expect(set).toHaveLength(1);
+  it("groups kg↔g produce peers (canonical weight)", () => {
+    const top = c({ sizeUnit: "kg", sizeQty: 1 });
+    const peer = c({ sizeUnit: "g", sizeQty: 1000 });
+    const set = buildCommodityEquivalents(top, [top, peer], "עגבניות", 5);
+    expect(set).toHaveLength(2);
+  });
+
+  it("groups unit↔g produce peers; still excludes a different class", () => {
+    const top = c({ classL1: "produce" });
+    const unitPeer = c({ sizeUnit: "unit", sizeQty: 1, classL1: "produce" });
+    const canned = c({ productClass: "canned", classL1: "pantry" });
+    const set = buildCommodityEquivalents(top, [top, unitPeer, canned], "עגבניות", 5);
+    expect(set).toHaveLength(2);
+    expect(set.map((x) => x.productClass)).not.toContain("canned");
   });
 
   it("returns only the top pick when it has no product class", () => {
@@ -161,6 +191,7 @@ describe("buildAvailabilityEquivalents", () => {
     matchedVia: "product",
     sizeQty: 700,
     sizeUnit: "g",
+    pieceCount: null,
     hasPrice: true,
     hasLocalPrice: true,
     productClass: null,
@@ -239,6 +270,15 @@ describe("buildAvailabilityEquivalents", () => {
     const ok2 = h({ name: "אבטיח אדום" });
     const rejected = h({ name: "אבטיח", intentTier: 0 });
     const set = buildAvailabilityEquivalents([ok1, ok2, rejected], "אבטיח", opts);
+    expect(set).toHaveLength(2);
+  });
+
+  it("excludes prepared-food hosts that share a produce token (lemon cake)", () => {
+    const freshA = h({ name: "לימון טרי", sizeUnit: "kg", sizeQty: 1 });
+    const freshB = h({ name: "לימונים ארוזים", sizeUnit: "kg", sizeQty: 1 });
+    const cake = h({ name: "עוגת לימונים 600 גרם", sizeUnit: "g", sizeQty: 600 });
+    const set = buildAvailabilityEquivalents([cake, freshA, freshB], "לימונים", opts);
+    expect(set.map((x) => x.name)).not.toContain("עוגת לימונים 600 גרם");
     expect(set).toHaveLength(2);
   });
 

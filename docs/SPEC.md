@@ -133,7 +133,7 @@ A future global market (e.g., a scraped US chain) implements the same interface 
 - `GET /v1/products/{id}/history?store_id=&from=&to=`
 - `GET /v1/chains` · `GET /v1/stores?chain=&city=&near=&radius=` (default radius **10km** when `near` is set)
 - `GET /v1/promotions?store_id=&product_id=&active=true`
-- `POST /v1/basket/optimize` (body: `[{product_id|gtin|query, qty}]` **plus required** `city` and/or `near`; returns per-store totals with promo math, missing-item handling, ranked result + `cheapest`)
+- `POST /v1/basket/optimize` — resumable: initial `{items[{product_id|gtin|query, pack_qty|amount+unit}], city|near}` or resume `{continuation, answers}`; returns `needs_confirmation` or `complete` with `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
 - Auth: `Authorization: Bearer <api_key>` · per-key rate limits + metering · OpenAPI JSON served at `/openapi.json`
 
 ### MCP server (v1 tools, thin wrappers over the same services)
@@ -142,7 +142,7 @@ A future global market (e.g., a scraped US chain) implements the same interface 
 - `get_product(id | gtin)`
 - `compare_prices(product, location?, sort?)` — default 10km; `sort=unit_price` for per-100g
 - `suggest_substitutes(product, location?)` — cheaper similar products (location optional; nationwide if omitted)
-- `optimize_basket(items[], location)` — **location required** (`city` and/or `near`); returns `cheapest` recommendation
+- `optimize_basket` — **location required** on initial call; if `needs_confirmation`, resume with `{continuation, answers}` only; complete plans are `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
 - `list_stores(chain?, city?, near?, radius_km?)` — default 10km when `near` is set
 - `get_promotions(store?, product?)`
 

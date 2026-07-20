@@ -119,10 +119,11 @@ export function systemPaths(mcpToolList: string): Record<string, unknown> {
       post: {
         summary: "MCP Streamable HTTP endpoint (JSON-RPC 2.0)",
         description:
-          `Remote MCP server exposing ${mcpToolList}. For shopping lists: call prepare_basket first, ` +
-          "confirm every required question, then call optimize_basket once with product_id on confirmed " +
-          "lines (prefer pack_qty; qty is a deprecated alias). Auth is Bearer by default; query-string " +
-          "?api_key= is accepted only on /mcp when SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 (legacy escape hatch).",
+          `Remote MCP server exposing ${mcpToolList}. For shopping lists: call optimize_basket with ` +
+          "items and location; if status is needs_confirmation, resume once with continuation and answers. " +
+          "Use pack_qty for shelf packs and amount+unit for physical need. Auth is Bearer by default; " +
+          "query-string ?api_key= is accepted only on /mcp when SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 " +
+          "(legacy escape hatch).",
         responses: { "200": { description: "JSON-RPC response or SSE stream" } },
       },
     },

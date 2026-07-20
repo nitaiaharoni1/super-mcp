@@ -24,6 +24,3 @@ export async function registerStoreRoutes(app: FastifyInstance): Promise<void> {
     }),
   );
 }
-
-/** @deprecated Use registerStoreRoutes — kept for callers that still import the old name. */
-export const registerChainRoutes = registerStoreRoutes;

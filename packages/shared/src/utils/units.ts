@@ -229,24 +229,44 @@ const PRODUCE_PIECE_WEIGHT_KG: Record<string, number> = {
 
 const DEFAULT_PIECE_WEIGHT_KG = 0.15;
 
+/** Whole-token produce cues — never substring-match (פרי ⊂ פרימיום). */
+const PRODUCE_NAME_CUE_TOKENS: ReadonlySet<string> = new Set([
+  "ירק",
+  "ירקות",
+  "פירות",
+  "פרי",
+]);
+
 /**
- * Estimate a typical per-piece weight (kg) for produce from its product name,
- * for converting a requested piece count into an approximate kg quantity.
- * Falls back to a conservative default when no known token matches.
+ * Estimate a typical per-piece weight (kg) for produce from its product name.
+ * Returns null for non-produce / packaged goods so callers buy unit counts
+ * instead of inventing a kg qty (wine 750ml must not become 0.15kg).
  */
-function estimatePieceWeightKg(productName: string | null | undefined): number {
+function estimatePieceWeightKg(productName: string | null | undefined): number | null {
   const name = (productName ?? "").replace(/\s+/g, " ").trim();
-  if (!name) return DEFAULT_PIECE_WEIGHT_KG;
+  if (!name) return null;
 
   let bestToken = "";
-  let bestWeight = DEFAULT_PIECE_WEIGHT_KG;
+  let bestWeight: number | null = null;
   for (const token of Object.keys(PRODUCE_PIECE_WEIGHT_KG)) {
     if (name.includes(token) && token.length > bestToken.length) {
       bestToken = token;
       bestWeight = PRODUCE_PIECE_WEIGHT_KG[token]!;
     }
   }
-  return bestWeight;
+  if (bestWeight != null) return bestWeight;
+  // Tokenize on whitespace / punctuation so "פרימיום" ≠ cue "פרי".
+  const tokens = name.split(/[^\u0590-\u05FFa-zA-Z0-9"]+/).filter(Boolean);
+  if (tokens.some((t) => PRODUCE_NAME_CUE_TOKENS.has(t))) return DEFAULT_PIECE_WEIGHT_KG;
+  return null;
+}
+
+function listingSoldByWeight(
+  isWeighted?: boolean,
+  saleBasis?: string | null,
+): boolean {
+  if (isWeighted === true) return true;
+  return saleBasis === "per_kg" || saleBasis === "per_l";
 }
 
 /**
@@ -254,10 +274,13 @@ function estimatePieceWeightKg(productName: string | null | undefined): number {
  *
  * - Packaged goods with known size: number of packs (ceil).
  * - Weighted / unknown size: shelf qty in kg or L (feeds price per kg/L) or unit count.
- * - If only `packQty` is provided (legacy), that pack count is returned unchanged.
+ * - If only `packQty` is provided and the listing is weighted (isWeighted /
+ *   sale_basis per_kg|per_l): treat packQty as piece count for recognized produce
+ *   (→ kg via piece-weight heuristics), otherwise as a kg/L amount.
+ * - Otherwise packQty is returned unchanged as pack count (`mode: "packs"`).
  */
-export function resolvePurchaseQty(input: {
-  /** Legacy pack count when amount/unit are omitted. */
+export interface PurchaseQuantityInput {
+  /** Shelf pack count when amount/unit are omitted. */
   packQty?: number;
   amount?: number;
   unit?: string;
@@ -265,18 +288,40 @@ export function resolvePurchaseQty(input: {
   productSizeUnit?: string | null;
   /** Used to infer pack size from name when size fields are missing. */
   productName?: string | null;
-}): { qty: number; mode: "packs" | "weighted_kg_or_l" | "units" | "legacy_packs" } {
+  /** Persisted number of pieces in one retail pack. */
+  pieceCount?: number | null;
+  /** Listing/product sold by weight (feed bIsWeighted or backfill). */
+  isWeighted?: boolean;
+  /** listing.sale_basis: per_kg | per_l | per_piece | per_pack | unknown */
+  saleBasis?: string | null;
+}
+
+export interface PurchaseQuantity {
+  qty: number;
+  mode: "packs" | "weighted_kg_or_l" | "units";
+}
+
+export function resolvePurchaseQty(input: PurchaseQuantityInput): PurchaseQuantity {
   const { amount, unit, packQty, productSizeQty, productSizeUnit } = input;
 
   if (amount == null || !Number.isFinite(amount) || amount <= 0) {
     const q = packQty != null && Number.isFinite(packQty) && packQty > 0 ? packQty : 1;
-    return { qty: q, mode: "legacy_packs" };
+    if (listingSoldByWeight(input.isWeighted, input.saleBasis)) {
+      const pieceWeightKg = estimatePieceWeightKg(input.productName);
+      if (pieceWeightKg != null) {
+        const kg = Math.round(q * pieceWeightKg * 1000) / 1000;
+        return { qty: kg, mode: "weighted_kg_or_l" };
+      }
+      // Non-produce weighted SKU: pack_qty means kg (or L) of product.
+      return { qty: q, mode: "weighted_kg_or_l" };
+    }
+    return { qty: q, mode: "packs" };
   }
 
   const need = normalizeMeasure(amount, unit);
   if (need.unparseable) {
     const q = packQty != null && Number.isFinite(packQty) && packQty > 0 ? packQty : amount;
-    return { qty: q, mode: "legacy_packs" };
+    return { qty: q, mode: "packs" };
   }
 
   const dbPack =
@@ -297,27 +342,34 @@ export function resolvePurchaseQty(input: {
 
   // Counted items (יח): prefer name/"N יח" pack counts even when DB size is weight (e.g. 480g).
   if (need.unit === "unit") {
-    const unitPack =
+    const inferredUnitPack =
       inferredPack && !inferredPack.unparseable && inferredPack.unit === "unit" && inferredPack.quantity > 1
-        ? inferredPack
-        : dbPack && !dbPack.unparseable && dbPack.unit === "unit" && dbPack.quantity > 1
-          ? dbPack
-          : null;
-    if (unitPack) {
+        ? inferredPack.quantity
+        : null;
+    const persistedUnitPack =
+      input.pieceCount != null && Number.isFinite(input.pieceCount) && input.pieceCount > 1
+        ? input.pieceCount
+        : null;
+    const dbUnitPack =
+      dbPack && !dbPack.unparseable && dbPack.unit === "unit" && dbPack.quantity > 1
+        ? dbPack.quantity
+        : null;
+    const piecesPerPack = inferredUnitPack ?? persistedUnitPack ?? dbUnitPack;
+    if (piecesPerPack != null) {
       return {
-        qty: Math.max(1, Math.ceil(need.quantity / unitPack.quantity)),
+        qty: Math.max(1, Math.ceil(need.quantity / piecesPerPack)),
         mode: "packs",
       };
     }
-    // No unit-pack: if the matched product is weighted (has a g/ml size, or
-    // no size at all so the caller prices it per kg via the weighted
-    // fallback), a requested piece count must become an approximate kg
-    // quantity — multiplying the count directly against a ₪/kg price would
-    // silently treat pieces as kilograms.
-    const isWeightedProduct = !dbPack || dbPack.unparseable || dbPack.unit === "g" || dbPack.unit === "ml";
-    if (isWeightedProduct) {
-      const pieceWeightKg = estimatePieceWeightKg(input.productName);
-      return { qty: need.quantity * pieceWeightKg, mode: "weighted_kg_or_l" };
+    // No unit-pack: convert piece→kg ONLY for recognized produce. Packaged
+    // g/ml retail SKUs (wine 750ml, hummus tubs) are sold per container — the
+    // old "any g/ml ⇒ weighted" path undercounted bottles by ~6× via the
+    // 0.15kg default piece weight.
+    const pieceWeightKg = estimatePieceWeightKg(input.productName);
+    if (pieceWeightKg != null) {
+      // Round to grams-level precision so 3×0.15 does not become 0.44999999999999996.
+      const kg = Math.round(need.quantity * pieceWeightKg * 1000) / 1000;
+      return { qty: kg, mode: "weighted_kg_or_l" };
     }
     return { qty: need.quantity, mode: "units" };
   }
@@ -402,4 +454,140 @@ export function normalizeGtin(itemCode: string): string {
 /** The item_code a listing row is keyed on: normalized GTIN for barcode items, raw code otherwise. */
 export function canonicalItemCode(itemType: number, itemCode: string): string {
   return isGtinItem(itemType, itemCode) ? normalizeGtin(itemCode) : itemCode;
+}
+
+export type PackCompatOptions = {
+  packTolerance?: number; // default 0.5
+  /** When true, allow unit/count peers against g/ml weighted goods (produce). */
+  allowCountToWeight?: boolean;
+};
+
+export type PackSizeInput = {
+  sizeQty?: number | null;
+  sizeUnit?: string | null;
+  name?: string | null;
+};
+
+type ResolvedPack = {
+  measure: NormalizedMeasure | null;
+  /** Name inferred a multi-piece unit pack (e.g. "10 יח") even if DB says grams. */
+  nameInfersUnitPack: boolean;
+  /** True when sizeQty was absent and we only know the unit (stub qty=1). */
+  qtyMissing: boolean;
+};
+
+/**
+ * Effective pack measure for equivalence: prefer parseable DB size; fall back to
+ * name inference. A name-inferred unit pack (count>1) wins over a DB weight label
+ * (multipack pita shelved as 1000g).
+ */
+function resolveEffectivePack(input: PackSizeInput): ResolvedPack {
+  const inferred = inferPackSizeFromName(input.name);
+  const inferredPack = inferred ? normalizeMeasure(inferred.quantity, inferred.unit) : null;
+  const nameInfersUnitPack = Boolean(
+    inferredPack &&
+      !inferredPack.unparseable &&
+      inferredPack.unit === "unit" &&
+      inferredPack.quantity > 1,
+  );
+  if (nameInfersUnitPack) {
+    return { measure: inferredPack, nameInfersUnitPack: true, qtyMissing: false };
+  }
+
+  const unit = input.sizeUnit?.trim();
+  const qtyPresent =
+    input.sizeQty != null && Number.isFinite(input.sizeQty) && input.sizeQty > 0;
+  if (unit) {
+    const db = normalizeMeasure(qtyPresent ? input.sizeQty! : 1, unit);
+    if (!db.unparseable) {
+      return { measure: db, nameInfersUnitPack: false, qtyMissing: !qtyPresent };
+    }
+  }
+
+  if (inferredPack && !inferredPack.unparseable) {
+    return {
+      measure: inferredPack,
+      nameInfersUnitPack: inferredPack.unit === "unit" && inferredPack.quantity > 1,
+      qtyMissing: false,
+    };
+  }
+  return { measure: null, nameInfersUnitPack: false, qtyMissing: true };
+}
+
+function isCountWeightPair(a: CanonicalUnit, b: CanonicalUnit): boolean {
+  return (
+    (a === "unit" && (b === "g" || b === "ml")) ||
+    (b === "unit" && (a === "g" || a === "ml"))
+  );
+}
+
+/**
+ * Whether two SKU pack sizes are interchangeable for commodity equivalence /
+ * coverage peer filtering. Canonicalizes kg↔g / יח↔unit and optionally allows
+ * count↔weight for produce (or when a name implies a piece multipack).
+ */
+export function packSizesCompatible(
+  a: PackSizeInput,
+  b: PackSizeInput,
+  opts?: PackCompatOptions,
+): { compatible: boolean; reason: string } {
+  const packTolerance = opts?.packTolerance ?? 0.5;
+  const allowCountToWeight = opts?.allowCountToWeight ?? false;
+  const ra = resolveEffectivePack(a);
+  const rb = resolveEffectivePack(b);
+  const ma = ra.measure;
+  const mb = rb.measure;
+
+  if (!ma && !mb) {
+    return { compatible: true, reason: "both_unparseable" };
+  }
+
+  if (!ma || !mb) {
+    const other = ma ?? mb;
+    if (
+      allowCountToWeight &&
+      other &&
+      (other.unit === "g" || other.unit === "ml")
+    ) {
+      return { compatible: true, reason: "null_vs_weight" };
+    }
+    return { compatible: false, reason: "unparseable_mismatch" };
+  }
+
+  if (ma.unit === mb.unit) {
+    if (ma.unit === "unit") {
+      // Unit stubs (qty missing or ≤1) are not real pack sizes — skip tolerance.
+      const skipQty =
+        ra.qtyMissing || rb.qtyMissing || ma.quantity <= 1 || mb.quantity <= 1;
+      if (!skipQty && ma.quantity > 0) {
+        if (Math.abs(mb.quantity - ma.quantity) / ma.quantity > packTolerance) {
+          return { compatible: false, reason: "qty_tolerance" };
+        }
+      }
+    } else {
+      // g/ml: enforce pack tolerance only when BOTH sides have a real pack qty.
+      // Catalog stubs of 1g/1ml (common on generic commodity rows) must not
+      // reject every real tub/bottle peer (חומוס 1g vs אחלה 400g).
+      const stubA = ra.qtyMissing || ma.quantity <= 1;
+      const stubB = rb.qtyMissing || mb.quantity <= 1;
+      if (!stubA && !stubB && ma.quantity > 0) {
+        if (Math.abs(mb.quantity - ma.quantity) / ma.quantity > packTolerance) {
+          return { compatible: false, reason: "qty_tolerance" };
+        }
+      }
+    }
+    return { compatible: true, reason: "same_unit" };
+  }
+
+  if (isCountWeightPair(ma.unit, mb.unit)) {
+    // Count↔weight only when the caller opted in (produce / pita_flatbread).
+    // Name-inferred "10 יח" packs are resolved to unit above when present; they
+    // still need allowCountToWeight to pair with a g/ml peer. Pantry stays strict.
+    if (allowCountToWeight) {
+      return { compatible: true, reason: "count_weight" };
+    }
+    return { compatible: false, reason: "count_weight_blocked" };
+  }
+
+  return { compatible: false, reason: "unit_mismatch" };
 }

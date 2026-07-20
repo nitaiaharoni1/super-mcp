@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AppError } from "@super-mcp/shared";
-import { optimizeBasket, prepareBasket } from "../../../services/basket/index.js";
+import { optimizeBasket } from "../../../services/basket/index.js";
 import { resolveRadiusKm, DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
 import { locationShape, toGeo } from "../shared/location.js";
@@ -9,181 +9,122 @@ import { locationShape, toGeo } from "../shared/location.js";
 const basketItemSchema = z
   .object({
     product_id: z.string().uuid().optional().describe("Canonical product UUID, if known."),
-    gtin: z.string().optional().describe("GTIN/barcode, if known."),
-    query: z.string().optional().describe("Free-text product name, used if product_id/gtin are unknown."),
-    pack_qty: z
-      .number()
-      .positive()
-      .optional()
-      .describe("Number of product packs to buy."),
-    qty: z
-      .number()
-      .positive()
-      .optional()
-      .describe("Deprecated alias for pack_qty. Do not supply both."),
+    gtin: z.string().min(1).optional().describe("GTIN/barcode, if known."),
+    query: z.string().min(1).optional().describe("Free-text product name."),
+    pack_qty: z.number().positive().optional().describe("Number of product packs to buy."),
     amount: z
       .number()
       .positive()
       .optional()
-      .describe("Physical amount, e.g. 1.5 with unit=kg. Converted to packs or weighted qty."),
+      .describe("Physical amount, e.g. 1.5 with unit=kg."),
     unit: z
       .string()
+      .min(1)
       .optional()
-      .describe("Unit for amount: kg, g, L, ml, unit, יח, קג, etc. For 20 pitas use amount=20, unit=יח."),
+      .describe("Unit for amount: kg, g, L, ml, unit, יח, etc."),
   })
-  .refine((item) => !(item.pack_qty != null && item.qty != null), {
-    message: "pack_qty and deprecated qty are mutually exclusive; supply only one",
+  .strict()
+  .refine(
+    (item) =>
+      [item.product_id, item.gtin, item.query].filter((value) => value != null).length === 1,
+    "each item requires exactly one identifier: product_id, gtin, or query",
+  )
+  .refine(
+    (item) => Number(item.pack_qty != null) + Number(item.amount != null) === 1,
+    "each item requires exactly one quantity source: pack_qty or amount + unit",
+  )
+  .refine((item) => item.amount == null || item.unit != null, "amount requires unit")
+  .refine((item) => item.amount != null || item.unit == null, "unit requires amount");
+
+const basketItemsSchema = z.array(basketItemSchema).min(1).max(50);
+
+const answerSchema = z
+  .object({
+    item_index: z.number().int().min(0),
+    product_id: z.string().uuid(),
   })
-  .describe("Shopping list line: product_id|gtin|query plus pack_qty (deprecated: qty) or amount+unit.");
-
-const basketItemsSchema = z
-  .array(basketItemSchema)
-  .min(1)
-  .max(50)
-  .describe(
-    "Shopping list. Each item needs product_id|gtin|query and pack_qty (deprecated: qty) or amount+unit.",
-  );
-
-function assertBasketItems(items: z.infer<typeof basketItemsSchema>): void {
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]!;
-    if (!item.product_id && !item.gtin && !item.query) {
-      throw new AppError("bad_request", `items[${i}] requires product_id, gtin, or query`, 400);
-    }
-    if (item.pack_qty == null && item.qty == null && item.amount == null) {
-      throw new AppError("bad_request", `items[${i}] requires pack_qty or amount`, 400);
-    }
-    if (item.pack_qty != null && item.qty != null) {
-      throw new AppError(
-        "bad_request",
-        `items[${i}] cannot supply both pack_qty and deprecated qty`,
-        400,
-      );
-    }
-    if (item.amount != null && !(item.unit && item.unit.trim())) {
-      throw new AppError(
-        "bad_request",
-        `items[${i}] amount requires unit (kg, g, L, ml, unit, יח, …)`,
-        400,
-      );
-    }
-  }
-}
+  .strict();
 
 function mapBasketItems(items: z.infer<typeof basketItemsSchema>) {
   return items.map((item) => ({
     productId: item.product_id,
     gtin: item.gtin,
     query: item.query,
-    qty: item.pack_qty ?? item.qty,
+    packQty: item.pack_qty,
     amount: item.amount,
     unit: item.unit,
   }));
 }
 
-export function registerBasketTools(server: McpServer): void {
-  registerTool(
-    server,
-    "prepare_basket",
-    {
-      title: "Resolve a shopping list near a location",
-      description:
-        "FIRST step for shopping lists: resolve free-text lines to product candidates near city/near " +
-        "(default radius). Returns resolutionStatus, safe assumptions, and required questions with at most " +
-        "three compact product/pack options for needs_confirmation lines. Each option carries " +
-        "nearbyPricedStores (real count of location-scoped stores that price it) and hasLocalPrice " +
-        "(nearbyPricedStores > 0). Does not load basket prices. " +
-        "After the user answers every required question, call optimize_basket with product_id for confirmed lines.",
-      inputSchema: {
-        items: basketItemsSchema,
-        ...locationShape,
-      },
-    },
-    async ({ items, city, near, radius_km }) => {
-      assertBasketItems(items);
-      const geo = toGeo(near);
-      return prepareBasket({
-        items: mapBasketItems(items),
-        city,
-        near: geo,
-        radiusKm: resolveRadiusKm(geo, radius_km),
-      });
-    },
-  );
+function continuationOptions() {
+  return {
+    continuationSecret: process.env.BASKET_CONTINUATION_SECRET ?? "",
+  };
+}
 
+export function registerBasketTools(server: McpServer): void {
   registerTool(
     server,
     "optimize_basket",
     {
-      title: "Price a basket at nearby stores in one shot",
+      title: "Resolve and price a shopping basket (resumable)",
       description:
-        "One-shot: prices the safely-resolved lines immediately and returns any lines that still need " +
-        "confirmation as `questions` (same shape as prepare_basket) — no separate prepare call required. " +
-        "Totals cover the resolved subset (see completeness.totalsArePartial); re-call with `product_id` " +
-        "answers to the questions to finalize (keep the original `query` on the line when you have it — " +
-        "helps per-chain equivalent coverage). Returns `recommendations` with cheapest (lowest total under a " +
-        "coverage floor), bestNearby/bestInStore (within a 1-line coverage band of the max, then total + distance " +
-        "when location.distanceReliable — the store you'd actually visit), bestOrderable (same band on lines with " +
-        "a storefront link), multiStore (cheapest-per-item), " +
-        `top stores (default 5), and questions. Requires city and/or near (default ${DEFAULT_RADIUS_KM}km). ` +
-        "By default (verbose=false) per-store `lines` are included only for the recommended stores to keep the " +
-        "response small (missingItems is always kept); set verbose=true for full per-store line detail. " +
-        "Missing items are listed — never silently dropped. Every priced line carries a `link` to open that " +
-        "product on the chain's online store.",
+        "Call once with the original shopping list. If status is needs_confirmation, ask every " +
+        "returned question and call the same tool once more with only continuation and answers. " +
+        "Never reconstruct items and do not call search_products per line. " +
+        `Initial calls require city and/or near (default ${DEFAULT_RADIUS_KM}km).`,
       inputSchema: {
-        items: basketItemsSchema,
+        items: basketItemsSchema.optional(),
         ...locationShape,
-        include_club: z
-          .boolean()
+        continuation: z
+          .string()
+          .min(1)
           .optional()
-          .describe("Whether to apply club-member-only promotions. Defaults to true."),
-        stores_limit: z
-          .number()
-          .int()
-          .min(0)
-          .max(500)
+          .describe("Opaque signed token from a prior needs_confirmation response."),
+        answers: z
+          .array(answerSchema)
+          .min(1)
           .optional()
-          .describe("Max store breakdowns to return (default 5). 0 = all compared stores."),
-        distance_penalty_per_km: z
-          .number()
-          .min(0)
-          .max(100)
-          .optional()
-          .describe(
-            "Shekels of 'cost' per km when ranking bestNearby/bestInStore/bestOrderable (default 3). " +
-              "Ignored when location.distanceReliable is false (city-centroid coordinates).",
-          ),
-        verbose: z
-          .boolean()
-          .optional()
-          .describe(
-            "Default false. When false, per-store `lines` are returned only for recommended stores " +
-              "(cheapest/bestNearby/bestInStore/bestOrderable; missingItems always kept); set true for full detail.",
-          ),
+          .describe("Answers to continuation questions (resume only)."),
+        include_club: z.boolean().optional(),
+        stores_limit: z.number().int().min(0).max(500).optional(),
+        distance_penalty_per_km: z.number().min(0).max(100).optional(),
+        verbose: z.boolean().optional(),
       },
     },
-    async ({
-      items,
-      city,
-      near,
-      radius_km,
-      include_club,
-      stores_limit,
-      distance_penalty_per_km,
-      verbose,
-    }) => {
-      assertBasketItems(items);
-      const geo = toGeo(near);
-      return optimizeBasket({
-        items: mapBasketItems(items),
-        city,
-        near: geo,
-        radiusKm: resolveRadiusKm(geo, radius_km),
-        includeClub: include_club,
-        storesLimit: stores_limit,
-        distancePenaltyPerKm: distance_penalty_per_km,
-        verbose,
-      });
+    async (args) => {
+      if (args.continuation) {
+        if (!args.answers?.length) {
+          throw new AppError("bad_request", "resume optimize_basket requires answers", 400);
+        }
+        return optimizeBasket(
+          {
+            continuation: args.continuation,
+            answers: args.answers.map((a) => ({
+              itemIndex: a.item_index,
+              productId: a.product_id,
+            })),
+          },
+          continuationOptions(),
+        );
+      }
+      if (!args.items?.length) {
+        throw new AppError("bad_request", "initial optimize_basket requires items", 400);
+      }
+      const geo = toGeo(args.near);
+      return optimizeBasket(
+        {
+          items: mapBasketItems(args.items),
+          city: args.city,
+          near: geo,
+          radiusKm: resolveRadiusKm(geo, args.radius_km),
+          includeClub: args.include_club,
+          storesLimit: args.stores_limit,
+          distancePenaltyPerKm: args.distance_penalty_per_km,
+          verbose: args.verbose,
+        },
+        continuationOptions(),
+      );
     },
   );
 }

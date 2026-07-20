@@ -1,57 +1,70 @@
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const prepareBasket = vi.fn();
 const optimizeBasket = vi.fn();
 
 vi.mock("../../src/services/basket/index.js", () => ({
-  prepareBasket: (...args: unknown[]) => prepareBasket(...args),
   optimizeBasket: (...args: unknown[]) => optimizeBasket(...args),
 }));
 
 import {
-  basketComponentSchemas,
   basketMcpTools,
   basketPaths,
 } from "../../src/openapi/basket.js";
 import { registerBasketRoutes } from "../../src/routes/basket/index.js";
-import { basketItemSchema } from "../../src/routes/basket/schemas.js";
+import {
+  basketItemSchema,
+  optimizeBasketBodySchema,
+} from "../../src/routes/basket/schemas.js";
+
+const UUID = "11111111-1111-4111-8111-111111111111";
 
 describe("basket REST contract", () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it("accepts pack_qty and rejects combining it with deprecated qty", () => {
-    expect(basketItemSchema.parse({ query: "pitas", pack_qty: 2 })).toMatchObject({
-      query: "pitas",
-      pack_qty: 2,
-    });
+  it("accepts exactly one identifier and one quantity source", () => {
+    expect(basketItemSchema.parse({ query: "פיתות", amount: 20, unit: "יח" })).toBeDefined();
     expect(() =>
-      basketItemSchema.parse({ query: "pitas", pack_qty: 2, qty: 2 }),
-    ).toThrow(/pack_qty.*qty/i);
+      basketItemSchema.parse({ query: "פיתות", product_id: UUID, pack_qty: 2 }),
+    ).toThrow(/exactly one identifier/i);
+    expect(() => basketItemSchema.parse({ query: "פיתות", qty: 2 })).toThrow();
   });
 
-  it("maps POST /v1/basket/prepare through the shared service contract", async () => {
-    prepareBasket.mockResolvedValue({
+  it("accepts a resume request without items or location", () => {
+    expect(
+      optimizeBasketBodySchema.parse({
+        continuation: "body.signature",
+        answers: [{ item_index: 3, product_id: UUID }],
+      }),
+    ).toBeDefined();
+  });
+
+  it("does not register prepare REST or MCP surfaces", () => {
+    expect(basketPaths).not.toHaveProperty("/v1/basket/prepare");
+    expect(basketMcpTools).toEqual(["optimize_basket"]);
+  });
+
+  it("maps POST /v1/basket/optimize through the resumable service contract", async () => {
+    optimizeBasket.mockResolvedValue({
+      status: "complete",
+      bestSingleStore: null,
+      cheapestCompleteStore: null,
+      multiStore: null,
       items: [],
-      completeness: {
-        requestedLines: 0,
-        resolvedLines: 0,
-        needsConfirmationLines: 0,
-        unresolvedLines: 0,
-        safeResolutionRatio: 0,
-        totalsArePartial: true,
-      },
-      assumptions: [],
-      questions: [],
+      stores: [],
+      storesCompared: 0,
+      storesTruncated: false,
+      location: { city: "Herzliya", distanceReliable: true },
     });
+    process.env.BASKET_CONTINUATION_SECRET = "test-only-basket-continuation-secret-ok";
     const app = Fastify();
     await registerBasketRoutes(app);
 
     const response = await app.inject({
       method: "POST",
-      url: "/v1/basket/prepare",
+      url: "/v1/basket/optimize",
       payload: {
         items: [
           { query: "20 pitas", amount: 20, unit: "unit" },
@@ -62,37 +75,36 @@ describe("basket REST contract", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ data: { questions: [] } });
-    expect(prepareBasket).toHaveBeenCalledWith({
-      items: [
-        {
-          productId: undefined,
-          gtin: undefined,
-          query: "20 pitas",
-          qty: undefined,
-          amount: 20,
-          unit: "unit",
-        },
-        {
-          productId: undefined,
-          gtin: undefined,
-          query: "milk",
-          qty: 2,
-          amount: undefined,
-          unit: undefined,
-        },
-      ],
-      city: "Herzliya",
-      near: undefined,
-      radiusKm: 10,
-    });
+    expect(optimizeBasket).toHaveBeenCalledWith(
+      {
+        items: [
+          {
+            productId: undefined,
+            gtin: undefined,
+            query: "20 pitas",
+            packQty: undefined,
+            amount: 20,
+            unit: "unit",
+          },
+          {
+            productId: undefined,
+            gtin: undefined,
+            query: "milk",
+            packQty: 2,
+            amount: undefined,
+            unit: undefined,
+          },
+        ],
+        city: "Herzliya",
+        near: undefined,
+        radiusKm: 10,
+        includeClub: true,
+        storesLimit: undefined,
+        distancePenaltyPerKm: undefined,
+        verbose: undefined,
+      },
+      { continuationSecret: "test-only-basket-continuation-secret-ok" },
+    );
     await app.close();
-  });
-
-  it("documents prepare request/response and advertises the MCP tool", () => {
-    expect(basketPaths).toHaveProperty("/v1/basket/prepare.post");
-    expect(basketComponentSchemas).toHaveProperty("BasketPrepareRequest");
-    expect(basketComponentSchemas).toHaveProperty("BasketPrepareResponse");
-    expect(basketMcpTools).toContain("prepare_basket");
   });
 });

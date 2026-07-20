@@ -4,9 +4,17 @@ import type {
   BasketLine,
   BasketStoreResult,
   MultiStoreLine,
-  MultiStorePlan,
   ResolvedItem,
 } from "./types.js";
+
+/** Draft multi-store selection before coverage metrics are attached. */
+export interface MultiStorePlanDraft {
+  total: number;
+  currency: string;
+  storeCount: number;
+  lines: MultiStoreLine[];
+  missingItemIndexes: number[];
+}
 
 export function isLineSubstituted(
   item: ResolvedItem,
@@ -52,8 +60,8 @@ export function substitutionReasonForLine(
   );
 }
 
-/** Align item statuses with the cheapest store's actual priced SKUs (substitutes differ). */
-export function applyCheapestStoreSubstitutions(
+/** Align item statuses with the chosen store plan's actual priced SKUs. */
+export function applyStorePlanSubstitutions(
   itemStatuses: BasketItemStatus[],
   topStore: BasketStoreResult,
 ): void {
@@ -61,6 +69,7 @@ export function applyCheapestStoreSubstitutions(
     const line = topStore.lines.find((l) => l.itemIndex === status.index);
     if (!line) continue;
     status.qty = line.qty;
+    status.qtyMode = line.qtyMode;
     if (line.substituted) {
       const originalId = line.originalProductId;
       const originalName =
@@ -83,7 +92,7 @@ export function applyCheapestStoreSubstitutions(
 export function buildMultiStorePlan(
   resolvedItems: ResolvedItem[],
   storeResults: BasketStoreResult[],
-): MultiStorePlan | null {
+): MultiStorePlanDraft | null {
   if (storeResults.length === 0) return null;
 
   const lines: MultiStoreLine[] = [];
@@ -129,15 +138,9 @@ export function buildMultiStorePlan(
   return {
     total,
     currency: storeResults[0]?.currency ?? "ILS",
-    itemsFound: lines.length,
-    itemsRequested: resolvedItems.length,
     storeCount,
     lines,
     missingItemIndexes,
-    reason:
-      storeCount <= 1
-        ? "All priced items are cheapest at a single store."
-        : `Cheapest per item across ${storeCount} stores (may require multiple trips).`,
   };
 }
 
@@ -150,6 +153,7 @@ export function fallbackCandidate(item: ResolvedItem): BasketCandidate {
     matchedVia: "product",
     sizeQty: null,
     sizeUnit: null,
+    pieceCount: null,
     // Synthesized from a resolved item without a priced shortlist; availability
     // is unknown, not guaranteed — never fabricate it as true.
     hasPrice: false,

@@ -9,6 +9,8 @@ export interface ResolveProductInput {
   brand?: string;
   sizeQty?: number;
   sizeUnit?: string;
+  pieceCount?: number | null;
+  packMetadataSource?: string | null;
 }
 
 /**
@@ -30,11 +32,14 @@ export async function resolveProduct(
   const brand = input.brand ?? null;
   const sizeQty = input.sizeQty ?? null;
   const sizeUnit = input.sizeUnit ?? null;
+  const pieceCount = input.pieceCount ?? null;
+  const packMetadataSource = input.packMetadataSource ?? null;
 
   if (input.gtin) {
     const res = await q.query<{ id: string }>(
-      `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit)
-       VALUES ($1, NULL, $2, $3, $4, $5)
+      `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit,
+                            piece_count, pack_metadata_source)
+       VALUES ($1, NULL, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (gtin) DO UPDATE SET
          name = CASE
            WHEN length(EXCLUDED.name) > length(product.name) THEN EXCLUDED.name
@@ -43,16 +48,19 @@ export async function resolveProduct(
          brand = COALESCE(EXCLUDED.brand, product.brand),
          size_qty = COALESCE(EXCLUDED.size_qty, product.size_qty),
          size_unit = COALESCE(EXCLUDED.size_unit, product.size_unit),
+         piece_count = COALESCE(EXCLUDED.piece_count, product.piece_count),
+         pack_metadata_source = COALESCE(EXCLUDED.pack_metadata_source, product.pack_metadata_source),
          updated_at = now()
        RETURNING id`,
-      [input.gtin, name, brand, sizeQty, sizeUnit],
+      [input.gtin, name, brand, sizeQty, sizeUnit, pieceCount, packMetadataSource],
     );
     return res.rows[0]!.id;
   }
 
   const res = await q.query<{ id: string }>(
-    `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit)
-     VALUES (NULL, $1, $2, $3, $4, $5)
+    `INSERT INTO product (gtin, source_key, name, brand, size_qty, size_unit,
+                          piece_count, pack_metadata_source)
+     VALUES (NULL, $1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (source_key) WHERE source_key IS NOT NULL DO UPDATE SET
        name = CASE
          WHEN length(EXCLUDED.name) > length(product.name) THEN EXCLUDED.name
@@ -61,9 +69,11 @@ export async function resolveProduct(
        brand = COALESCE(EXCLUDED.brand, product.brand),
        size_qty = COALESCE(EXCLUDED.size_qty, product.size_qty),
        size_unit = COALESCE(EXCLUDED.size_unit, product.size_unit),
+       piece_count = COALESCE(EXCLUDED.piece_count, product.piece_count),
+       pack_metadata_source = COALESCE(EXCLUDED.pack_metadata_source, product.pack_metadata_source),
        updated_at = now()
      RETURNING id`,
-    [input.sourceKey!, name, brand, sizeQty, sizeUnit],
+    [input.sourceKey!, name, brand, sizeQty, sizeUnit, pieceCount, packMetadataSource],
   );
   return res.rows[0]!.id;
 }

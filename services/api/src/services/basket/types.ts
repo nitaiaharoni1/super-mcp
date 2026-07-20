@@ -3,16 +3,21 @@ import type { SearchProductHit } from "../search/types.js";
 import type { GeoPoint } from "../../lib/geo.js";
 import type { StoreLocationMetadata } from "../../lib/resolveStoreLocation.js";
 
+export type BasketSelectionEffect = "representative" | "pin";
+export type BasketIntentMode = "exact" | "commodity" | "needs_confirmation" | "unresolved";
+
 export interface BasketItemInput {
   productId?: string;
   gtin?: string;
   query?: string;
-  /** Internal pack count mapped from boundary `pack_qty` (or deprecated `qty`). */
-  qty?: number;
+  /** Pack/shelf count requested (mapped from boundary `pack_qty`). */
+  packQty?: number;
   /** Physical amount requested (e.g. 1.5 with unit=kg). */
   amount?: number;
   /** Unit for amount: kg, g, L, ml, unit, יח, etc. */
   unit?: string;
+  /** Internal only; never accepted from the public initial schema. */
+  intentModeOverride?: Extract<BasketIntentMode, "exact" | "commodity">;
 }
 
 export interface BasketLocationInput {
@@ -21,23 +26,45 @@ export interface BasketLocationInput {
   radiusKm?: number;
 }
 
-export interface BasketPrepareInput extends BasketLocationInput {
-  items: BasketItemInput[];
-}
-
-export interface BasketOptimizeInput extends BasketLocationInput {
+export interface BasketInitialInput extends BasketLocationInput {
   items: BasketItemInput[];
   includeClub?: boolean;
   /** Max store breakdowns to return (default 5). Use 0 for all. */
   storesLimit?: number;
-  /** Shekels of "cost" per km when ranking the bestNearby recommendation (default 3). */
+  /** Shekels of "cost" per km when ranking bestSingleStore (default 3). */
   distancePenaltyPerKm?: number;
   /**
    * When false (default), per-store `lines` are dropped from every store except
-   * the recommended ones (cheapest/bestNearby/bestInStore/bestOrderable) to keep
-   * the response small; `missingItems` is always kept. Set true for full detail.
+   * the recommended ones (bestSingleStore / cheapestCompleteStore) to keep the
+   * response small; `missingItems` is always kept. Set true for full detail.
    */
   verbose?: boolean;
+}
+
+export interface BasketAnswer {
+  itemIndex: number;
+  productId: string;
+}
+
+export interface BasketResumeInput {
+  continuation: string;
+  answers: BasketAnswer[];
+}
+
+export type BasketOptimizeRequest = BasketInitialInput | BasketResumeInput;
+
+export interface BasketContinuationQuestion {
+  itemIndex: number;
+  selectionEffect: BasketSelectionEffect;
+  allowedProductIds: string[];
+}
+
+export interface BasketContinuationV1 {
+  version: 1;
+  issuedAt: number;
+  expiresAt: number;
+  input: BasketInitialInput;
+  questions: BasketContinuationQuestion[];
 }
 
 export type ResolvedBy = "product_id" | "gtin" | "query" | "unresolved";
@@ -51,6 +78,7 @@ export interface BasketCandidate {
   matchedVia: SearchProductHit["matchedVia"];
   sizeQty: number | null;
   sizeUnit: string | null;
+  pieceCount: number | null;
   hasPrice: boolean;
   hasLocalPrice: boolean;
   /** Semantic product-class of the candidate (from its profile), or null when unclassified. */
@@ -125,6 +153,8 @@ export interface BasketLine {
   productId: string;
   name: string;
   qty: number;
+  /** Purchase qty basis for this priced SKU (may differ from the resolved primary). */
+  qtyMode: string;
   listingId: string;
   itemCode: string;
   unitPrice: number;
@@ -163,35 +193,23 @@ export interface BasketStoreResult {
   missingItems: BasketMissingItem[];
 }
 
-export interface BasketRecommendation {
+export interface BasketCoverage {
+  pricedLines: number;
+  resolvableLines: number;
+  requestedLines: number;
+  coverageRatio: number;
+}
+
+export interface BasketStorePlan extends BasketCoverage {
   storeId: string;
   storeName: string;
   chainId: string;
   chainName: string;
   total: number;
   currency: string;
-  itemsFound: number;
-  itemsRequested: number;
   distanceKm: number | null;
-  /** Why this store was picked as the cheapest practical option. */
-  reason: string;
-}
-
-export interface BasketRecommendations {
-  /** Lowest total among near-best-covering stores (coverage floor). */
-  cheapest: BasketRecommendation | null;
-  /**
-   * Within a 1-line coverage band of the max, prefer lower total (+ distance when
-   * reliable). Primary "where should I go" pick; matches bestInStore.
-   */
-  bestNearby: BasketRecommendation | null;
-  /** Same as bestNearby — physical in-store visit recommendation. */
-  bestInStore: BasketRecommendation | null;
-  /**
-   * Within a 1-line band of max orderable coverage (priced lines with a non-null
-   * storefront link). Null when no store has orderable lines.
-   */
-  bestOrderable: BasketRecommendation | null;
+  lines: BasketLine[];
+  missingItems: BasketMissingItem[];
 }
 
 export interface MultiStoreLine {
@@ -209,87 +227,79 @@ export interface MultiStoreLine {
   link: string | null;
 }
 
-export interface MultiStorePlan {
+export interface BasketMultiStorePlan extends BasketCoverage {
   total: number;
   currency: string;
-  itemsFound: number;
-  itemsRequested: number;
   storeCount: number;
   lines: MultiStoreLine[];
   missingItemIndexes: number[];
-  reason: string;
 }
 
-export interface BasketCompleteness {
-  requestedLines: number;
-  resolvedLines: number;
-  needsConfirmationLines: number;
-  unresolvedLines: number;
-  safeResolutionRatio: number;
-  totalsArePartial: boolean;
+export interface CandidateAvailability {
+  pricedStoreCount: number;
+  chainCount: number;
+  minPrice: number | null;
 }
 
-export interface BasketPrepareQuestionOption {
+export interface BasketQuestionOption {
   productId: string;
   name: string;
-  sizeQty: number | null;
-  sizeUnit: string | null;
-  /** Distinct location-scoped stores that carry a positive price for this option. */
+  pack: {
+    pieceCount: number | null;
+    sizeQty: number | null;
+    sizeUnit: string | null;
+  };
   nearbyPricedStores: number;
-  /** Real availability derived from nearbyPricedStores > 0 (never fabricated). */
-  hasLocalPrice: boolean;
+  nearbyPricedChains: number;
+  minimumNearbyPrice: number | null;
 }
 
-export interface BasketPrepareQuestion {
+export interface BasketQuestion {
   itemIndex: number;
   /** Stable within the basket contract so callers can associate an answer with a line. */
   id: string;
   prompt: string;
   reason: string;
-  required: boolean;
-  options: BasketPrepareQuestionOption[];
+  required: true;
+  selectionEffect: BasketSelectionEffect;
+  options: BasketQuestionOption[];
 }
 
-export interface BasketPrepareResult {
+export interface BasketPreview {
+  priceScope: "resolved_subset";
+  resolvedLines: number;
+  requestedLines: number;
+  candidateStores: number;
+}
+
+export interface BasketNeedsConfirmationResult {
+  status: "needs_confirmation";
+  continuation: string;
+  questions: BasketQuestion[];
+  preview: BasketPreview;
   items: BasketItemStatus[];
-  completeness: BasketCompleteness;
-  /** Safe automatic selections applied during resolution (query → chosen product). */
-  assumptions: string[];
-  /** Required confirmations for lines that cannot be safely auto-selected. */
-  questions: BasketPrepareQuestion[];
   location: StoreLocationMetadata;
 }
 
-export interface BasketOptimizeResult {
+export interface BasketCompleteResult {
+  status: "complete";
+  bestSingleStore: BasketStorePlan | null;
+  cheapestCompleteStore: BasketStorePlan | null;
+  multiStore: BasketMultiStorePlan | null;
   items: BasketItemStatus[];
-  /** Candidate stores ranked cheapest / most-complete first (trimmed). */
   stores: BasketStoreResult[];
   storesCompared: number;
   storesTruncated: boolean;
-  /**
-   * @deprecated Use `recommendations.cheapest`. Kept for one release for
-   * backward-compat. Same as stores[0] when any store can fill at least one item.
-   */
-  cheapest: BasketRecommendation | null;
-  /**
-   * Store picks: `cheapest` (lowest total under a coverage floor), `bestNearby` /
-   * `bestInStore` (1-line coverage band + cost), and `bestOrderable` (same band
-   * on linked lines). All share the BasketRecommendation shape.
-   */
-  recommendations: BasketRecommendations;
-  /** Per-item cheapest across stores (may require multiple trips). */
-  multiStore: MultiStorePlan | null;
-  /**
-   * Resolution coverage. When totalsArePartial is true, cheapest/multiStore
-   * cover only the resolved subset; the unconfirmed lines appear in questions.
-   */
-  completeness: BasketCompleteness;
-  /**
-   * Confirmations for lines that still need a human decision (same shape as
-   * prepare_basket). Re-call optimize with product_id answers to finalize.
-   */
-  questions: BasketPrepareQuestion[];
   location: StoreLocationMetadata;
+}
+
+export type BasketOptimizeResult =
+  | BasketNeedsConfirmationResult
+  | BasketCompleteResult;
+
+export interface BasketOptimizeOptions {
+  continuationSecret: string;
+  now?: number;
 }
 
 export interface ResolveLocationScope {
@@ -306,6 +316,11 @@ export interface ListingRow {
   item_code: string;
   name: string;
   gtin: string | null;
+  /** Feed/backfill: sold by weight (₪/kg or ₪/L). */
+  is_weighted?: boolean | null;
+  /** per_kg | per_l | per_piece | per_pack | unknown */
+  sale_basis?: string | null;
+  piece_count?: number | null;
 }
 
 export interface StorePriceRow {

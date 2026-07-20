@@ -3,6 +3,7 @@ import { canonicalItemCode, computeUnitPrice, inferPackSizeFromName,
   isGtinItem,
   normalizeGtin,
   normalizeMeasure,
+  packSizesCompatible,
   resolvePurchaseQty,
 } from "../../src/utils/units.js";
 
@@ -142,8 +143,47 @@ describe("resolvePurchaseQty", () => {
     expect(r.qty).toBeCloseTo(1.75, 5);
   });
 
-  it("keeps legacy packQty when amount omitted", () => {
-    expect(resolvePurchaseQty({ packQty: 3 })).toMatchObject({ qty: 3, mode: "legacy_packs" });
+  it("uses packQty as pack count when amount omitted", () => {
+    expect(resolvePurchaseQty({ packQty: 3 })).toMatchObject({ qty: 3, mode: "packs" });
+  });
+
+  it("treats weighted produce pack_qty as piece count (watermelon → ~4kg)", () => {
+    const r = resolvePurchaseQty({
+      packQty: 1,
+      productName: "אבטיח",
+      isWeighted: true,
+    });
+    expect(r.mode).toBe("weighted_kg_or_l");
+    expect(r.qty).toBeCloseTo(4, 5);
+  });
+
+  it("does not treat פרימיום as a produce cue (פרי substring)", () => {
+    const r = resolvePurchaseQty({
+      packQty: 1,
+      productName: "גבינה פרימיום",
+      saleBasis: "per_kg",
+    });
+    expect(r).toMatchObject({ qty: 1, mode: "weighted_kg_or_l" });
+  });
+
+  it("treats weighted pack_qty as kg when name is not produce", () => {
+    expect(
+      resolvePurchaseQty({
+        packQty: 1.5,
+        productName: "חזה עוף טרי",
+        saleBasis: "per_kg",
+      }),
+    ).toMatchObject({ qty: 1.5, mode: "weighted_kg_or_l" });
+  });
+
+  it("uses packs for non-weighted pack_qty", () => {
+    expect(
+      resolvePurchaseQty({
+        packQty: 1,
+        productName: "אבטיח ארוז",
+        isWeighted: false,
+      }),
+    ).toMatchObject({ qty: 1, mode: "packs" });
   });
 
   it("infers pack size from product name when size fields missing", () => {
@@ -230,6 +270,30 @@ describe("resolvePurchaseQty", () => {
     expect(r.qty).toBeCloseTo(0.3, 5);
   });
 
+  it("buys bottled wine by unit count, not inventing a 0.15kg piece weight", () => {
+    expect(
+      resolvePurchaseQty({
+        amount: 1,
+        unit: "יח",
+        productSizeQty: 750,
+        productSizeUnit: "ml",
+        productName: 'יין אדום מונטפולציאנו 750 מ"ל',
+      }),
+    ).toMatchObject({ qty: 1, mode: "units" });
+  });
+
+  it("buys packaged hummus tubs by unit count despite gram size metadata", () => {
+    expect(
+      resolvePurchaseQty({
+        amount: 1,
+        unit: "יח",
+        productSizeQty: 400,
+        productSizeUnit: "g",
+        productName: "אחלה חומוס 400ג",
+      }),
+    ).toMatchObject({ qty: 1, mode: "units" });
+  });
+
   it("still returns packs (unchanged) when a real unit-pack exists (20 פיתות @ 10/pack)", () => {
     const r = resolvePurchaseQty({
       amount: 20,
@@ -237,6 +301,30 @@ describe("resolvePurchaseQty", () => {
       productName: "פיתות 10יח אנג'ל",
     });
     expect(r).toMatchObject({ qty: 2, mode: "packs" });
+  });
+
+  it("uses persisted pieceCount when a gram-sized multipack has no count in its name", () => {
+    expect(
+      resolvePurchaseQty({
+        amount: 20,
+        unit: "יח",
+        productSizeQty: 1000,
+        productSizeUnit: "g",
+        productName: "פיתות ביתי דגנית",
+        pieceCount: 10,
+      }),
+    ).toEqual({ qty: 2, mode: "packs" });
+  });
+
+  it("prefers an explicit name count over conflicting persisted pieceCount", () => {
+    expect(
+      resolvePurchaseQty({
+        amount: 20,
+        unit: "יח",
+        productName: "פיתות 8 יח",
+        pieceCount: 10,
+      }),
+    ).toEqual({ qty: 3, mode: "packs" });
   });
 });
 describe("canonicalItemCode", () => {
@@ -247,5 +335,120 @@ describe("canonicalItemCode", () => {
   it("returns internal codes unchanged", () => {
     expect(canonicalItemCode(0, "INTERNAL-42")).toBe("INTERNAL-42");
     expect(canonicalItemCode(1, "123")).toBe("123");
+  });
+});
+
+describe("packSizesCompatible", () => {
+  it("treats kg and g as the same canonical weight", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1, sizeUnit: "kg", name: "עגבניות" },
+        { sizeQty: 1000, sizeUnit: "g", name: "עגבניות חממה" },
+      ).compatible,
+    ).toBe(true);
+  });
+
+  it("treats יח and unit as the same count unit", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1, sizeUnit: "יח", name: "בצל" },
+        { sizeQty: 1, sizeUnit: "unit", name: "בצל אדום" },
+      ).compatible,
+    ).toBe(true);
+  });
+
+  it("allows unit↔g when allowCountToWeight (produce)", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1, sizeUnit: "unit", name: "בצל" },
+        { sizeQty: 1000, sizeUnit: "g", name: "בצל יבש" },
+        { allowCountToWeight: true },
+      ).compatible,
+    ).toBe(true);
+  });
+
+  it("blocks unit↔g when allowCountToWeight is false (salt)", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1000, sizeUnit: "g", name: "מלח גס" },
+        { sizeQty: 1, sizeUnit: "unit", name: "מלח גס יחידה" },
+        { allowCountToWeight: false },
+      ).compatible,
+    ).toBe(false);
+  });
+
+  it("treats name-inferred multipack (10 יח) as unit pack even when DB says grams", () => {
+    // Both resolve to unit×10 — same_unit path, not count↔weight bypass.
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1000, sizeUnit: "g", name: "פיתות 10 יח" },
+        { sizeQty: 10, sizeUnit: "unit", name: "פיתה אסלי 10 יח" },
+        { allowCountToWeight: false },
+      ).compatible,
+    ).toBe(true);
+  });
+
+  it("blocks bare unit↔g without allowCountToWeight even if name has יח on the weight side only", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1, sizeUnit: "unit", name: "מלח גס" },
+        { sizeQty: 1000, sizeUnit: "g", name: "מלח גס 1 קג" },
+        { allowCountToWeight: false },
+      ).compatible,
+    ).toBe(false);
+  });
+
+  it("allows null vs g/ml only when allowCountToWeight", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: null, sizeUnit: null, name: "אבטיח" },
+        { sizeQty: 1000, sizeUnit: "g", name: "אבטיח אדום" },
+        { allowCountToWeight: true },
+      ).compatible,
+    ).toBe(true);
+    expect(
+      packSizesCompatible(
+        { sizeQty: null, sizeUnit: null, name: "מלח" },
+        { sizeQty: 1000, sizeUnit: "g", name: "מלח גס" },
+        { allowCountToWeight: false },
+      ).compatible,
+    ).toBe(false);
+  });
+
+  it("rejects wine packs beyond tolerance (750 vs 2000)", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 750, sizeUnit: "ml", name: "יין אדום" },
+        { sizeQty: 2000, sizeUnit: "ml", name: "יין אדום ביתי" },
+        { packTolerance: 0.5 },
+      ).compatible,
+    ).toBe(false);
+  });
+
+  it("skips qty tolerance when either sizeQty is missing (unit-only stub)", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: null, sizeUnit: "ml", name: "יין אדום קברנה" },
+        { sizeQty: 750, sizeUnit: "ml", name: "יין אדום קברנה סוביניון" },
+      ).compatible,
+    ).toBe(true);
+  });
+
+  it("skips qty tolerance for 1g/1ml catalog stubs vs real packs", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1, sizeUnit: "g", name: "חומוס" },
+        { sizeQty: 400, sizeUnit: "g", name: "אחלה חומוס 400ג" },
+      ).compatible,
+    ).toBe(true);
+  });
+
+  it("treats both unparseable packs as compatible", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: null, sizeUnit: null, name: "חומוס" },
+        { sizeQty: null, sizeUnit: null, name: "חומוס אסלי" },
+      ).compatible,
+    ).toBe(true);
   });
 });

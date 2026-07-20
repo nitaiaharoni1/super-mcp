@@ -108,7 +108,7 @@ const fixture: { cases: GoldenCase[] } = {
     },
     {
       query: "לימונים",
-      forbiddenNameSubstrings: ["ליקר"],
+      forbiddenNameSubstrings: ["ליקר", "עוגת", "עוגה"],
       acceptableNameSubstrings: ["לימון"],
     },
     {
@@ -118,7 +118,7 @@ const fixture: { cases: GoldenCase[] } = {
     },
     {
       query: "קולה",
-      forbiddenNameSubstrings: ["סוכריות", "גומי", "דיאט", "זירו", "zero"],
+      forbiddenNameSubstrings: ["סוכריות", "גומי", "לקריץ", "דיאט", "זירו", "zero"],
       acceptableNameSubstrings: ["קוקה", "קולה", "cola"],
     },
   ],
@@ -127,7 +127,11 @@ const fixture: { cases: GoldenCase[] } = {
 const candidatesByQuery: Record<string, SearchProductHit[]> = {
   פרגיות: [hit("safe-thighs", "פרגיות עוף", 0.95, true), hit("sausage", "נקניקיות עוף", 0.99)],
   מלפפונים: [hit("fresh-cucumber", "מלפפון טרי", 0.95, true), hit("pickled", "מלפפונים במלח", 0.99)],
-  לימונים: [hit("lemon", "לימון טרי", 0.95, true), hit("liqueur", "ליקר לימון", 0.99)],
+  לימונים: [
+    hit("cake", "עוגת לימונים 600 גרם", 1, true),
+    hit("lemon", "לימון טרי", 0.95, true),
+    hit("liqueur", "ליקר לימון", 0.99),
+  ],
   קרח: [
     hit("machine", "מכונת קרח ביתית", 1, true),
     hit("whiskey", "קוביות קרח רב פעמיות לוויסקי", 0.99, true),
@@ -137,8 +141,14 @@ const candidatesByQuery: Record<string, SearchProductHit[]> = {
   ],
   קולה: [
     hit("candy", "סוכריות גומי קולה", 1, true),
+    hit("licorice", "לקריץ קולה מסוכר במשקל", 0.995, true),
     hit("zero", "RC קולה זירו", 0.99, true),
     hit("regular", "קוקה קולה בקבוק", 0.95, true),
+  ],
+  יין: [
+    hit("cab", "יין אדום קברנה סוביניון", 0.95, true),
+    hit("merlot", "יין אדום מרלו", 0.94, true),
+    hit("chardonnay", "יין לבן שרדונה", 0.93, true),
   ],
 };
 
@@ -199,8 +209,51 @@ describe("Herzliya BBQ golden safety", () => {
 
     expect(result.candidates[0]?.productId).toBe("regular");
     expect(result.candidates.map((candidate) => candidate.productId)).not.toContain("candy");
+    expect(result.candidates[0]?.name).not.toMatch(/לקריץ/);
     expect(result.resolutionStatus).toBe("needs_confirmation");
     expect(result.productId).toBeNull();
+  });
+
+  it("לימונים never auto-prices lemon cake or liqueur", async () => {
+    const result = await resolveQueryItem(
+      { query: "לימונים" },
+      { index: 0, amount: null, unit: null },
+      { city: "הרצליה" },
+      false,
+    );
+
+    expect(result.name).not.toMatch(/עוגת|ליקר/);
+    expect(result.candidates[0]?.productId).toBe("lemon");
+    expect(result.productId).not.toBe("cake");
+    expect(result.productId).not.toBe("liqueur");
+  });
+
+  it("קולה amount+unit never auto-prices candy or licorice", async () => {
+    const result = await resolveQueryItem(
+      { query: "קולה", amount: 2, unit: "יח" },
+      { index: 0, amount: 2, unit: "יח" },
+      { city: "הרצליה" },
+      true,
+    );
+
+    expect(result.name).not.toMatch(/סוכריות|לקריץ|גומי/);
+    expect(result.candidates[0]?.productId).toBe("regular");
+    expect(result.candidates.map((c) => c.productId)).not.toContain("candy");
+    expect(result.productId).not.toBe("candy");
+    expect(result.productId).not.toBe("licorice");
+  });
+
+  it("bare יין auto-resolves a good-enough bottle when multiple wines share the יין token", async () => {
+    const result = await resolveQueryItem(
+      { query: "יין" },
+      { index: 0, amount: null, unit: null },
+      { city: "הרצליה" },
+      false,
+    );
+
+    expect(result.resolutionStatus).toBe("resolved");
+    expect(result.productId).toBe("cab");
+    expect(result.equivalents?.length).toBeGreaterThanOrEqual(2);
   });
 
   it("defaults bare ice to consumable bagged ice and excludes non-food lookalikes", async () => {

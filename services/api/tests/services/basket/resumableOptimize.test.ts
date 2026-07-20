@@ -1,0 +1,244 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ResolvedItem } from "../../../src/services/basket/types.js";
+
+const resolveItems = vi.fn();
+const listStores = vi.fn();
+const loadBasketPricingData = vi.fn();
+const loadCandidateAvailability = vi.fn();
+const enrichCommodityCoverage = vi.fn();
+
+vi.mock("../../../src/services/basket/resolve.js", () => ({
+  resolveItems: (...args: unknown[]) => resolveItems(...args),
+}));
+vi.mock("../../../src/services/stores/index.js", () => ({
+  listStores: (...args: unknown[]) => listStores(...args),
+}));
+vi.mock("../../../src/services/basket/loadPricingData.js", () => ({
+  loadBasketPricingData: (...args: unknown[]) => loadBasketPricingData(...args),
+  loadCandidateAvailability: (...args: unknown[]) => loadCandidateAvailability(...args),
+}));
+vi.mock("../../../src/services/basket/commodityCoverage.js", () => ({
+  enrichCommodityCoverage: (...args: unknown[]) => enrichCommodityCoverage(...args),
+}));
+
+import { optimizeBasket } from "../../../src/services/basket/optimize.js";
+
+const SECRET = "test-only-basket-continuation-secret-ok";
+const OPTIONS = { continuationSecret: SECRET, now: 1_000 };
+const STORE_ID = "11111111-1111-4111-8111-111111111111";
+const PRODUCT_SAFE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const PRODUCT_A = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const PRODUCT_B = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const LISTING_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+function candidate(productId: string, name: string, score = 0.9) {
+  return {
+    productId,
+    name,
+    score,
+    matchedVia: "product" as const,
+    sizeQty: 1,
+    sizeUnit: "unit",
+    pieceCount: null,
+    hasPrice: true,
+    hasLocalPrice: true,
+    productClass: "bakery",
+    classL1: "bakery",
+    intentTier: 1 as const,
+  };
+}
+
+function resolvedSafe(): ResolvedItem {
+  const primary = candidate(PRODUCT_SAFE, "מלח גס");
+  return {
+    index: 0,
+    qty: 1,
+    qtyMode: "packs",
+    amount: null,
+    unit: null,
+    productId: PRODUCT_SAFE,
+    name: primary.name,
+    resolvedBy: "query",
+    resolutionStatus: "resolved",
+    confidence: 0.95,
+    lowConfidence: false,
+    candidates: [primary],
+    primaryProductId: null,
+    primaryName: null,
+    substitution: null,
+  };
+}
+
+function resolvedAmbiguous(): ResolvedItem {
+  return {
+    index: 0,
+    qty: 1,
+    qtyMode: "packs",
+    amount: null,
+    unit: null,
+    productId: null,
+    name: "פיתות",
+    resolvedBy: "query",
+    resolutionStatus: "needs_confirmation",
+    confidence: null,
+    lowConfidence: true,
+    candidates: [
+      candidate(PRODUCT_A, "פיתות 10", 0.9),
+      candidate(PRODUCT_B, "פיתות 8", 0.85),
+    ],
+    primaryProductId: null,
+    primaryName: null,
+    substitution: null,
+  };
+}
+
+describe("resumable optimizeBasket", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listStores.mockResolvedValue([
+      {
+        id: STORE_ID,
+        chainId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        chainName: "Test",
+        storeCode: "1",
+        name: "Test Store",
+        address: "Addr",
+        city: "הרצליה",
+        zip: null,
+        lat: 32.16,
+        lng: 34.84,
+        geoSource: "address",
+        distanceKm: 1,
+      },
+    ]);
+    loadCandidateAvailability.mockResolvedValue(
+      new Map([
+        [PRODUCT_A, { pricedStoreCount: 4, chainCount: 2, minPrice: 10 }],
+        [PRODUCT_B, { pricedStoreCount: 2, chainCount: 1, minPrice: 9 }],
+        [PRODUCT_SAFE, { pricedStoreCount: 3, chainCount: 2, minPrice: 5 }],
+      ]),
+    );
+    loadBasketPricingData.mockResolvedValue({
+      listingByChainAndProduct: new Map([
+        [
+          "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          new Map([
+            [
+              PRODUCT_SAFE,
+              [
+                {
+                  id: LISTING_ID,
+                  product_id: PRODUCT_SAFE,
+                  chain_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                  item_code: "1",
+                  name: "מלח גס",
+                  gtin: null,
+                },
+              ],
+            ],
+            [
+              PRODUCT_A,
+              [
+                {
+                  id: LISTING_ID,
+                  product_id: PRODUCT_A,
+                  chain_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                  item_code: "2",
+                  name: "פיתות 10",
+                  gtin: null,
+                  piece_count: 10,
+                },
+              ],
+            ],
+          ]),
+        ],
+      ]),
+      priceByListingAndStore: new Map([
+        [
+          `${LISTING_ID}:${STORE_ID}`,
+          {
+            listing_id: LISTING_ID,
+            store_id: STORE_ID,
+            price: "12",
+            currency: "ILS",
+            source_ts: "2026-07-20T00:00:00Z",
+            ingested_at: "2026-07-20T00:00:00Z",
+          },
+        ],
+      ]),
+      promoMap: new Map(),
+    });
+    enrichCommodityCoverage.mockResolvedValue(undefined);
+  });
+
+  it("returns complete in one call when no required questions remain", async () => {
+    resolveItems.mockResolvedValue([resolvedSafe()]);
+    const result = await optimizeBasket(
+      { city: "הרצליה", items: [{ query: "מלח גס", packQty: 1 }] },
+      OPTIONS,
+    );
+    expect(result.status).toBe("complete");
+    if (result.status !== "complete") throw new Error("expected complete");
+    expect(result.bestSingleStore).not.toBeNull();
+    expect(loadBasketPricingData).toHaveBeenCalledOnce();
+  });
+
+  it("returns continuation and no final recommendations when confirmation is required", async () => {
+    resolveItems.mockResolvedValue([resolvedAmbiguous()]);
+    const result = await optimizeBasket(
+      { city: "הרצליה", items: [{ query: "פיתות", amount: 20, unit: "יח" }] },
+      OPTIONS,
+    );
+    expect(result.status).toBe("needs_confirmation");
+    if (result.status !== "needs_confirmation") throw new Error("expected confirmation");
+    expect(result).not.toHaveProperty("bestSingleStore");
+    expect(result).not.toHaveProperty("multiStore");
+    expect(result.questions[0]?.options[0]?.nearbyPricedStores).toBeGreaterThan(0);
+    expect(loadBasketPricingData).not.toHaveBeenCalled();
+    expect(enrichCommodityCoverage).not.toHaveBeenCalled();
+  });
+
+  it("resumes using only continuation and answers", async () => {
+    resolveItems
+      .mockResolvedValueOnce([resolvedAmbiguous()])
+      .mockResolvedValueOnce([
+        {
+          ...resolvedSafe(),
+          productId: PRODUCT_A,
+          name: "פיתות 10",
+          candidates: [candidate(PRODUCT_A, "פיתות 10")],
+        },
+      ]);
+
+    const first = await optimizeBasket(
+      { city: "הרצליה", items: [{ query: "פיתות", amount: 20, unit: "יח" }] },
+      OPTIONS,
+    );
+    if (first.status !== "needs_confirmation") throw new Error("expected confirmation");
+
+    const second = await optimizeBasket(
+      {
+        continuation: first.continuation,
+        answers: [
+          {
+            itemIndex: 0,
+            productId: first.questions[0]!.options[0]!.productId,
+          },
+        ],
+      },
+      OPTIONS,
+    );
+    expect(second.status).toBe("complete");
+    expect(resolveItems).toHaveBeenCalledTimes(2);
+    const resumedItems = resolveItems.mock.calls[1]![0] as Array<{
+      productId?: string;
+      query?: string;
+      intentModeOverride?: string;
+    }>;
+    expect(resumedItems[0]).toMatchObject({
+      productId: PRODUCT_A,
+      query: "פיתות",
+      intentModeOverride: "commodity",
+    });
+  });
+});

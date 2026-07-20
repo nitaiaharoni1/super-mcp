@@ -2,10 +2,12 @@ import {
   buildQueryProfile,
   DEFAULT_SEMANTIC_SEARCH_CONFIG,
   inferPackSizeFromName,
+  normalizeEmbedInput,
   normalizeMeasure,
   profileFromText,
   rankDeterministicCandidates,
   resolvePurchaseQty,
+  tokenizeNormalized,
   type OntologySnapshot,
   type RetrievalEvidence,
   type SemanticProfile,
@@ -24,6 +26,7 @@ import {
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  preferQueryHeadAnchored,
   queryHeadAnchored,
 } from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
@@ -48,6 +51,53 @@ function isVectorOnlyHit(hit: SearchProductHit): boolean {
     !hasLexicalEvidence &&
     (hit.vectorDistance != null || hit.matchedVia === "vector")
   );
+}
+
+/**
+ * Single-token spirits/beer generics that must not auto-resolve via commodity
+ * override (variety/brand is the decision). Bare "יין" is intentionally excluded:
+ * when the user does not name a variety, pick a good-enough locally-stocked bottle
+ * via commodity/availability equivalence (cheapest red/white among peers).
+ */
+const BARE_ALCOHOL_QUERY_TOKENS: ReadonlySet<string> = new Set([
+  "בירה",
+  "וודקה",
+  "וויסקי",
+  "ויסקי",
+  "רום",
+  "גין",
+]);
+
+function strongPool(candidates: BasketCandidate[]): BasketCandidate[] {
+  const strong = candidates.filter(
+    (c) => c.intentTier != null && c.intentTier >= 1 && c.intentTier <= 2,
+  );
+  return strong.length > 0 ? strong : candidates;
+}
+
+/**
+ * Override safety: strong shortlist members must not disagree on classL1 (or on
+ * flat productClass when L1 is absent). A lone labeled class among unlabeled
+ * peers is fine; two distinct L1s (soda vs candy, produce vs bakery) is not.
+ */
+function strongCandidatesShareClass(candidates: BasketCandidate[]): boolean {
+  const pool = strongPool(candidates);
+  const l1 = [
+    ...new Set(pool.map((c) => c.classL1).filter((x): x is string => x != null && x !== "")),
+  ];
+  if (l1.length > 1) return false;
+  if (l1.length === 1) return true;
+  const flat = [
+    ...new Set(pool.map((c) => c.productClass).filter((x): x is string => x != null && x !== "")),
+  ];
+  return flat.length <= 1;
+}
+
+/** Bare category alcohol queries ("יין", "בירה") — variety is the decision. */
+function isBareAlcoholGeneric(queryText: string): boolean {
+  const tokens = tokenizeNormalized(normalizeEmbedInput(queryText));
+  if (tokens.length !== 1) return false;
+  return BARE_ALCOHOL_QUERY_TOKENS.has(tokens[0]!);
 }
 
 export interface RankQueryOptions {
@@ -130,12 +180,13 @@ export function rankQueryCandidates(
 
   const purchaseFor = (hit: SearchProductHit) =>
     resolvePurchaseQty({
-      packQty: item.qty,
+      packQty: item.packQty,
       amount: item.amount,
       unit: item.unit,
       productSizeQty: hit.sizeQty,
       productSizeUnit: hit.sizeUnit,
       productName: hit.name,
+      pieceCount: hit.pieceCount,
     });
   const need = wantsPackSize ? normalizeMeasure(item.amount, item.unit) : null;
   const packMeasureFor = (hit: SearchProductHit) => {
@@ -260,16 +311,20 @@ export function rankQueryCandidates(
   const shortlistCap = semantic
     ? Math.min(candidateLimit, SEMANTIC_CANDIDATE_LIMIT)
     : DEFAULT_CANDIDATE_LIMIT;
-  const shortlist = ranked.slice(0, shortlistCap);
+  const shortlistRaw = ranked.slice(0, shortlistCap);
   if (wantsPackSize) {
-    const seen = new Set(shortlist.map((hit) => hit.id));
+    const seen = new Set(shortlistRaw.map((hit) => hit.id));
     for (const hit of ranked) {
-      if (shortlist.length >= shortlistCap + 3) break;
+      if (shortlistRaw.length >= shortlistCap + 3) break;
       if (seen.has(hit.id) || purchaseFor(hit).mode !== "packs") continue;
-      shortlist.push(hit);
+      shortlistRaw.push(hit);
       seen.add(hit.id);
     }
   }
+  // Utensil/opener leaders ("חולץ יין") often share a token with the commodity
+  // and can outrank real bottles on lexical score + local stock. Keep them in
+  // the shortlist for transparency, but never ahead of head-anchored products.
+  const shortlist = preferQueryHeadAnchored(item.query ?? "", shortlistRaw);
   let decision = decideResolution(
     item.query ?? "",
     shortlist.map((hit) => ({
@@ -336,8 +391,8 @@ export function rankQueryCandidates(
   }
   if (!chosen) {
     return {
-      qty: item.qty ?? item.amount ?? 1,
-      qtyMode: "legacy_packs",
+      qty: item.packQty ?? item.amount ?? 1,
+      qtyMode: "packs",
       productId: null,
       name: item.query ?? null,
       resolvedBy: "unresolved",
@@ -351,12 +406,13 @@ export function rankQueryCandidates(
     };
   }
   const purchase = resolvePurchaseQty({
-    packQty: item.qty,
+    packQty: item.packQty,
     amount: item.amount,
     unit: item.unit,
     productSizeQty: chosen.sizeQty,
     productSizeUnit: chosen.sizeUnit,
     productName: chosen.name,
+    pieceCount: chosen.pieceCount,
   });
 
   let substitution: BasketSubstitutionMeta | null = null;
@@ -391,7 +447,7 @@ export function rankQueryCandidates(
   // hit brand keyed by product id. NOTE: we deliberately do NOT fall back to the
   // LLM brand_extracted here. The commodity+variant+query-token path already pins
   // a brand query (query tokens must appear in the equivalent's name) AND keeps
-  // it regular (variant), which is strictly better than the legacy brand-pin
+  // it regular (variant), which is strictly better than a brand-pin
   // downgrade — routing more lines through brand-pin regressed cola→diet and cut
   // auto-resolve 16→13/18. brand_extracted stays stored for future use.
   const shortlistBrandById = new Map<string, string | null>(
@@ -416,9 +472,19 @@ export function rankQueryCandidates(
   // Risk-aware overrides. Same-class near-duplicate ambiguity (commodity) is
   // pricing detail, not a user decision; brand-pinning / cross-class ambiguity
   // genuinely changes WHAT the user gets and must still confirm.
+  //
+  // Score risk only on head-anchored candidates. Live shortlists often mix the
+  // commodity (יין אדום …) with utensil/host leaders (חולץ יין, עוגת לימונים)
+  // that share a token but a different classL1 — that must not invent a
+  // cross_class confirmation when the anchored pool is a clean commodity.
+  const queryText = item.query ?? "";
+  const anchoredCandidates = candidates.filter((c) =>
+    queryHeadAnchored(queryText, c.name),
+  );
+  const riskPool = anchoredCandidates.length > 0 ? anchoredCandidates : candidates;
   const risk = classifyLineRisk(
-    item.query ?? "",
-    candidates.map(
+    queryText,
+    riskPool.map(
       (c): RiskCandidate => ({
         productClass: c.productClass,
         brand: shortlistBrandById.get(c.productId) ?? null,
@@ -432,20 +498,25 @@ export function rankQueryCandidates(
   // ambiguity auto-resolves to the top pick with an equivalence set attached.
   // HARD GUARD: never override a vector-only top pick (invariant: vector-only
   // can't auto-price), and only for commodity risk — never cross_class/opaque.
+  // Also skip when strong candidates disagree on classL1/productClass (even if
+  // risk still says commodity), and for bare single-token alcohol generics.
   // Uses the query-token-safe builder so a brand/variety query (טסטרס צ'ויס)
   // never groups a different brand of the same class (עלית צ'יקו).
+  const overrideSafe =
+    strongCandidatesShareClass(riskPool) && !isBareAlcoholGeneric(queryText);
   if (
     decision.status === "needs_confirmation" &&
     risk.kind === "commodity" &&
+    overrideSafe &&
     candidates[0] != null &&
     shortlist[0] != null &&
     !isVectorOnlyHit(shortlist[0]) &&
-    queryHeadAnchored(item.query ?? "", candidates[0].name)
+    queryHeadAnchored(queryText, candidates[0].name)
   ) {
     const equivalents = buildCommodityEquivalents(
       candidates[0],
       candidates,
-      item.query ?? "",
+      queryText,
       searchConfig?.maxEquivalents ?? 5,
       searchConfig?.packTolerance ?? 0.5,
     );
@@ -472,22 +543,24 @@ export function rankQueryCandidates(
   // pick the cheapest — availability + query specificity stand in for the missing
   // class signal. Never fires for brand_pinned (respect the named brand) or
   // cross_class (a genuine either/or the user must decide), nor for a vector-only
-  // top pick (the "vector-only never auto-prices" invariant).
+  // top pick (the "vector-only never auto-prices" invariant), nor when strong
+  // candidates conflict on class or the query is a bare alcohol generic.
   if (
     decision.status === "needs_confirmation" &&
     risk.kind !== "brand_pinned" &&
     risk.kind !== "cross_class" &&
+    overrideSafe &&
     candidates[0] != null &&
     shortlist[0] != null &&
     !isVectorOnlyHit(shortlist[0])
   ) {
-    const equivalents = buildAvailabilityEquivalents(candidates, item.query ?? "", {
+    const equivalents = buildAvailabilityEquivalents(candidates, queryText, {
       maxEquivalents: searchConfig?.maxEquivalents ?? 5,
       packTolerance: searchConfig?.packTolerance ?? 0.5,
       penaltyBlock: searchConfig?.penaltyBlockThreshold ?? 1,
       penaltyOf: (id) => gateById.get(id)?.penaltyScore ?? 0,
     });
-    if (equivalents.length >= 2 && queryHeadAnchored(item.query ?? "", equivalents[0]!.name)) {
+    if (equivalents.length >= 2 && queryHeadAnchored(queryText, equivalents[0]!.name)) {
       const top = equivalents[0]!;
       return {
         ...base,

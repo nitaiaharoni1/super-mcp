@@ -21,9 +21,9 @@ vi.mock("@super-mcp/db", () => ({
   bulkUpsertStorePrices: vi.fn(async () => {}),
 }));
 
-import { bulkUpsertStorePrices, upsertChain, upsertPromotion } from "@super-mcp/db";
+import { bulkUpsertListings, bulkUpsertStorePrices, upsertChain, upsertPromotion } from "@super-mcp/db";
 import type { RawPriceRecord, RawRecord } from "@super-mcp/shared";
-import { Normalizer } from "../src/normalize.js";
+import { derivePackSaleFacts, Normalizer } from "../src/normalize.js";
 
 function priceRecord(storeId: string): RawPriceRecord {
   return {
@@ -100,5 +100,87 @@ describe("Normalizer", () => {
     expect(upsertPromotion).toHaveBeenCalledWith(
       expect.objectContaining({ itemCodes: ["7290000173199", "INTERNAL-42"] }),
     );
+  });
+
+  it("persists weighted produce sale facts from feed bIsWeighted", async () => {
+    const record: RawPriceRecord = {
+      ...priceRecord("001"),
+      itemCode: "7290000001001",
+      name: "בצל יבש",
+      qty: undefined,
+      unit: undefined,
+      isWeighted: true,
+      price: 4.9,
+    };
+    const n = new Normalizer("test");
+    await n.apply([record]);
+    expect(bulkUpsertListings).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          isWeighted: true,
+          saleBasis: "per_kg",
+          measureSource: "weighted_default",
+          pieceCount: null,
+        }),
+      ]),
+    );
+  });
+
+  it("persists multipack piece_count from name when feed qty is one pack", async () => {
+    const record: RawPriceRecord = {
+      ...priceRecord("001"),
+      itemCode: "7290000002002",
+      name: "פיתות מארז 10",
+      qty: 1,
+      unit: "יח",
+      isWeighted: false,
+      price: 12.9,
+    };
+    const n = new Normalizer("test");
+    await n.apply([record]);
+    expect(bulkUpsertListings).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          isWeighted: false,
+          saleBasis: "per_pack",
+          pieceCount: 10,
+          measureSource: "name_inferred",
+        }),
+      ]),
+    );
+  });
+});
+
+describe("derivePackSaleFacts", () => {
+  it("maps weighted+g to per_kg with weighted_default when qty missing", () => {
+    expect(
+      derivePackSaleFacts({
+        name: "עגבניה",
+        isWeighted: true,
+        canonicalUnit: "g",
+        measureUnparseable: false,
+      }),
+    ).toMatchObject({
+      isWeighted: true,
+      saleBasis: "per_kg",
+      measureSource: "weighted_default",
+      pieceCount: null,
+    });
+  });
+
+  it("prefers feed multi-piece count over name", () => {
+    expect(
+      derivePackSaleFacts({
+        name: "יוגורט מארז 8",
+        isWeighted: false,
+        rawQty: 6,
+        canonicalUnit: "unit",
+        measureUnparseable: false,
+      }),
+    ).toMatchObject({
+      pieceCount: 6,
+      saleBasis: "per_pack",
+      measureSource: "feed",
+    });
   });
 });

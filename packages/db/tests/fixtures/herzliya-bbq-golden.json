@@ -38,14 +38,14 @@
     },
     {
       "query": "טחינה",
-      "amount": 500,
-      "unit": "g",
+      "amount": 0.5,
+      "unit": "kg",
       "forbiddenNameSubstrings": ["חומוס", "סלט"],
       "acceptableNameSubstrings": ["טחינה"]
     },
     {
       "query": "מלח גס",
-      "qty": 1,
+      "packQty": 1,
       "forbiddenNameSubstrings": ["פלפל", "תבלין"],
       "acceptableNameSubstrings": ["מלח"]
     },
@@ -65,55 +65,62 @@
     },
     {
       "query": "פלפלים",
-      "qty": 3,
+      "amount": 3,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["רסק", "שימורים", "מלח"],
       "acceptableNameSubstrings": ["פלפל"]
     },
     {
       "query": "בצלים",
-      "qty": 3,
+      "amount": 3,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["קפוא", "פרוס", "מטוגן"],
       "acceptableNameSubstrings": ["בצל"]
     },
     {
       "query": "חסה",
-      "qty": 1,
+      "amount": 1,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["קפוא", "סלט מוכן"],
       "acceptableNameSubstrings": ["חסה"]
     },
     {
       "query": "לימונים",
-      "qty": 4,
+      "amount": 4,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["ליקר"],
       "acceptableNameSubstrings": ["לימון"]
     },
     {
       "query": "אבטיח",
-      "qty": 1,
+      "amount": 1,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["גלידה", "מיץ"],
       "acceptableNameSubstrings": ["אבטיח"]
     },
     {
       "query": "קולה",
-      "qty": 2,
+      "amount": 2,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["דיאט", "zero"],
       "acceptableNameSubstrings": ["קוקה", "קола", "cola"]
     },
     {
       "query": "יין",
-      "qty": 3,
+      "amount": 3,
+      "unit": "יח",
       "forbiddenNameSubstrings": ["בירה", "ליקר"],
       "acceptableNameSubstrings": ["יין"]
     },
     {
       "query": "קפה טייסטרס צ׳ויס",
-      "qty": 1,
+      "packQty": 1,
       "forbiddenNameSubstrings": ["עלית", "נסקפה", "אילי"],
       "acceptableNameSubstrings": ["טייסטרס", "taster"]
     },
     {
       "query": "קרח",
-      "qty": 1,
+      "packQty": 1,
       "forbiddenNameSubstrings": ["קרחון", "גלידה"],
       "acceptableNameSubstrings": ["קרח"]
     }

@@ -1,29 +1,40 @@
-import { AppError, DEFAULT_SEMANTIC_SEARCH_CONFIG } from "@super-mcp/shared";
+import { AppError } from "@super-mcp/shared";
 import { resolveRadiusKm } from "../../lib/defaults.js";
 import {
   resolveStoreLocation,
   type StoreLocationMetadata,
 } from "../../lib/resolveStoreLocation.js";
 import { toSearchLocationParams } from "../search/locationScope.js";
-import { getActiveOntology } from "../search/ontology.js";
 import type { StoreSummary } from "../stores/index.js";
 import { enrichCommodityCoverage } from "./commodityCoverage.js";
+import {
+  applyBasketAnswers,
+  createBasketContinuationPayload,
+  decodeBasketContinuation,
+  encodeBasketContinuation,
+} from "./continuation.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
-import { loadBasketPricingData } from "./loadPricingData.js";
-import { DEFAULT_PREPARE_OPTIONS_LIMIT, buildPrepareQuestions } from "./prepare.js";
-import { buildCheapestRecommendation, priceStoreBasket } from "./priceStoreBasket.js";
-import { pickRecommendations } from "./recommendStores.js";
+import { loadBasketPricingData, loadCandidateAvailability } from "./loadPricingData.js";
+import { priceStoreBasket } from "./priceStoreBasket.js";
+import {
+  DEFAULT_QUESTION_OPTIONS_LIMIT,
+  buildBasketQuestions,
+  collectQuestionOptionProductIds,
+  selectQuestionCandidateShortlist,
+} from "./questionAvailability.js";
+import { buildRecommendationPlans } from "./recommendationPlans.js";
 import { resolveItems } from "./resolve.js";
-import { applyCheapestStoreSubstitutions, buildMultiStorePlan } from "./substitutions.js";
+import { applyStorePlanSubstitutions } from "./substitutions.js";
 import type {
-  BasketCompleteness,
+  BasketInitialInput,
   BasketItemStatus,
   BasketLocationInput,
-  BasketOptimizeInput,
+  BasketOptimizeOptions,
+  BasketOptimizeRequest,
   BasketOptimizeResult,
-  BasketRecommendation,
-  BasketRecommendations,
+  BasketResumeInput,
   BasketStoreResult,
+  CandidateAvailability,
   ResolvedItem,
   ResolutionStatus,
 } from "./types.js";
@@ -33,13 +44,16 @@ const DEFAULT_DISTANCE_PENALTY_PER_KM = 3;
 export interface ResolvedBasketLines {
   resolvedItems: ResolvedItem[];
   itemStatuses: BasketItemStatus[];
-  completeness: BasketCompleteness;
   candidateStores: StoreSummary[];
   storeIds: string[];
   location: StoreLocationMetadata;
 }
 
-function assertBasketInput(input: BasketLocationInput & { items: BasketOptimizeInput["items"] }): void {
+function isResumeRequest(request: BasketOptimizeRequest): request is BasketResumeInput {
+  return "continuation" in request;
+}
+
+function assertBasketInput(input: BasketLocationInput & { items: BasketInitialInput["items"] }): void {
   if (input.items.length === 0) {
     throw new AppError("bad_request", "items must contain at least one entry", 400);
   }
@@ -71,9 +85,9 @@ export function buildItemStatuses(resolvedItems: ResolvedItem[]): BasketItemStat
   }));
 }
 
-/** Shared resolve path for prepare and optimize — location scope, resolve, completeness. */
+/** Shared resolve path — location scope + resolve. */
 export async function resolveBasketLines(
-  input: BasketLocationInput & { items: BasketOptimizeInput["items"] },
+  input: BasketLocationInput & { items: BasketInitialInput["items"] },
 ): Promise<ResolvedBasketLines> {
   assertBasketInput(input);
 
@@ -95,39 +109,229 @@ export async function resolveBasketLines(
       storeIds: storeIds.length > 0 ? storeIds : undefined,
     }),
   );
-  const itemStatuses = buildItemStatuses(resolvedItems);
-
-  const ontology = await getActiveOntology();
-  const minSafeResolutionRatio =
-    ontology?.searchConfig?.minSafeResolutionRatio ?? DEFAULT_SEMANTIC_SEARCH_CONFIG.minSafeResolutionRatio;
-  const completeness = computeBasketCompleteness(resolvedItems, minSafeResolutionRatio);
 
   return {
     resolvedItems,
-    itemStatuses,
-    completeness,
+    itemStatuses: buildItemStatuses(resolvedItems),
     candidateStores,
     storeIds,
     location: locationResult.location,
   };
 }
 
-export async function optimizeBasket(input: BasketOptimizeInput): Promise<BasketOptimizeResult> {
-  const { resolvedItems, itemStatuses, completeness, candidateStores, storeIds, location } =
+function serializeQuestionStatuses(
+  items: BasketItemStatus[],
+  input: BasketInitialInput,
+  availability: Map<string, CandidateAvailability>,
+): BasketItemStatus[] {
+  return items.map((item) => ({
+    ...item,
+    candidates:
+      item.resolutionStatus === "resolved"
+        ? []
+        : selectQuestionCandidateShortlist(
+            item.candidates,
+            DEFAULT_QUESTION_OPTIONS_LIMIT,
+            availability,
+            input.items[item.index]?.query?.trim() ?? "",
+          ),
+  }));
+}
+
+function trimStoreResults(
+  storeResults: BasketStoreResult[],
+  storesLimit: number | undefined,
+  verbose: boolean | undefined,
+  recommendedIds: Array<string | undefined>,
+): { stores: BasketStoreResult[]; storesTruncated: boolean } {
+  const limit =
+    storesLimit === 0 ? storeResults.length : Math.max(1, storesLimit ?? DEFAULT_STORES_LIMIT);
+  const trimmed = storeResults.slice(0, limit);
+  const keep = new Set(recommendedIds.filter((id): id is string => Boolean(id)));
+  const stores =
+    verbose ?? false
+      ? trimmed
+      : trimmed.map((s) => (keep.has(s.storeId) ? s : { ...s, lines: [] }));
+  return { stores, storesTruncated: storeResults.length > trimmed.length };
+}
+
+interface BasketPhaseTimings {
+  searchMs: number;
+  classificationMs: number;
+  availabilityMs: number;
+  equivalenceMs: number;
+  pricingMs: number;
+}
+
+function emitBasketOptimizeTelemetry(fields: {
+  protocolState: "initial" | "resume";
+  requestedLines: number;
+  resolvedLines: number;
+  confirmedLines: number;
+  unresolvedLines: number;
+  pricedLines: number;
+  questionCount: number;
+  candidateStoreCount: number;
+  timings: BasketPhaseTimings;
+  totalMs: number;
+  bestSingleStoreCoverage: number | null;
+  continuationBytes: number;
+}): void {
+  console.log(
+    JSON.stringify({
+      event: "basket_optimize",
+      protocolState: fields.protocolState,
+      requestedLines: fields.requestedLines,
+      resolvedLines: fields.resolvedLines,
+      confirmedLines: fields.confirmedLines,
+      unresolvedLines: fields.unresolvedLines,
+      pricedLines: fields.pricedLines,
+      questionCount: fields.questionCount,
+      candidateStoreCount: fields.candidateStoreCount,
+      searchMs: fields.timings.searchMs,
+      classificationMs: fields.timings.classificationMs,
+      availabilityMs: fields.timings.availabilityMs,
+      equivalenceMs: fields.timings.equivalenceMs,
+      pricingMs: fields.timings.pricingMs,
+      dbQueryCount: null,
+      totalMs: fields.totalMs,
+      bestSingleStoreCoverage: fields.bestSingleStoreCoverage,
+      continuationBytes: fields.continuationBytes,
+    }),
+  );
+}
+
+export async function optimizeBasket(
+  request: BasketOptimizeRequest,
+  options: BasketOptimizeOptions,
+): Promise<BasketOptimizeResult> {
+  const protocolState = isResumeRequest(request) ? "resume" : "initial";
+  const input = isResumeRequest(request)
+    ? applyBasketAnswers(
+        decodeBasketContinuation(
+          request.continuation,
+          options.continuationSecret,
+          options.now,
+        ),
+        request.answers,
+      )
+    : request;
+  return optimizeInitialOrResumedBasket(input, options, protocolState);
+}
+
+async function optimizeInitialOrResumedBasket(
+  input: BasketInitialInput,
+  options: BasketOptimizeOptions,
+  protocolState: "initial" | "resume",
+): Promise<BasketOptimizeResult> {
+  const startedAt = Date.now();
+  const timings: BasketPhaseTimings = {
+    searchMs: 0,
+    classificationMs: 0,
+    availabilityMs: 0,
+    equivalenceMs: 0,
+    pricingMs: 0,
+  };
+
+  const searchStarted = Date.now();
+  const { resolvedItems, itemStatuses, candidateStores, storeIds, location } =
     await resolveBasketLines(input);
+  timings.searchMs = Date.now() - searchStarted;
 
-  // Broaden auto-resolved, CLASSIFIED commodity lines to the same-class SKUs the
-  // in-scope stores actually carry, so per-chain pricing fills them instead of
-  // showing not_carried_by_chain. Class-gated: safe from cross-category drift.
-  // Optimize-only (prepare doesn't price, so it skips this work).
-  await enrichCommodityCoverage(input.items, resolvedItems, storeIds);
+  const availabilityStarted = Date.now();
+  const availability = await loadCandidateAvailability(
+    collectQuestionOptionProductIds(itemStatuses),
+    storeIds,
+  );
+  timings.availabilityMs = Date.now() - availabilityStarted;
+  const questions = buildBasketQuestions(
+    input.items,
+    itemStatuses,
+    availability,
+    DEFAULT_QUESTION_OPTIONS_LIMIT,
+  );
 
-  const productIds = collectProductIdsForPricing(resolvedItems);
+  const resolvedLines = itemStatuses.filter((item) => item.resolutionStatus === "resolved").length;
+  const confirmedLines = itemStatuses.filter(
+    (item) => item.resolutionStatus === "needs_confirmation",
+  ).length;
+  const unresolvedLines = itemStatuses.filter((item) => item.resolutionStatus === "unresolved")
+    .length;
 
-  if (productIds.length === 0 || candidateStores.length === 0) {
-    return emptyBasketResult(input.items, itemStatuses, completeness, location);
+  if (questions.length > 0) {
+    const payload = createBasketContinuationPayload(
+      input,
+      questions.map((question) => ({
+        itemIndex: question.itemIndex,
+        selectionEffect: question.selectionEffect,
+        allowedProductIds: question.options.map((option) => option.productId),
+      })),
+      options.now,
+    );
+    const continuation = encodeBasketContinuation(payload, options.continuationSecret);
+    emitBasketOptimizeTelemetry({
+      protocolState,
+      requestedLines: input.items.length,
+      resolvedLines,
+      confirmedLines,
+      unresolvedLines,
+      pricedLines: 0,
+      questionCount: questions.length,
+      candidateStoreCount: candidateStores.length,
+      timings,
+      totalMs: Date.now() - startedAt,
+      bestSingleStoreCoverage: null,
+      continuationBytes: Buffer.byteLength(continuation, "utf8"),
+    });
+    return {
+      status: "needs_confirmation",
+      continuation,
+      questions,
+      preview: {
+        priceScope: "resolved_subset",
+        resolvedLines,
+        requestedLines: input.items.length,
+        candidateStores: candidateStores.length,
+      },
+      items: serializeQuestionStatuses(itemStatuses, input, availability),
+      location,
+    };
   }
 
+  const equivalenceStarted = Date.now();
+  await enrichCommodityCoverage(input.items, resolvedItems, storeIds);
+  timings.equivalenceMs = Date.now() - equivalenceStarted;
+
+  const productIds = collectProductIdsForPricing(resolvedItems);
+  if (productIds.length === 0 || candidateStores.length === 0) {
+    emitBasketOptimizeTelemetry({
+      protocolState,
+      requestedLines: input.items.length,
+      resolvedLines,
+      confirmedLines,
+      unresolvedLines,
+      pricedLines: 0,
+      questionCount: 0,
+      candidateStoreCount: candidateStores.length,
+      timings,
+      totalMs: Date.now() - startedAt,
+      bestSingleStoreCoverage: null,
+      continuationBytes: 0,
+    });
+    return {
+      status: "complete",
+      bestSingleStore: null,
+      cheapestCompleteStore: null,
+      multiStore: null,
+      items: itemStatuses.map((s) => ({ ...s, candidates: [] })),
+      stores: [],
+      storesCompared: 0,
+      storesTruncated: false,
+      location,
+    };
+  }
+
+  const pricingStarted = Date.now();
   const includeClub = input.includeClub ?? true;
   const { listingByChainAndProduct, priceByListingAndStore, promoMap } = await loadBasketPricingData(
     productIds,
@@ -136,7 +340,6 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
   );
 
   const storeResults: BasketStoreResult[] = [];
-
   for (const store of candidateStores) {
     const result = priceStoreBasket(
       store,
@@ -154,80 +357,66 @@ export async function optimizeBasket(input: BasketOptimizeInput): Promise<Basket
     return a.total - b.total;
   });
 
-  const storesLimit =
-    input.storesLimit === 0
-      ? storeResults.length
-      : Math.max(1, input.storesLimit ?? DEFAULT_STORES_LIMIT);
-  const trimmed = storeResults.slice(0, storesLimit);
+  const plans = buildRecommendationPlans(
+    storeResults,
+    resolvedItems,
+    {
+      distancePenaltyPerKm: input.distancePenaltyPerKm ?? DEFAULT_DISTANCE_PENALTY_PER_KM,
+      distanceReliable: location.distanceReliable,
+    },
+    input.items.length,
+  );
+  timings.pricingMs = Date.now() - pricingStarted;
 
-  // One-shot: always price the safely-resolved subset. completeness.totalsArePartial
-  // stays as the honesty flag, but recommendations are no longer nulled — the lines
-  // that still need a human decision are returned inline as `questions`.
-  const picks = pickRecommendations(storeResults, {
-    distancePenaltyPerKm: input.distancePenaltyPerKm ?? DEFAULT_DISTANCE_PENALTY_PER_KM,
-    distanceReliable: location.distanceReliable,
-  });
-  const recommendations: BasketRecommendations = {
-    cheapest: picks.cheapest ? buildCheapestRecommendation(picks.cheapest, "cheapest") : null,
-    bestNearby: picks.bestNearby
-      ? buildCheapestRecommendation(picks.bestNearby, "bestNearby")
-      : null,
-    bestInStore: picks.bestInStore
-      ? buildCheapestRecommendation(picks.bestInStore, "bestInStore")
-      : null,
-    bestOrderable: picks.bestOrderable
-      ? buildCheapestRecommendation(picks.bestOrderable, "bestOrderable")
-      : null,
-  };
-
-  // Top-level cheapest kept for backward-compat: stores[0] is coverage-first
-  // (fewest-missing then total), the historic "cheapest" field.
-  const top = storeResults[0];
-  const cheapest: BasketRecommendation | null = top ? buildCheapestRecommendation(top) : null;
-
-  // Substitution display describes the store you'd actually go to (bestNearby),
-  // not the raw lowest-total pick.
-  if (picks.bestNearby) {
-    applyCheapestStoreSubstitutions(itemStatuses, picks.bestNearby);
+  if (plans.bestSingleStoreResult) {
+    applyStorePlanSubstitutions(itemStatuses, plans.bestSingleStoreResult);
   }
 
-  const multiStore = buildMultiStorePlan(resolvedItems, storeResults);
-
-  const questions = buildPrepareQuestions(input.items, itemStatuses, DEFAULT_PREPARE_OPTIONS_LIMIT);
-
-  // Payload slimming: unless verbose, drop per-store line detail for every store
-  // except the recommended ones. missingItems is kept everywhere (small, needed
-  // for coverage reasoning).
-  const recommendedIds = new Set(
-    [
-      recommendations.cheapest?.storeId,
-      recommendations.bestNearby?.storeId,
-      recommendations.bestInStore?.storeId,
-      recommendations.bestOrderable?.storeId,
-    ].filter((id): id is string => Boolean(id)),
+  const { stores, storesTruncated } = trimStoreResults(
+    storeResults,
+    input.storesLimit,
+    input.verbose,
+    [plans.bestSingleStore?.storeId, plans.cheapestCompleteStore?.storeId],
   );
-  const verbose = input.verbose ?? false;
-  const stores = verbose
-    ? trimmed
-    : trimmed.map((s) => (recommendedIds.has(s.storeId) ? s : { ...s, lines: [] }));
 
-  // Non-verbose: also drop per-item candidate lists. They are the largest single
-  // contributor to the payload, and they're redundant here — needs_confirmation
-  // lines already carry their option list in `questions`, and resolved lines
-  // don't need a candidate list. Applied AFTER questions/substitutions consumed
-  // the candidates above. multiStore.lines are kept (they ARE the recommendation).
+  const verbose = input.verbose ?? false;
   const items = verbose ? itemStatuses : itemStatuses.map((s) => ({ ...s, candidates: [] }));
 
+  // Avoid duplicating the same store's line payload when coverage is already complete.
+  let cheapestCompleteStore = plans.cheapestCompleteStore;
+  if (
+    !verbose &&
+    cheapestCompleteStore &&
+    plans.bestSingleStore &&
+    cheapestCompleteStore.storeId === plans.bestSingleStore.storeId
+  ) {
+    cheapestCompleteStore = { ...cheapestCompleteStore, lines: [] };
+  }
+
+  emitBasketOptimizeTelemetry({
+    protocolState,
+    requestedLines: input.items.length,
+    resolvedLines,
+    confirmedLines,
+    unresolvedLines,
+    pricedLines: plans.bestSingleStore?.pricedLines ?? 0,
+    questionCount: 0,
+    candidateStoreCount: candidateStores.length,
+    timings,
+    totalMs: Date.now() - startedAt,
+    bestSingleStoreCoverage: plans.bestSingleStore?.coverageRatio ?? null,
+    continuationBytes: 0,
+  });
+
   return {
+    status: "complete",
+    bestSingleStore: plans.bestSingleStore,
+    cheapestCompleteStore,
+    multiStore: plans.multiStore,
     items,
     stores,
     storesCompared: storeResults.length,
-    storesTruncated: storeResults.length > trimmed.length,
-    cheapest,
-    recommendations,
-    multiStore,
-    completeness,
-    questions,
+    storesTruncated,
     location,
   };
 }
@@ -245,42 +434,11 @@ export function classifyResolutionLine(item: ResolvedItem): ResolutionStatus {
   return "unresolved";
 }
 
-export function computeBasketCompleteness(
-  resolvedItems: ResolvedItem[],
-  minSafeResolutionRatio: number,
-): BasketCompleteness {
-  const requestedLines = resolvedItems.length;
-  let resolvedLines = 0;
-  let needsConfirmationLines = 0;
-  let unresolvedLines = 0;
-
-  for (const item of resolvedItems) {
-    const status = classifyResolutionLine(item);
-    if (status === "resolved") resolvedLines += 1;
-    else if (status === "needs_confirmation") needsConfirmationLines += 1;
-    else unresolvedLines += 1;
-  }
-
-  const safeResolutionRatio = requestedLines > 0 ? resolvedLines / requestedLines : 0;
-  const totalsArePartial = safeResolutionRatio < minSafeResolutionRatio;
-
-  return {
-    requestedLines,
-    resolvedLines,
-    needsConfirmationLines,
-    unresolvedLines,
-    safeResolutionRatio,
-    totalsArePartial,
-  };
-}
-
 export function collectProductIdsForPricing(resolvedItems: ResolvedItem[]): string[] {
   return [
     ...new Set(
       resolvedItems
         .filter((r) => isSafelyResolvedForPricing(r))
-        // Equivalents' ids too, so each chain's interchangeable SKU gets its
-        // listings/prices fetched for per-chain pricing.
         .flatMap((r) => [
           ...(r.productId != null ? [r.productId] : []),
           ...(r.equivalents ?? []).map((c) => c.productId),
@@ -291,29 +449,4 @@ export function collectProductIdsForPricing(resolvedItems: ResolvedItem[]): stri
 
 function isSafelyResolvedForPricing(item: ResolvedItem): boolean {
   return item.resolutionStatus === "resolved" || (item.productId != null && !item.lowConfidence);
-}
-
-function emptyBasketResult(
-  inputItems: BasketOptimizeInput["items"],
-  itemStatuses: BasketItemStatus[],
-  completeness: BasketCompleteness,
-  location: StoreLocationMetadata,
-): BasketOptimizeResult {
-  return {
-    items: itemStatuses,
-    stores: [],
-    storesCompared: 0,
-    storesTruncated: false,
-    cheapest: null,
-    recommendations: {
-      cheapest: null,
-      bestNearby: null,
-      bestInStore: null,
-      bestOrderable: null,
-    },
-    multiStore: null,
-    completeness,
-    questions: buildPrepareQuestions(inputItems, itemStatuses, DEFAULT_PREPARE_OPTIONS_LIMIT),
-    location,
-  };
 }

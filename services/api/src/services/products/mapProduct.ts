@@ -10,5 +10,6 @@ export function mapProduct(row: ProductRow): ProductSummary {
     categoryL2: row.category_l2,
     sizeQty: row.size_qty,
     sizeUnit: row.size_unit,
+    pieceCount: row.piece_count,
   };
 }

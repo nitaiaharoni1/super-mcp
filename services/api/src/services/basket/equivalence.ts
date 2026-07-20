@@ -1,5 +1,14 @@
-import { compareClassPaths, normalizeEmbedInput, tokenizeNormalized } from "@super-mcp/shared";
+import {
+  compareClassPaths,
+  normalizeEmbedInput,
+  packSizesCompatible,
+  queryTokensSatisfied,
+  stemHebrewToken,
+  tokenizeNormalized,
+} from "@super-mcp/shared";
 import type { BasketCandidate } from "./types.js";
+
+export { queryTokensSatisfied } from "@super-mcp/shared";
 
 /** Build the LLM taxonomy path from a candidate's class levels. */
 function classPathOf(c: BasketCandidate) {
@@ -27,26 +36,6 @@ export function variantConflict(a: BasketCandidate, b: BasketCandidate): boolean
   return Boolean(a.variant && b.variant && a.variant !== b.variant);
 }
 
-// Hebrew final letters -> medial form, then strip ONE plural/feminine suffix, so
-// a query token and a name token reduce to the SAME stem across morphology:
-//   מלפפונים→מלפפונ, מלפפון→מלפפונ ; עגבניות→עגבני, עגבניה→עגבני ; בצלים→בצל, בצל→בצל.
-// Stem EQUALITY (not prefix) keeps specificity — בצל≠בצלצל (onion vs onion-rings),
-// קברנה≠מרלו — while healing plural/singular.
-const FINAL_FORMS: Record<string, string> = { ך: "כ", ם: "מ", ן: "נ", ף: "פ", ץ: "צ" };
-// Suffixes in MEDIAL form (compared after the token's final letters are folded),
-// so the plural ים (final mem) is written ימ here. NOT "יות" — the י usually
-// belongs to the stem (עגבניות→עגבני via "ות", not עגבנ). Longest first.
-const NOUN_SUFFIXES = ["ות", "ימ", "ה", "ת"];
-function stem(t0: string): string {
-  const t = t0.replace(/[ךםןףץ]/g, (c) => FINAL_FORMS[c] ?? c);
-  if (t.length > 4) {
-    for (const suf of NOUN_SUFFIXES) {
-      if (t.endsWith(suf) && t.length - suf.length >= 3) return t.slice(0, -suf.length);
-    }
-  }
-  return t;
-}
-
 // Utensil / container / device / toy nouns. When one of these LEADS a product
 // name, the product IS that thing (a pasta spoon, a water gun, a paper holder, a
 // milk frother, a fruit juicer) — not the commodity the query named. Normalized,
@@ -57,9 +46,84 @@ const NON_COMMODITY_LEADERS: ReadonlySet<string> = new Set([
   "מטחנת", "מטחנה", "מועך", "מקציף", "כד", "מסננת", "מכשיר", "מתקן", "סיר",
   "מחבת", "צלחת", "קולפן", "מברשת", "מגירת", "קנקן", "בקבוקון", "קערת", "כוסון",
   "כוס", "פלסט",
+  // openers / corkscrews — "יין" must never auto-resolve to "חולץ יין" / "פותחן יין"
+  "חולץ", "פותחן", "מחלץ",
   // "derived product OF X" (vinegar/juice/powder/concentrate of X ≠ X)
   "חומץ", "מיץ", "אבקת", "תרכיז",
+  // prepared-food / dessert hosts — "לימונים" ≠ "עוגת לימונים"; "קולה" ≠ "לקריץ קולה"
+  // Include common plurals; queryHeadAnchored also checks stemmed leaders.
+  "עוגת", "עוגה", "עוגות", "מאפה", "מאפי", "מאפים", "לקריץ", "סוכריות", "סוכריה",
+  "גלידת", "גלידה", "גלידות", "ליקר",
 ]);
+
+/** Stemmed forms of NON_COMMODITY_LEADERS so plurals (עוגות→עוג) still match. */
+const NON_COMMODITY_LEADER_STEMS: ReadonlySet<string> = new Set(
+  [...NON_COMMODITY_LEADERS].map((t) => stemHebrewToken(t)),
+);
+
+/** Common produce query stems — fallback when both pack units are missing. */
+const PRODUCE_QUERY_STEMS: ReadonlySet<string> = new Set(
+  [
+    "עגבניה",
+    "עגבניות",
+    "מלפפון",
+    "מלפפונים",
+    "בצל",
+    "בצלים",
+    "לימון",
+    "לימונים",
+    "גזר",
+    "תפוח",
+    "תפוז",
+    "בננה",
+    "אבטיח",
+    "מלון",
+    "פלפל",
+    "שום",
+    "חציל",
+    "קישוא",
+    "אבוקדו",
+    "בטטה",
+  ].map(stemHebrewToken),
+);
+
+function queryLooksLikeProduce(queryText: string): boolean {
+  const tokens = tokenizeNormalized(normalizeEmbedInput(queryText));
+  return tokens.some((t) => PRODUCE_QUERY_STEMS.has(stemHebrewToken(t)));
+}
+
+function classAllowsCountWeight(c: BasketCandidate): boolean {
+  const l1 = c.classL1 ?? c.productClass;
+  return l1 === "produce" || c.classL2 === "pita_flatbread";
+}
+
+function allowCountToWeight(
+  a: BasketCandidate,
+  b: BasketCandidate,
+  queryText: string,
+): boolean {
+  if (classAllowsCountWeight(a) || classAllowsCountWeight(b)) return true;
+  const aMissing = a.sizeUnit == null || a.sizeUnit === "";
+  const bMissing = b.sizeUnit == null || b.sizeUnit === "";
+  if (aMissing && bMissing) return queryLooksLikeProduce(queryText);
+  return false;
+}
+
+function packsCompatible(
+  a: BasketCandidate,
+  b: BasketCandidate,
+  queryText: string,
+  packTolerance: number,
+): boolean {
+  return packSizesCompatible(
+    { sizeQty: a.sizeQty, sizeUnit: a.sizeUnit, name: a.name },
+    { sizeQty: b.sizeQty, sizeUnit: b.sizeUnit, name: b.name },
+    {
+      packTolerance,
+      allowCountToWeight: allowCountToWeight(a, b, queryText),
+    },
+  ).compatible;
+}
 
 /**
  * The query's HEAD (first content token) must lead the primary name — appear
@@ -72,26 +136,38 @@ const NON_COMMODITY_LEADERS: ReadonlySet<string> = new Set([
 export function queryHeadAnchored(queryText: string, primaryName: string): boolean {
   const q = tokenizeNormalized(normalizeEmbedInput(queryText));
   if (q.length === 0) return true;
-  const head = stem(q[0]!);
+  const head = stemHebrewToken(q[0]!);
   const nameRaw = tokenizeNormalized(normalizeEmbedInput(primaryName));
-  const first2 = nameRaw.slice(0, 2).map(stem);
+  const first2 = nameRaw.slice(0, 2).map(stemHebrewToken);
   const idx = first2.indexOf(head);
   if (idx === -1) return false;
   // head at position 1 behind a utensil/container/device leader → not the commodity
-  if (idx === 1 && nameRaw[0] && NON_COMMODITY_LEADERS.has(nameRaw[0])) return false;
+  if (
+    idx === 1 &&
+    nameRaw[0] &&
+    (NON_COMMODITY_LEADERS.has(nameRaw[0]) ||
+      NON_COMMODITY_LEADER_STEMS.has(stemHebrewToken(nameRaw[0])))
+  ) {
+    return false;
+  }
   return true;
 }
 
 /**
- * Does every query token appear in the name, tolerant of Hebrew plural/singular?
- * Compares STEMS (final-letter normalized, one plural/feminine suffix stripped),
- * so מלפפונים↔מלפפון and עגבניות↔עגבניה match while query SPECIFICITY holds — a
- * cabernet or brand token still has to be present, and near-lookalikes (בצל vs
- * בצלצלים) do not collapse together.
+ * Stable partition: head-anchored hits first, utensil/derived leaders last.
+ * When nothing is anchored, the input order is preserved.
  */
-export function queryTokensSatisfied(queryTokens: string[], name: string): boolean {
-  const nameStems = new Set(tokenizeNormalized(normalizeEmbedInput(name)).map(stem));
-  return queryTokens.every((qt) => nameStems.has(stem(qt)));
+export function preferQueryHeadAnchored<T extends { name: string }>(
+  queryText: string,
+  hits: T[],
+): T[] {
+  if (!queryText || hits.length <= 1) return hits;
+  const anchored: T[] = [];
+  const rest: T[] = [];
+  for (const hit of hits) {
+    (queryHeadAnchored(queryText, hit.name) ? anchored : rest).push(hit);
+  }
+  return anchored.length > 0 ? [...anchored, ...rest] : hits;
 }
 
 // Preserved/prepared forms that are a DIFFERENT product from the fresh staple,
@@ -170,10 +246,9 @@ export function buildCommodityEquivalents(
     if (c.productClass !== top.productClass) continue;
     if (classesConflict(top, c)) continue; // different L3 (onion≠scallion, lemon≠lime)
     if (variantConflict(top, c)) continue; // regular≠cherry/zero/organic
-    if ((c.sizeUnit ?? null) !== (top.sizeUnit ?? null)) continue;
-    if (top.sizeQty != null && c.sizeQty != null && top.sizeQty > 0) {
-      if (Math.abs(c.sizeQty - top.sizeQty) / top.sizeQty > packTolerance) continue;
-    }
+    if (!packsCompatible(top, c, queryText, packTolerance)) continue;
+    // Prepared-food hosts share a produce token ("עוגת לימונים") but must not join.
+    if (!queryHeadAnchored(queryText, c.name)) continue;
     // Query specificity (morphology-tolerant). The preserved-form word list is only
     // a fallback for UNLABELED pairs — class+variant already separate pickled/sliced
     // when both are classified.
@@ -226,10 +301,13 @@ export function buildAvailabilityEquivalents(
   const queryTokenSet = new Set(queryTokens);
   // Query-safe (morphology-tolerant), locally-available, non-penalized pool in rank
   // order. Preserved-word guard is a fallback only for unlabeled candidates.
+  // Head-anchor drops prepared-food hosts ("עוגת לימונים") that share a produce
+  // token but are not the commodity.
   const pool = candidates.filter((c) => {
     if (!c.hasLocalPrice) return false;
     if (opts.penaltyOf(c.productId) >= opts.penaltyBlock) return false;
     if (c.intentTier === 0) return false;
+    if (!queryHeadAnchored(queryText, c.name)) return false;
     if (!c.classL1 && hasUnrequestedPreservedForm(queryTokenSet, c.name)) return false;
     return queryTokensSatisfied(queryTokens, c.name);
   });
@@ -239,10 +317,7 @@ export function buildAvailabilityEquivalents(
   for (const c of pool) {
     if (out.length > opts.maxEquivalents) break;
     if (c.productId === primary.productId) continue;
-    if ((c.sizeUnit ?? null) !== (primary.sizeUnit ?? null)) continue;
-    if (primary.sizeQty != null && c.sizeQty != null && primary.sizeQty > 0) {
-      if (Math.abs(c.sizeQty - primary.sizeQty) / primary.sizeQty > opts.packTolerance) continue;
-    }
+    if (!packsCompatible(primary, c, queryText, opts.packTolerance)) continue;
     if (primary.productClass && c.productClass && primary.productClass !== c.productClass) continue;
     if (classesConflict(primary, c)) continue;
     if (variantConflict(primary, c)) continue;

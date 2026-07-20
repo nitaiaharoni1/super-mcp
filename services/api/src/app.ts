@@ -13,6 +13,7 @@ import {
   registerStoreRoutes,
 } from "./routes/index.js";
 import { registerMcpRoutes } from "./mcp/server.js";
+import { assertBasketContinuationSecret } from "./services/basket/continuation.js";
 
 const PUBLIC_PATHS = new Set(["/health", "/ready", "/openapi.json"]);
 
@@ -30,6 +31,8 @@ function capabilityForUrl(url: string): Capability {
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
+  assertBasketContinuationSecret(process.env.BASKET_CONTINUATION_SECRET ?? "");
+
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "info",

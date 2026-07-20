@@ -4,7 +4,7 @@
  *   pnpm db:benchmark-semantic
  *   SUPER_MCP_EMBED_BACKEND=hasher pnpm db:benchmark-semantic
  *
- * Basket resolve latency (warm prepareBasket / resolveItems):
+ * Basket resolve latency (warm resolveBasketLines):
  *   pnpm db:benchmark-semantic -- --basket
  *   pnpm db:benchmark-semantic -- --basket --city=… --near=lat,lng --fixture=path.json
  *
@@ -895,7 +895,7 @@ function parseNear(raw: string | undefined): { lat: number; lng: number } | unde
 
 interface BasketFixtureCase {
   query: string;
-  qty?: number;
+  packQty?: number;
   amount?: number;
   unit?: string;
 }
@@ -968,38 +968,59 @@ async function runBasketBenchmark(): Promise<Record<string, unknown>> {
   }
 
   const fixture = loadBasketFixture(fixturePath);
-  const items = fixture.cases.map((row) => ({
-    query: row.query,
-    ...(row.qty != null ? { qty: row.qty } : {}),
-    ...(row.amount != null ? { amount: row.amount } : {}),
-    ...(row.unit != null ? { unit: row.unit } : {}),
-    ...(row.qty == null && row.amount == null ? { qty: 1 } : {}),
-  }));
+  const items = fixture.cases.map((row) => {
+    if (row.amount != null) {
+      return {
+        query: row.query,
+        amount: row.amount,
+        unit: row.unit ?? "unit",
+      };
+    }
+    return {
+      query: row.query,
+      packQty: row.packQty ?? 1,
+    };
+  });
 
-  const prepareUrl = new URL(
-    "../../../../services/api/src/services/basket/prepare.ts",
+  const optimizeUrl = new URL(
+    "../../../../services/api/src/services/basket/optimize.ts",
     import.meta.url,
   );
-  const { prepareBasket } = await import(prepareUrl.href);
+  const { resolveBasketLines } = (await import(optimizeUrl.href)) as {
+    resolveBasketLines: (input: {
+      items: Array<{ query: string; packQty?: number; amount?: number; unit?: string }>;
+      city?: string;
+      near?: { lat: number; lng: number };
+    }) => Promise<{
+      itemStatuses: Array<{ resolutionStatus: string }>;
+      candidateStores: unknown[];
+    }>;
+  };
 
-  // One uncounted warmup, then warmRuns measured iterations.
-  await prepareBasket({
+  const locationInput = {
     items,
     ...(locationCity ? { city: locationCity } : {}),
     ...(near ? { near } : {}),
-  });
+  };
+
+  // One uncounted warmup, then warmRuns measured iterations.
+  await resolveBasketLines(locationInput);
 
   const durationsMs: number[] = [];
-  let lastCompleteness: Record<string, unknown> | null = null;
+  let lastResolution: Record<string, unknown> | null = null;
   for (let i = 0; i < warmRuns; i++) {
     const t0 = performance.now();
-    const result = await prepareBasket({
-      items,
-      ...(locationCity ? { city: locationCity } : {}),
-      ...(near ? { near } : {}),
-    });
+    const result = await resolveBasketLines(locationInput);
     durationsMs.push(performance.now() - t0);
-    lastCompleteness = result.completeness ?? null;
+    lastResolution = {
+      requestedLines: result.itemStatuses.length,
+      resolvedLines: result.itemStatuses.filter((s) => s.resolutionStatus === "resolved").length,
+      needsConfirmationLines: result.itemStatuses.filter(
+        (s) => s.resolutionStatus === "needs_confirmation",
+      ).length,
+      unresolvedLines: result.itemStatuses.filter((s) => s.resolutionStatus === "unresolved").length,
+      candidateStores: result.candidateStores.length,
+    };
   }
 
   const sorted = [...durationsMs].sort((a, b) => a - b);
@@ -1023,7 +1044,7 @@ async function runBasketBenchmark(): Promise<Record<string, unknown>> {
       p50: p50 != null ? Math.round(p50 * 10) / 10 : null,
       p95: p95 != null ? Math.round(p95 * 10) / 10 : null,
     },
-    completeness: lastCompleteness,
+    resolution: lastResolution,
   };
 }
 

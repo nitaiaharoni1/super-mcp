@@ -84,7 +84,8 @@ export async function searchByQueryVector(
   const stockFilter = raw.inStockOnly && scoped ? `AND ${localExists}` : "";
 
   const sql = `
-    SELECT p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2, p.size_qty, p.size_unit,
+    SELECT p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2,
+           p.size_qty, p.size_unit, p.piece_count,
            (pe.embedding <=> $1::vector) AS vector_distance,
            ${globalExists} AS has_price,
            ${scoped ? localExists : globalExists} AS has_local_price

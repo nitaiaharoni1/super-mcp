@@ -55,7 +55,8 @@ export function buildExactProductRankedCte(): string {
         AND p.gtin = $4
     ),
     ranked AS (
-      SELECT p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2, p.size_qty, p.size_unit,
+      SELECT p.id, p.gtin, p.name, p.brand, p.category_l1, p.category_l2,
+             p.size_qty, p.size_unit, p.piece_count,
              CASE
                WHEN $4::text IS NOT NULL AND p.gtin = $4 THEN 1.0
                WHEN $1 <> '' AND lower(p.name) = lower($1) THEN 1.0

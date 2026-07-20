@@ -13,7 +13,6 @@ import type {
   BasketCandidate,
   BasketLine,
   BasketMissingItem,
-  BasketRecommendation,
   BasketStoreResult,
   ListingRow,
   ResolvedItem,
@@ -60,11 +59,14 @@ export function priceStoreBasket(
       listing: ListingRow;
       priceRow: StorePriceRow;
       qty: number;
+      qtyMode: string;
     } | null = null;
 
     let sawListing = false;
     let matchedTotal = Infinity;
     const primaryScore = tryOrder[0]?.score ?? 0;
+    const primaryProductId = item.productId;
+
     for (const candidate of tryOrder) {
       // Don't silently swap to a much worse match (e.g. 6-pack mini pita for "פיתות 10").
       if (candidate.score + 0.2 < primaryScore) continue;
@@ -88,16 +90,34 @@ export function priceStoreBasket(
         unit: item.unit ?? undefined,
         productSizeQty: candidate.sizeQty,
         productSizeUnit: candidate.sizeUnit,
-        productName: candidate.name,
+        productName: candidate.name || listing.name,
+        pieceCount: listing.piece_count ?? candidate.pieceCount,
+        isWeighted: listing.is_weighted ?? undefined,
+        saleBasis: listing.sale_basis ?? undefined,
       });
-      // Pick the CHEAPEST priced member of the equivalence set, not the first.
-      // For a generic commodity line the set is same-category (e.g. all red wines
-      // for 'יין אדום'), and the default is cheapest unless a variety/brand was
-      // named. tryOrder is [primary] for non-commodity lines, so this is a no-op
-      // there; ties keep the primary (it sorts first).
+      // Prefer the confirmed/resolved primary whenever this store stocks it —
+      // do not swap Coke→Crystal just because Crystal is cheaper. Only when the
+      // primary has no listing/price here do we pick the cheapest equivalent.
+      const isPrimary = candidate.productId === primaryProductId;
+      if (isPrimary) {
+        matched = {
+          candidate,
+          listing,
+          priceRow,
+          qty: purchase.qty,
+          qtyMode: purchase.mode,
+        };
+        break;
+      }
       const candidateTotal = Number(priceRow.price) * purchase.qty;
       if (candidateTotal < matchedTotal) {
-        matched = { candidate, listing, priceRow, qty: purchase.qty };
+        matched = {
+          candidate,
+          listing,
+          priceRow,
+          qty: purchase.qty,
+          qtyMode: purchase.mode,
+        };
         matchedTotal = candidateTotal;
       }
     }
@@ -148,6 +168,7 @@ export function priceStoreBasket(
       productId: matched.candidate.productId,
       name: matched.candidate.name || matched.listing.name,
       qty: matched.qty,
+      qtyMode: matched.qtyMode,
       listingId: matched.listing.id,
       itemCode: matched.listing.item_code,
       unitPrice: listPrice,
@@ -194,50 +215,6 @@ export function priceStoreBasket(
 }
 
 /** Address/feed coords are branch-level; city_centroid/null are not. */
-function isBranchDistanceReliable(geoSource: string | null | undefined): boolean {
+export function isBranchDistanceReliable(geoSource: string | null | undefined): boolean {
   return geoSource === "address" || geoSource === "feed";
-}
-
-export type RecommendationKind = "cheapest" | "bestNearby" | "bestInStore" | "bestOrderable";
-
-export function buildCheapestRecommendation(
-  top: BasketStoreResult,
-  kind: RecommendationKind = "cheapest",
-): BasketRecommendation {
-  return {
-    storeId: top.storeId,
-    storeName: top.storeName,
-    chainId: top.chainId,
-    chainName: top.chainName,
-    total: top.total,
-    currency: top.currency,
-    itemsFound: top.itemsFound,
-    itemsRequested: top.itemsRequested,
-    distanceKm: top.distanceKm,
-    reason: recommendationReason(top, kind),
-  };
-}
-
-function recommendationReason(top: BasketStoreResult, kind: RecommendationKind): string {
-  const missing =
-    top.missingItems.length === 0
-      ? "carries the full priced basket"
-      : `missing ${top.missingItems.length} of ${top.itemsRequested} items`;
-  switch (kind) {
-    case "cheapest":
-      return top.missingItems.length === 0
-        ? "Lowest total among nearby stores that carry the full basket (promos applied)."
-        : `Lowest total among nearby stores meeting the coverage floor; ${missing}.`;
-    case "bestNearby":
-    case "bestInStore":
-      return `Best in-store pick within a 1-line coverage band of the max; ${missing}.`;
-    case "bestOrderable": {
-      const orderable = top.lines.filter((l) => l.link != null).length;
-      return `Best online-orderable pick (${orderable} linked lines) within a 1-line orderable-coverage band; ${missing}.`;
-    }
-    default: {
-      const _exhaustive: never = kind;
-      return _exhaustive;
-    }
-  }
 }

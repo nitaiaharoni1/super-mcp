@@ -8,14 +8,13 @@ import { registerTools } from "./tools/index.js";
 export const MCP_SERVER_INSTRUCTIONS =
   "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness " +
   "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. " +
-  "For shopping lists: call prepare_basket with items[{query|gtin|product_id, pack_qty|amount+unit}] " +
-  "and city (Hebrew/English) or near=lat,lng. Confirm every required question, then call optimize_basket " +
-  "once with product_id values for confirmed lines. Do not call search_products per line first; use " +
-  "search_products / resolve_products only for unresolved or missing lines. qty remains a deprecated alias " +
-  "for pack_qty and must not be supplied with it. Use amount+unit for natural counts and weighed goods " +
-  "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). The response includes the cheapest " +
-  "single-store plan plus multiStore (cheapest-per-item across stores). Location filters default to 10km " +
-  "when near is set. Use get_promotions to explain discounts.";
+  "For shopping lists: call optimize_basket with items[{query|gtin|product_id, pack_qty|amount+unit}] " +
+  "and city (Hebrew/English) or near=lat,lng. If status is needs_confirmation, answer every required " +
+  "question and call again with only {continuation, answers}. If status is complete, use " +
+  "bestSingleStore / cheapestCompleteStore / multiStore. Do not call search_products per line first; " +
+  "use search_products / resolve_products only for unresolved or missing lines. Use amount+unit for " +
+  "natural counts and weighed goods (20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). " +
+  "Location filters default to 10km when near is set. Use get_promotions to explain discounts.";
 
 function createMcpServer(): McpServer {
   const server = new McpServer(

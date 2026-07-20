@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "create-key": "tsx src/create-key.ts",
+    "canary:basket": "tsx src/scripts/canaryBasket.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

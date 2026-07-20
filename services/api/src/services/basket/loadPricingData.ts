@@ -1,6 +1,6 @@
 import { query } from "@super-mcp/db";
 import { getActivePromotionsForListings } from "../promotions/index.js";
-import type { ListingRow, StorePriceRow } from "./types.js";
+import type { CandidateAvailability, ListingRow, StorePriceRow } from "./types.js";
 
 export interface BasketPricingContext {
   listingByChainAndProduct: Map<string, Map<string, ListingRow[]>>;
@@ -14,7 +14,8 @@ export async function loadBasketPricingData(
   includeClub: boolean,
 ): Promise<BasketPricingContext> {
   const listingRes = await query<ListingRow>(
-    `SELECT l.id, l.product_id, l.chain_id, l.item_code, l.name, p.gtin
+    `SELECT l.id, l.product_id, l.chain_id, l.item_code, l.name, p.gtin,
+            l.is_weighted, l.sale_basis, l.piece_count
      FROM listing l JOIN product p ON p.id = l.product_id
      WHERE l.product_id = ANY($1::uuid[])`,
     [productIds],
@@ -52,28 +53,40 @@ export async function loadBasketPricingData(
 }
 
 /**
- * How many distinct location-scoped stores carry a positive price for each of the
- * given product ids. One aggregate over all ids (not per product) so a prepared
- * basket can report REAL nearby availability per option instead of a fabricated
- * flag. Returns a Map keyed by product id; ids with no priced store are absent.
+ * Batch local availability for confirmation options: priced store count, chain
+ * diversity, and minimum nearby price. Missing ids are absent from the map.
  */
-export async function countNearbyPricedStores(
+export async function loadCandidateAvailability(
   productIds: string[],
   storeIds: string[],
-): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
-  if (productIds.length === 0 || storeIds.length === 0) return counts;
-  const res = await query<{ product_id: string; priced_stores: string | number }>(
-    `SELECT l.product_id, count(DISTINCT sp.store_id) AS priced_stores
-     FROM listing l JOIN store_price sp ON sp.listing_id = l.id
-     WHERE l.product_id = ANY($1::uuid[])
-       AND sp.store_id = ANY($2::uuid[])
-       AND sp.price > 0
-     GROUP BY l.product_id`,
+): Promise<Map<string, CandidateAvailability>> {
+  if (productIds.length === 0 || storeIds.length === 0) return new Map();
+  const result = await query<{
+    product_id: string;
+    priced_stores: string | number;
+    priced_chains: string | number;
+    min_price: string | number | null;
+  }>(
+    `SELECT l.product_id,
+            count(DISTINCT sp.store_id) AS priced_stores,
+            count(DISTINCT l.chain_id) AS priced_chains,
+            min(sp.price) AS min_price
+       FROM listing l
+       JOIN store_price sp ON sp.listing_id = l.id
+      WHERE l.product_id = ANY($1::uuid[])
+        AND sp.store_id = ANY($2::uuid[])
+        AND sp.price > 0
+      GROUP BY l.product_id`,
     [productIds, storeIds],
   );
-  for (const row of res.rows) {
-    counts.set(row.product_id, Number(row.priced_stores));
-  }
-  return counts;
+  return new Map(
+    result.rows.map((row) => [
+      row.product_id,
+      {
+        pricedStoreCount: Number(row.priced_stores),
+        chainCount: Number(row.priced_chains),
+        minPrice: row.min_price == null ? null : Number(row.min_price),
+      },
+    ]),
+  );
 }
