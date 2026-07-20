@@ -45,8 +45,20 @@ const STORE_A = "11111111-1111-4111-8111-000000000001";
 const STORE_B = "22222222-2222-4222-8222-000000000001";
 const TOMATO_A = "a0000000-0000-4000-8000-000000000001";
 const TOMATO_B = "b0000000-0000-4000-8000-000000000001";
+const TASTERS = "c0000000-0000-4000-8000-000000000001";
+const TURKISH_COFFEE = "c0000000-0000-4000-8000-000000000002";
+const COKE_ZERO = "c0000000-0000-4000-8000-000000000003";
+const COKE_REGULAR = "c0000000-0000-4000-8000-000000000004";
+const GTIN_PRODUCT = "c0000000-0000-4000-8000-000000000005";
+const GTIN_PEER = "c0000000-0000-4000-8000-000000000006";
 const LISTING_A = "d4444444-4444-4444-8444-000000000001";
 const LISTING_B = "e4444444-4444-4444-8444-000000000001";
+const LISTING_TASTERS = "d4444444-4444-4444-8444-000000000011";
+const LISTING_TURKISH = "d4444444-4444-4444-8444-000000000012";
+const LISTING_COKE_ZERO = "d4444444-4444-4444-8444-000000000013";
+const LISTING_COKE_REG = "d4444444-4444-4444-8444-000000000014";
+const LISTING_GTIN = "d4444444-4444-4444-8444-000000000015";
+const LISTING_GTIN_PEER = "d4444444-4444-4444-8444-000000000016";
 
 function cand(over: Partial<BasketCandidate> & { productId: string; name: string }): BasketCandidate {
   return {
@@ -244,5 +256,395 @@ describe("product_id confirmations still get equivalent coverage", () => {
     const storeB = result.stores.find((s) => s.storeId === STORE_B);
     // Without equivalents, chain B cannot price the confirmed tomato UUID.
     expect(storeB == null || storeB.itemsFound === 0 || storeB.missingItems.length > 0).toBe(true);
+  });
+
+  it("product_id-only Taster's Choice does not gain class peers or substitute cheaper coffee", async () => {
+    const tasters = cand({
+      productId: TASTERS,
+      name: "נסקפה טייסטרס צ'ויס 200ג",
+      productClass: "beverage",
+      classL1: "beverage",
+      classL2: "coffee",
+      classL3: "instant_coffee",
+      sizeQty: 200,
+      sizeUnit: "g",
+      hasPrice: true,
+      hasLocalPrice: true,
+    });
+    const turkish = cand({
+      productId: TURKISH_COFFEE,
+      name: "קפה טורקי עלית",
+      productClass: "beverage",
+      classL1: "beverage",
+      classL2: "coffee",
+      classL3: "instant_coffee",
+      sizeQty: 200,
+      sizeUnit: "g",
+      hasPrice: true,
+      hasLocalPrice: true,
+    });
+    resolveItems.mockResolvedValue([
+      {
+        index: 0,
+        qty: 1,
+        qtyMode: "packs",
+        amount: null,
+        unit: null,
+        productId: TASTERS,
+        name: tasters.name,
+        resolvedBy: "product_id",
+        resolutionStatus: "resolved",
+        confidence: 1,
+        lowConfidence: false,
+        candidates: [tasters],
+        primaryProductId: null,
+        primaryName: null,
+        substitution: null,
+      },
+    ]);
+    // Tempt the optimizer: if peers leaked through, chain B would pick cheaper coffee.
+    enrichCommodityCoverage.mockImplementation(async (items: Array<{ query?: string }>, resolved: ResolvedItem[]) => {
+      expect(items[0]).toMatchObject({ productId: TASTERS });
+      expect(items[0]?.query).toBeUndefined();
+      // Exact product_id-only must not attach class peers (enrich skips for exact intent).
+      expect(resolved[0]?.equivalents).toBeUndefined();
+    });
+    loadBasketPricingData.mockResolvedValue({
+      listingByChainAndProduct: new Map([
+        [
+          CHAIN_A,
+          new Map([
+            [
+              TASTERS,
+              [
+                {
+                  id: LISTING_TASTERS,
+                  product_id: TASTERS,
+                  chain_id: CHAIN_A,
+                  item_code: "T1",
+                  name: tasters.name,
+                  gtin: null,
+                },
+              ],
+            ],
+          ]),
+        ],
+        [
+          CHAIN_B,
+          new Map([
+            [
+              TURKISH_COFFEE,
+              [
+                {
+                  id: LISTING_TURKISH,
+                  product_id: TURKISH_COFFEE,
+                  chain_id: CHAIN_B,
+                  item_code: "T2",
+                  name: turkish.name,
+                  gtin: null,
+                },
+              ],
+            ],
+          ]),
+        ],
+      ]),
+      priceByListingAndStore: new Map<string, StorePriceRow>([
+        [
+          `${LISTING_TASTERS}:${STORE_A}`,
+          {
+            listing_id: LISTING_TASTERS,
+            store_id: STORE_A,
+            price: "32",
+            currency: "ILS",
+            source_ts: "2026-07-19T00:00:00Z",
+            ingested_at: "2026-07-19T00:00:00Z",
+          },
+        ],
+        [
+          `${LISTING_TURKISH}:${STORE_B}`,
+          {
+            listing_id: LISTING_TURKISH,
+            store_id: STORE_B,
+            price: "18",
+            currency: "ILS",
+            source_ts: "2026-07-19T00:00:00Z",
+            ingested_at: "2026-07-19T00:00:00Z",
+          },
+        ],
+      ]),
+      promoMap: new Map(),
+    });
+
+    const result = await optimizeBasket({
+      city: "הרצליה",
+      near: { lat: 32.1675, lng: 34.8578 },
+      items: [{ productId: TASTERS, packQty: 1 }],
+      verbose: true,
+      storesLimit: 0,
+    }, OPTIONS);
+
+    expect(enrichCommodityCoverage).toHaveBeenCalledOnce();
+    const storeA = result.stores.find((s) => s.storeId === STORE_A);
+    expect(storeA?.lines[0]?.productId).toBe(TASTERS);
+    expect(storeA?.lines[0]?.substituted).toBeFalsy();
+    const storeB = result.stores.find((s) => s.storeId === STORE_B);
+    expect(storeB == null || storeB.itemsFound === 0 || storeB.missingItems.length > 0).toBe(true);
+    expect(result.stores.flatMap((s) => s.lines).some((l) => l.productId === TURKISH_COFFEE)).toBe(
+      false,
+    );
+  });
+
+  it("product_id-only Coke Zero does not gain class peers or substitute regular Coke", async () => {
+    const cokeZero = cand({
+      productId: COKE_ZERO,
+      name: "קוקה קולה זירו 1.5 ל",
+      productClass: "beverage",
+      classL1: "beverage",
+      classL2: "soft_drink",
+      classL3: "cola",
+      variant: "diet_zero",
+      sizeQty: 1500,
+      sizeUnit: "ml",
+      hasPrice: true,
+      hasLocalPrice: true,
+    });
+    resolveItems.mockResolvedValue([
+      {
+        index: 0,
+        qty: 1,
+        qtyMode: "packs",
+        amount: null,
+        unit: null,
+        productId: COKE_ZERO,
+        name: cokeZero.name,
+        resolvedBy: "product_id",
+        resolutionStatus: "resolved",
+        confidence: 1,
+        lowConfidence: false,
+        candidates: [cokeZero],
+        primaryProductId: null,
+        primaryName: null,
+        substitution: null,
+      },
+    ]);
+    enrichCommodityCoverage.mockImplementation(async (items: Array<{ query?: string }>, resolved: ResolvedItem[]) => {
+      expect(items[0]).toMatchObject({ productId: COKE_ZERO });
+      expect(items[0]?.query).toBeUndefined();
+      expect(resolved[0]?.equivalents).toBeUndefined();
+    });
+    loadBasketPricingData.mockResolvedValue({
+      listingByChainAndProduct: new Map([
+        [
+          CHAIN_A,
+          new Map([
+            [
+              COKE_ZERO,
+              [
+                {
+                  id: LISTING_COKE_ZERO,
+                  product_id: COKE_ZERO,
+                  chain_id: CHAIN_A,
+                  item_code: "C0",
+                  name: cokeZero.name,
+                  gtin: null,
+                },
+              ],
+            ],
+          ]),
+        ],
+        [
+          CHAIN_B,
+          new Map([
+            [
+              COKE_REGULAR,
+              [
+                {
+                  id: LISTING_COKE_REG,
+                  product_id: COKE_REGULAR,
+                  chain_id: CHAIN_B,
+                  item_code: "C1",
+                  name: "קוקה קולה 1.5 ל",
+                  gtin: null,
+                },
+              ],
+            ],
+          ]),
+        ],
+      ]),
+      priceByListingAndStore: new Map<string, StorePriceRow>([
+        [
+          `${LISTING_COKE_ZERO}:${STORE_A}`,
+          {
+            listing_id: LISTING_COKE_ZERO,
+            store_id: STORE_A,
+            price: "9.9",
+            currency: "ILS",
+            source_ts: "2026-07-19T00:00:00Z",
+            ingested_at: "2026-07-19T00:00:00Z",
+          },
+        ],
+        [
+          `${LISTING_COKE_REG}:${STORE_B}`,
+          {
+            listing_id: LISTING_COKE_REG,
+            store_id: STORE_B,
+            price: "7.5",
+            currency: "ILS",
+            source_ts: "2026-07-19T00:00:00Z",
+            ingested_at: "2026-07-19T00:00:00Z",
+          },
+        ],
+      ]),
+      promoMap: new Map(),
+    });
+
+    const result = await optimizeBasket({
+      city: "הרצליה",
+      near: { lat: 32.1675, lng: 34.8578 },
+      items: [{ productId: COKE_ZERO, packQty: 1 }],
+      verbose: true,
+      storesLimit: 0,
+    }, OPTIONS);
+
+    expect(enrichCommodityCoverage).toHaveBeenCalledOnce();
+    const storeA = result.stores.find((s) => s.storeId === STORE_A);
+    expect(storeA?.lines[0]?.productId).toBe(COKE_ZERO);
+    expect(storeA?.lines[0]?.substituted).toBeFalsy();
+    expect(result.stores.flatMap((s) => s.lines).some((l) => l.productId === COKE_REGULAR)).toBe(
+      false,
+    );
+  });
+
+  it("GTIN-only request does not gain class peers or substitute another product", async () => {
+    const primary = cand({
+      productId: GTIN_PRODUCT,
+      name: "חלב תנובה 3%",
+      productClass: "dairy",
+      classL1: "dairy",
+      classL2: "milk",
+      classL3: "fresh_milk",
+      sizeQty: 1000,
+      sizeUnit: "ml",
+      hasPrice: true,
+      hasLocalPrice: true,
+    });
+    const peer = cand({
+      productId: GTIN_PEER,
+      name: "חלב טרה 3%",
+      productClass: "dairy",
+      classL1: "dairy",
+      classL2: "milk",
+      classL3: "fresh_milk",
+      sizeQty: 1000,
+      sizeUnit: "ml",
+      hasPrice: true,
+      hasLocalPrice: true,
+    });
+    resolveItems.mockResolvedValue([
+      {
+        index: 0,
+        qty: 1,
+        qtyMode: "packs",
+        amount: null,
+        unit: null,
+        productId: GTIN_PRODUCT,
+        name: primary.name,
+        resolvedBy: "gtin",
+        resolutionStatus: "resolved",
+        confidence: 1,
+        lowConfidence: false,
+        candidates: [primary],
+        primaryProductId: null,
+        primaryName: null,
+        substitution: null,
+      },
+    ]);
+    enrichCommodityCoverage.mockImplementation(
+      async (items: Array<{ gtin?: string; query?: string }>, resolved: ResolvedItem[]) => {
+        expect(items[0]).toMatchObject({ gtin: "7290004131074" });
+        expect(items[0]?.query).toBeUndefined();
+        expect(resolved[0]?.resolvedBy).toBe("gtin");
+        expect(resolved[0]?.equivalents).toBeUndefined();
+      },
+    );
+    loadBasketPricingData.mockResolvedValue({
+      listingByChainAndProduct: new Map([
+        [
+          CHAIN_A,
+          new Map([
+            [
+              GTIN_PRODUCT,
+              [
+                {
+                  id: LISTING_GTIN,
+                  product_id: GTIN_PRODUCT,
+                  chain_id: CHAIN_A,
+                  item_code: "G1",
+                  name: primary.name,
+                  gtin: "7290004131074",
+                },
+              ],
+            ],
+          ]),
+        ],
+        [
+          CHAIN_B,
+          new Map([
+            [
+              GTIN_PEER,
+              [
+                {
+                  id: LISTING_GTIN_PEER,
+                  product_id: GTIN_PEER,
+                  chain_id: CHAIN_B,
+                  item_code: "G2",
+                  name: peer.name,
+                  gtin: "7290004131999",
+                },
+              ],
+            ],
+          ]),
+        ],
+      ]),
+      priceByListingAndStore: new Map<string, StorePriceRow>([
+        [
+          `${LISTING_GTIN}:${STORE_A}`,
+          {
+            listing_id: LISTING_GTIN,
+            store_id: STORE_A,
+            price: "7.2",
+            currency: "ILS",
+            source_ts: "2026-07-19T00:00:00Z",
+            ingested_at: "2026-07-19T00:00:00Z",
+          },
+        ],
+        [
+          `${LISTING_GTIN_PEER}:${STORE_B}`,
+          {
+            listing_id: LISTING_GTIN_PEER,
+            store_id: STORE_B,
+            price: "5.9",
+            currency: "ILS",
+            source_ts: "2026-07-19T00:00:00Z",
+            ingested_at: "2026-07-19T00:00:00Z",
+          },
+        ],
+      ]),
+      promoMap: new Map(),
+    });
+
+    const result = await optimizeBasket({
+      city: "הרצליה",
+      near: { lat: 32.1675, lng: 34.8578 },
+      items: [{ gtin: "7290004131074", packQty: 1 }],
+      verbose: true,
+      storesLimit: 0,
+    }, OPTIONS);
+
+    expect(enrichCommodityCoverage).toHaveBeenCalledOnce();
+    const storeA = result.stores.find((s) => s.storeId === STORE_A);
+    expect(storeA?.lines[0]?.productId).toBe(GTIN_PRODUCT);
+    expect(storeA?.lines[0]?.substituted).toBeFalsy();
+    expect(result.stores.flatMap((s) => s.lines).some((l) => l.productId === GTIN_PEER)).toBe(false);
   });
 });

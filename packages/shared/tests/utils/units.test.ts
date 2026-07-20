@@ -4,6 +4,7 @@ import { canonicalItemCode, computeUnitPrice, inferPackSizeFromName,
   normalizeGtin,
   normalizeMeasure,
   packSizesCompatible,
+  reconcileMeasureFamilyWithName,
   resolvePurchaseQty,
 } from "../../src/utils/units.js";
 
@@ -411,6 +412,50 @@ describe("packSizesCompatible", () => {
         { sizeQty: null, sizeUnit: null, name: "מלח" },
         { sizeQty: 1000, sizeUnit: "g", name: "מלח גס" },
         { allowCountToWeight: false },
+      ).compatible,
+    ).toBe(false);
+  });
+
+  it("reconcileMeasureFamilyWithName flips g→ml only on equal-quantity family conflict", () => {
+    expect(
+      reconcileMeasureFamilyWithName("קוקה קולה 1.5 ליטר", {
+        quantity: 1500,
+        unit: "g",
+        unparseable: false,
+      }),
+    ).toMatchObject({ quantity: 1500, unit: "ml" });
+    expect(
+      reconcileMeasureFamilyWithName("אבקת משקה 2 ליטר", {
+        quantity: 400,
+        unit: "g",
+        unparseable: false,
+      }),
+    ).toMatchObject({ quantity: 400, unit: "g" });
+    expect(
+      reconcileMeasureFamilyWithName("שוקולד 100 גרם", {
+        quantity: 100,
+        unit: "g",
+        unparseable: false,
+      }),
+    ).toMatchObject({ quantity: 100, unit: "g" });
+  });
+
+  it("trusts the name's volume when the catalog unit family conflicts at equal quantity", () => {
+    // Ingestion wrote 1500 g for a bottle named "1.5 ליטר" — the name is ground
+    // truth for unit family when quantities agree (real Neve Amal cola incident).
+    expect(
+      packSizesCompatible(
+        { sizeQty: 1500, sizeUnit: "g", name: "קוקה קולה 1.5 ליטר" },
+        { sizeQty: 1500, sizeUnit: "ml", name: "קוקה-קולה בקבוק 1.5 ליטר" },
+      ),
+    ).toEqual({ compatible: true, reason: "same_unit" });
+  });
+
+  it("keeps the catalog unit when the name's conflicting family has a different quantity", () => {
+    expect(
+      packSizesCompatible(
+        { sizeQty: 400, sizeUnit: "g", name: "אבקת משקה 2 ליטר" },
+        { sizeQty: 2000, sizeUnit: "ml", name: "משקה מוכן 2 ליטר" },
       ).compatible,
     ).toBe(false);
   });

@@ -22,6 +22,7 @@ vi.mock("../../../src/services/basket/commodityCoverage.js", () => ({
 }));
 
 import { optimizeBasket } from "../../../src/services/basket/optimize.js";
+import { clearResolutionCache } from "../../../src/services/basket/resolutionCache.js";
 
 const SECRET = "test-only-basket-continuation-secret-ok";
 const OPTIONS = { continuationSecret: SECRET, now: 1_000 };
@@ -95,6 +96,7 @@ function resolvedAmbiguous(): ResolvedItem {
 describe("resumable optimizeBasket", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearResolutionCache();
     listStores.mockResolvedValue([
       {
         id: STORE_ID,
@@ -240,5 +242,53 @@ describe("resumable optimizeBasket", () => {
       query: "פיתות",
       intentModeOverride: "commodity",
     });
+  });
+
+  it("reuses the cached resolution for non-answered lines by original index", async () => {
+    const ambiguousAt0 = { ...resolvedAmbiguous(), index: 0 };
+    const safeAt1 = { ...resolvedSafe(), index: 1 };
+    resolveItems
+      .mockResolvedValueOnce([ambiguousAt0, safeAt1])
+      .mockResolvedValueOnce([
+        {
+          ...resolvedSafe(),
+          index: 0,
+          productId: PRODUCT_A,
+          name: "פיתות 10",
+          candidates: [candidate(PRODUCT_A, "פיתות 10")],
+        },
+        safeAt1,
+      ]);
+
+    const first = await optimizeBasket(
+      {
+        city: "הרצליה",
+        items: [
+          { query: "פיתות", amount: 20, unit: "יח" },
+          { query: "מלח גס", packQty: 1 },
+        ],
+      },
+      OPTIONS,
+    );
+    if (first.status !== "needs_confirmation") throw new Error("expected confirmation");
+
+    await optimizeBasket(
+      {
+        continuation: first.continuation,
+        answers: [{ itemIndex: 0, productId: first.questions[0]!.options[0]!.productId }],
+      },
+      OPTIONS,
+    );
+
+    // The resume must hand resolveItems a reuse map that carries ONLY the
+    // non-answered line (index 1), keyed by its original index, so the answered
+    // line (index 0) is re-resolved and the safe line is reused verbatim.
+    const reuse = resolveItems.mock.calls[1]![2] as
+      | Map<number, { index: number; productId: string | null }>
+      | undefined;
+    expect(reuse).toBeInstanceOf(Map);
+    expect(reuse!.has(0)).toBe(false);
+    expect(reuse!.has(1)).toBe(true);
+    expect(reuse!.get(1)).toMatchObject({ index: 1, productId: PRODUCT_SAFE });
   });
 });

@@ -2,9 +2,9 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AppError } from "@super-mcp/shared";
 import { optimizeBasket } from "../../../services/basket/index.js";
-import { resolveRadiusKm, DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
+import { DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
-import { locationShape, toGeo } from "../shared/location.js";
+import { locationShape, resolveToolLocation } from "../shared/location.js";
 
 const basketItemSchema = z
   .object({
@@ -71,8 +71,11 @@ export function registerBasketTools(server: McpServer): void {
       description:
         "Call once with the original shopping list. If status is needs_confirmation, ask every " +
         "returned question and call the same tool once more with only continuation and answers. " +
+        "selectionEffect: representative→commodity peers, brand_family→same-brand compatible packs " +
+        "(larger packs may appear as alternative_available), pin→exact SKU. " +
         "Never reconstruct items and do not call search_products per line. " +
-        `Initial calls require city and/or near (default ${DEFAULT_RADIUS_KM}km).`,
+        `Initial calls require city, near, and/or location (default ${DEFAULT_RADIUS_KM}km when a point is set). ` +
+        "Prefer location for neighborhoods/addresses (e.g. 'נווה עמל, הרצליה'); near remains lat,lng.",
       inputSchema: {
         items: basketItemsSchema.optional(),
         ...locationShape,
@@ -94,6 +97,18 @@ export function registerBasketTools(server: McpServer): void {
     },
     async (args) => {
       if (args.continuation) {
+        if (
+          args.items?.length ||
+          args.city != null ||
+          args.near != null ||
+          args.location != null
+        ) {
+          throw new AppError(
+            "bad_request",
+            "resume optimize_basket accepts only continuation and answers",
+            400,
+          );
+        }
         if (!args.answers?.length) {
           throw new AppError("bad_request", "resume optimize_basket requires answers", 400);
         }
@@ -108,16 +123,31 @@ export function registerBasketTools(server: McpServer): void {
           continuationOptions(),
         );
       }
+      if (args.answers?.length) {
+        throw new AppError(
+          "bad_request",
+          "answers require continuation; use resume form of optimize_basket",
+          400,
+        );
+      }
       if (!args.items?.length) {
         throw new AppError("bad_request", "initial optimize_basket requires items", 400);
       }
-      const geo = toGeo(args.near);
+      if (!args.city && !args.near && !args.location) {
+        throw new AppError(
+          "bad_request",
+          "initial optimize_basket requires city, near, or location",
+          400,
+        );
+      }
+      const loc = await resolveToolLocation(args);
       return optimizeBasket(
         {
           items: mapBasketItems(args.items),
-          city: args.city,
-          near: geo,
-          radiusKm: resolveRadiusKm(geo, args.radius_km),
+          city: loc.city,
+          near: loc.near,
+          radiusKm: loc.radiusKm,
+          locationOrigin: loc.locationOrigin,
           includeClub: args.include_club,
           storesLimit: args.stores_limit,
           distancePenaltyPerKm: args.distance_penalty_per_km,

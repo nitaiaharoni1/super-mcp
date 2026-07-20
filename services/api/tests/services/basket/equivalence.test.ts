@@ -55,6 +55,15 @@ describe("queryHeadAnchored", () => {
     expect(queryHeadAnchored("חלב", "תנובה חלב 3%")).toBe(true);
     expect(queryHeadAnchored("פרגיות עוף", "סטייק פרגיות עוף טרי")).toBe(true);
   });
+  it("blocks stuffed-dough hosts (dumplings/ravioli/burekas) for the filling query", () => {
+    expect(queryHeadAnchored("בשר", "כיסונים בשר בקר 800 גרם מאמא מרי")).toBe(false);
+    expect(queryHeadAnchored("בשר בקר", "כיסונים בשר בקר בסגנון")).toBe(false);
+  });
+  it("still anchors a real burekas query and legit raw beef", () => {
+    // leader guard fires only when the host word is NOT the query head
+    expect(queryHeadAnchored("בורקס", "בורקס גבינה")).toBe(true);
+    expect(queryHeadAnchored("בשר בקר", "בשר בקר טחון טרי")).toBe(true);
+  });
 });
 
 describe("queryTokensSatisfied (morphology-tolerant)", () => {
@@ -132,6 +141,65 @@ describe("buildCommodityEquivalents", () => {
       5,
     );
     expect(set).toHaveLength(3); // all red wines are interchangeable when unspecified
+  });
+
+  it("bare יין includes red/white/rosé peers under the wine family", () => {
+    const wine = (
+      name: string,
+      classL3: "red_wine" | "white_wine" | "rose_wine",
+    ): BasketCandidate =>
+      c({
+        name,
+        productClass: "alcohol",
+        classL1: "alcohol",
+        classL2: "wine",
+        classL3,
+        sizeUnit: "ml",
+        sizeQty: 750,
+        variant: "regular",
+      });
+    const top = wine("יין אדום קברנה", "red_wine");
+    const set = buildCommodityEquivalents(
+      top,
+      [
+        top,
+        wine("יין לבן יקבי רמת הגולן", "white_wine"),
+        wine("יין רוזה יבש", "rose_wine"),
+        wine("חולץ יין", "red_wine"),
+      ],
+      "יין",
+      5,
+    );
+    expect(set.map((x) => x.name).sort()).toEqual([
+      "יין אדום קברנה",
+      "יין לבן יקבי רמת הגולן",
+      "יין רוזה יבש",
+    ]);
+  });
+
+  it("יין אדום excludes white/rosé even when they share the wine L2", () => {
+    const wine = (
+      name: string,
+      classL3: "red_wine" | "white_wine" | "rose_wine",
+    ): BasketCandidate =>
+      c({
+        name,
+        productClass: "alcohol",
+        classL1: "alcohol",
+        classL2: "wine",
+        classL3,
+        sizeUnit: "ml",
+        sizeQty: 750,
+        variant: "regular",
+      });
+    const top = wine("יין אדום קברנה", "red_wine");
+    const set = buildCommodityEquivalents(
+      top,
+      [top, wine("יין לבן יבש", "white_wine"), wine("יין אדום מרלו", "red_wine")],
+      "יין אדום",
+      5,
+    );
+    expect(set.map((x) => x.name)).toEqual(["יין אדום קברנה", "יין אדום מרלו"]);
   });
 
   it("respects query specificity: 'יין אדום קברנה' excludes non-cabernet wines", () => {

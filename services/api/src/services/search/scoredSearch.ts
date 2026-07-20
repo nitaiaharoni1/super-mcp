@@ -472,9 +472,21 @@ export async function searchProductsScored(params: SearchProductsParams): Promis
   );
   const morphNeedsExpansion =
     q !== "" && expandHebrewQueryVariants(q, 4).some((v) => v !== q);
+  // When the probe's authority comes from an exact NAME match, that product
+  // itself must be locally priced. A catalog can hold an unpriced orphan twin
+  // ("קוקה קולה 1.5 ליטר" 2 far stores) of a widely-carried spelling variant
+  // ("קוקה-קולה בקבוק 1.5 ליטר") that never enters the small probe pool; an
+  // unrelated locally-priced FTS hit (a zero 6-pack) must not validate the
+  // probe on the orphan's behalf.
+  const probeLocallyGrounded = (() => {
+    if (!locationScoped || exactHits == null) return true;
+    const exactNameHits = exactHits.filter((h) => h.evidence?.exactName);
+    if (exactNameHits.length > 0) return exactNameHits.some((h) => h.hasLocalPrice);
+    return exactHits.some((h) => h.hasLocalPrice);
+  })();
   const exactProbeUsable =
     exactHits != null &&
-    !(locationScoped && exactHits.every((h) => !h.hasLocalPrice)) &&
+    probeLocallyGrounded &&
     !(morphNeedsExpansion && !exactHits.some((h) => h.evidence?.exactName));
   if (exactHits && exactProbeUsable) {
     console.log(

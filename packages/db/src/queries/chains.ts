@@ -47,10 +47,14 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
   const q = client ?? getPool();
   const geo = normalizeStoreCoordinates(input.lat, input.lng);
   // Price/promo files may stub a branch before (or after) Stores XML lands.
-  // Never let a "Store NNN" placeholder clobber a real branch name.
+  // Never let a "Store NNN" placeholder clobber a real branch name, and never
+  // let a reingest erase or downgrade a hard-won geocoded point: coordinates are
+  // kept unless the feed supplies its own, and provenance (geo_source) survives
+  // untouched except to (a) mark real feed coords 'feed' or (b) reset to NULL so
+  // the address geocoder re-runs when a branch's street address actually changes.
   const res = await q.query<{ id: string }>(
-    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng, geo_source)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      ON CONFLICT (chain_id, store_code) DO UPDATE SET
        name = CASE
          WHEN EXCLUDED.name ~ '^Store[[:space:]]' THEN store.name
@@ -67,6 +71,12 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
          WHEN EXCLUDED.lat IS NOT NULL AND EXCLUDED.lng IS NOT NULL THEN EXCLUDED.lng
          ELSE store.lng
        END,
+       geo_source = CASE
+         WHEN EXCLUDED.lat IS NOT NULL AND EXCLUDED.lng IS NOT NULL THEN 'feed'
+         WHEN EXCLUDED.address IS NOT NULL
+              AND EXCLUDED.address IS DISTINCT FROM store.address THEN NULL
+         ELSE store.geo_source
+       END,
        updated_at = now()
      RETURNING id`,
     [
@@ -78,6 +88,7 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
       input.zip ?? null,
       geo?.lat ?? null,
       geo?.lng ?? null,
+      geo ? "feed" : null,
     ],
   );
   return res.rows[0]!.id;

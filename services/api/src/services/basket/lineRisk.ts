@@ -42,6 +42,25 @@ export function brandMatches(a: string | null, b: string | null): boolean {
 }
 
 /**
+ * True when the free-text query names a real brand family (not a bare commodity
+ * noun that happens to appear in brand_extracted, e.g. query "קולה" with
+ * brandExtracted "קולה"). Multi-token brands always qualify when fully present;
+ * single-token brands qualify only when the query has additional tokens
+ * ("קפה נסקפה") so bare commodity nouns stay commodity-scoped.
+ */
+export function isBrandFamilyPin(queryText: string, brand: string | null): boolean {
+  if (!brand) return false;
+  const brandTokens = riskTokens(brand);
+  const queryTokenList = riskTokens(queryText);
+  if (brandTokens.length === 0 || queryTokenList.length === 0) return false;
+  const queryTokens = new Set(queryTokenList);
+  if (!brandTokens.every((t) => queryTokens.has(t))) return false;
+  // Bare commodity noun: single brand token equal to the entire query.
+  if (brandTokens.length === 1 && queryTokenList.length === 1) return false;
+  return true;
+}
+
+/**
  * A line earns a human question only when the shortlist is ambiguous in a way
  * that changes WHAT the user gets: candidates split across product classes,
  * or the query pins a brand. Same-class same-unit near-duplicates are pricing
@@ -53,12 +72,11 @@ export function classifyLineRisk(queryText: string, shortlist: RiskCandidate[]):
   );
   const pool = strong.length > 0 ? strong : shortlist;
 
-  const queryTokens = new Set(riskTokens(queryText));
   for (const c of pool) {
     if (!c.brand) continue;
-    const brandTokens = riskTokens(c.brand);
-    // All brand tokens present in the query = the user asked for this brand.
-    if (brandTokens.length > 0 && brandTokens.every((t) => queryTokens.has(t))) {
+    // All brand tokens present in the query = the user asked for this brand,
+    // unless it is only a bare commodity noun coinciding with brand_extracted.
+    if (isBrandFamilyPin(queryText, c.brand)) {
       return { kind: "brand_pinned", pinnedBrand: c.brand };
     }
   }

@@ -143,7 +143,7 @@ export interface PurchaseQuantityInput {
 
 export interface PurchaseQuantity {
   qty: number;
-  mode: "packs" | "weighted_kg_or_l" | "units" | "legacy_packs";
+  mode: "packs" | "weighted_kg_or_l" | "units";
 }
 
 export function resolvePurchaseQty(input: PurchaseQuantityInput): PurchaseQuantity {

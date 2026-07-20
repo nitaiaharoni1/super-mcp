@@ -219,7 +219,12 @@ POST /v1/basket/optimize                  resumable shopping list (see §9)
 GET  /v1/usage                            your own usage
 ```
 
-OpenAPI JSON is served at `/openapi.json`; health at `/health`.
+Location-aware endpoints accept **`city`**, **`near=lat,lng`**, and/or **`location`**
+(free-text neighborhood/address, e.g. `נווה עמל, הרצליה`). `location` is resolved once
+via a privacy-safe Nominatim cache (HMAC keys — raw addresses are not stored), then
+treated as `near`. Do not combine `near` with `location`. Public Nominatim is
+low-volume/single-machine only; set `NOMINATIM_BASE_URL` to a self-hosted instance for
+higher traffic. OpenAPI JSON is served at `/openapi.json`; health at `/health`.
 
 ### MCP (for AI agents)
 
@@ -314,6 +319,34 @@ anything ambiguous.
 call; ambiguous lists return questions plus a signed continuation, then finish on a
 second call that must not reconstruct the original items.
 
+MCP server instructions end with a machine-checkable identity line
+`protocol=basket-optimize-resumable-v1; build=<revision>`. CI should inject
+`SUPER_MCP_BUILD_REVISION` (or `GIT_COMMIT_SHA`). Verify deployed parity with:
+
+```bash
+pnpm --filter @super-mcp/api canary:mcp-contract
+# or against a live endpoint:
+SUPER_MCP_URL=… SUPER_MCP_API_KEY=… EXPECTED_BUILD_REVISION=$(git rev-parse HEAD) \
+  pnpm --filter @super-mcp/api canary:mcp-contract
+```
+
+Basket identity scopes:
+
+| Scope | When | Pricing |
+|-------|------|---------|
+| `commodity` | Bare category text (`יין`, tahini) or `representative` answer | Cheapest safe same-class peer |
+| `brand_family` | Named brand + family (`טייסטרס צ׳ויס`) or `brand_family` answer | Prefer selected SKU; else same-brand compatible pack; larger packs → `alternative_available` |
+| `exact` | GTIN / `product_id` without free text, variant pin, or `pin` answer | Hard SKU only |
+
+Generic commodity lines price the cheapest compatible branch-local peer; brand-family
+lines may price a same-brand compatible sibling (95g↔100g Taster’s) with
+`brand_family_equivalent` provenance; exact `product_id` / GTIN / pin answers stay
+exact. Live Neve Amal coverage:
+
+```bash
+CANARY_BASKET_AUTO_RESUME=1 pnpm --filter @super-mcp/api canary:basket
+```
+
 ### Initial call — resolve (and price only when safe)
 
 ```json
@@ -334,7 +367,7 @@ Quantity modes:
 - **`amount` + `unit`** — physical need (1.75 kg chicken; 20 pitas as
   `"amount":20,"unit":"יח"`). Piece counts convert that need into packs
   (10-pita bag → `qty: 2`, `qtyMode: "packs"`).
-- Deprecated **`qty`** is rejected at the public boundary.
+- Input **`qty`** is not accepted; use `pack_qty` or `amount` + `unit`.
 
 If every line is safe, the response is `status: "complete"` with plans (below).
 
@@ -363,7 +396,8 @@ If any line needs a human, the response is `status: "needs_confirmation"`:
 ```
 
 No store plans are returned in this state. Options carry real nearby availability.
-`selectionEffect` is `representative` (keep commodity intent) or `pin` (exact SKU).
+`selectionEffect` is `representative` (commodity), `brand_family` (same-brand
+compatible packs), or `pin` (exact SKU).
 
 ### Resume call — answers only
 

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { closePool } from "@super-mcp/db";
+import { backfillCentroids, closePool, healSizeUnitFamily } from "@super-mcp/db";
 import { getAdapters } from "./sources/index.js";
 import { runPipeline } from "./pipeline.js";
 
@@ -30,6 +30,28 @@ async function main(): Promise<void> {
       return result;
     }),
   );
+  // Self-heal g/ml unit-family corruption catalog-wide (idempotent) so each run
+  // leaves stored sizes consistent with product names, including stragglers not
+  // in this feed slice. Never let a maintenance hiccup fail the whole ingest.
+  try {
+    const heal = await healSizeUnitFamily();
+    console.log(JSON.stringify({ event: "heal_size_unit_family", ...heal }));
+  } catch (err) {
+    console.error("heal_size_unit_family failed (non-fatal):", err);
+  }
+
+  // Stamp any store still missing coordinates (new branches, or ones whose
+  // address just changed and were reset for re-geocoding) with its city
+  // centroid. Offline and idempotent, so every ingest leaves stores locatable at
+  // least city-level; the address-precision upgrade runs separately (geocode
+  // script) and is never undone by this pass, which only touches NULL coords.
+  try {
+    const geo = await backfillCentroids();
+    console.log(JSON.stringify({ event: "geocode_centroid", ...geo }));
+  } catch (err) {
+    console.error("geocode_centroid backfill failed (non-fatal):", err);
+  }
+
   // Exit 1 only when every adapter failed with zero successful rows.
   const hardFail = results.every((r) => r.status === "failed" && r.rowsOk === 0);
   await closePool();

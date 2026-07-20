@@ -3,6 +3,7 @@ import { listStores } from "../stores/index.js";
 import { getActivePromotionsForListings, pickBestPromoForStore } from "../promotions/index.js";
 import { buildProductLink } from "../productLinks/index.js";
 import {
+  brandFamilyEquivalentReason,
   chainEquivalentReason,
   fallbackCandidate,
   isChainEquivalentSubstitution,
@@ -27,6 +28,23 @@ function tryOrderForItem(item: ResolvedItem): BasketCandidate[] {
   // Un-gated shortlist members must NEVER appear here (that was the old wrong-
   // substitution bug); resolution has already established the one safe SKU.
   return [primary, ...(item.equivalents ?? []).filter((c) => c.productId !== item.productId)];
+}
+
+/** First locally priced alternative (larger pack etc.) when no auto peer matches. */
+function findPricedAlternative(
+  item: ResolvedItem,
+  byProduct: Map<string, ListingRow[]> | undefined,
+  priceByListingAndStore: Map<string, StorePriceRow>,
+  storeId: string,
+): { candidate: BasketCandidate; listing: ListingRow; priceRow: StorePriceRow } | null {
+  for (const candidate of item.alternatives ?? []) {
+    const listings = byProduct?.get(candidate.productId) ?? [];
+    for (const listing of listings) {
+      const priceRow = priceByListingAndStore.get(`${listing.id}:${storeId}`);
+      if (priceRow) return { candidate, listing, priceRow };
+    }
+  }
+  return null;
 }
 
 export function priceStoreBasket(
@@ -95,11 +113,11 @@ export function priceStoreBasket(
         isWeighted: listing.is_weighted ?? undefined,
         saleBasis: listing.sale_basis ?? undefined,
       });
-      // Prefer the confirmed/resolved primary whenever this store stocks it —
-      // do not swap Coke→Crystal just because Crystal is cheaper. Only when the
-      // primary has no listing/price here do we pick the cheapest equivalent.
+      const candidateTotal = Number(priceRow.price) * purchase.qty;
       const isPrimary = candidate.productId === primaryProductId;
-      if (isPrimary) {
+      // Exact / brand_family: prefer the pinned primary whenever stocked.
+      // Commodity intent: minimize line total among approved peers (bare יין).
+      if (item.intentMode !== "commodity" && isPrimary) {
         matched = {
           candidate,
           listing,
@@ -109,7 +127,6 @@ export function priceStoreBasket(
         };
         break;
       }
-      const candidateTotal = Number(priceRow.price) * purchase.qty;
       if (candidateTotal < matchedTotal) {
         matched = {
           candidate,
@@ -123,6 +140,23 @@ export function priceStoreBasket(
     }
 
     if (!matched) {
+      const alt = findPricedAlternative(item, byProduct, priceByListingAndStore, store.id);
+      if (alt) {
+        missingItems.push({
+          itemIndex: item.index,
+          productId: item.productId,
+          name: item.name,
+          reason: "alternative_available",
+          alternative: {
+            productId: alt.candidate.productId,
+            name: alt.candidate.name || alt.listing.name,
+            sizeQty: alt.candidate.sizeQty,
+            sizeUnit: alt.candidate.sizeUnit,
+            pieceCount: alt.candidate.pieceCount,
+          },
+        });
+        continue;
+      }
       missingItems.push({
         itemIndex: item.index,
         productId: item.productId,
@@ -152,12 +186,23 @@ export function priceStoreBasket(
     }
 
     const isChainEquivalent = isChainEquivalentSubstitution(item, matched.candidate.productId);
+    const isBrandFamily =
+      item.intentMode === "brand_family" &&
+      isChainEquivalent &&
+      matched.candidate.productId !== item.productId;
     const substituted = isChainEquivalent || isLineSubstituted(item, matched.candidate.productId);
-    const primaryName =
-      item.candidates.find((c) => c.productId === item.productId)?.name ?? item.name;
-    const substitutionReason = isChainEquivalent
-      ? chainEquivalentReason(primaryName, matched.candidate.name || matched.listing.name)
-      : substitutionReasonForLine(item, substituted);
+    const primaryCand = item.candidates.find((c) => c.productId === item.productId);
+    const primaryName = primaryCand?.name ?? item.name;
+    const substitutionReason = isBrandFamily
+      ? brandFamilyEquivalentReason(
+          primaryName,
+          matched.candidate.name || matched.listing.name,
+          primaryCand?.sizeQty,
+          matched.candidate.sizeQty,
+        )
+      : isChainEquivalent
+        ? chainEquivalentReason(primaryName, matched.candidate.name || matched.listing.name)
+        : substitutionReasonForLine(item, substituted);
     const originalProductId = isChainEquivalent
       ? item.productId
       : substituted
@@ -214,7 +259,7 @@ export function priceStoreBasket(
   };
 }
 
-/** Address/feed coords are branch-level; city_centroid/null are not. */
+/** Feed/address/overpass coords are branch-level; city_centroid/null are not. */
 export function isBranchDistanceReliable(geoSource: string | null | undefined): boolean {
-  return geoSource === "address" || geoSource === "feed";
+  return geoSource === "address" || geoSource === "feed" || geoSource === "overpass";
 }

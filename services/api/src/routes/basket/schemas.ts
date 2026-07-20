@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { geoQueryFields } from "../shared/schemas.js";
+import { geoQueryFields, refineGeoFields } from "../shared/schemas.js";
 
 export const basketItemSchema = z
   .object({
@@ -39,8 +39,9 @@ export const basketInitialBodySchema = z
     verbose: z.coerce.boolean().optional(),
   })
   .strict()
-  .refine((body) => Boolean(body.city || body.near), {
-    message: "provide either city or near",
+  .refine(refineGeoFields, { message: "provide either near or location, not both" })
+  .refine((body) => Boolean(body.city || body.near || body.location), {
+    message: "provide city, near, or location",
   });
 
 export const basketResumeBodySchema = z

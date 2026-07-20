@@ -22,8 +22,9 @@ export function createBasketContinuationPayload(
   input: BasketContinuationV1["input"],
   questions: BasketContinuationV1["questions"],
   now = Date.now(),
+  resolutionKey?: string,
 ): BasketContinuationV1 {
-  return { version: 1, issuedAt: now, expiresAt: now + TOKEN_TTL_MS, input, questions };
+  return { version: 1, issuedAt: now, expiresAt: now + TOKEN_TTL_MS, input, questions, resolutionKey };
 }
 
 export function encodeBasketContinuation(
@@ -124,11 +125,25 @@ export function applyBasketAnswers(
       const question = questionByIndex.get(itemIndex);
       const answer = answersByIndex.get(itemIndex);
       if (!question || !answer) return item;
+      const intentModeOverride = (() => {
+        switch (question.selectionEffect) {
+          case "pin":
+            return "exact" as const;
+          case "brand_family":
+            return "brand_family" as const;
+          case "representative":
+            return "commodity" as const;
+          default: {
+            const exhaustive: never = question.selectionEffect;
+            return exhaustive;
+          }
+        }
+      })();
       return {
         ...item,
         productId: answer.productId,
         gtin: undefined,
-        intentModeOverride: question.selectionEffect === "pin" ? "exact" : "commodity",
+        intentModeOverride,
       };
     }),
   };

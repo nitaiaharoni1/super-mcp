@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyLineRisk } from "../../../src/services/basket/lineRisk.js";
+import { classifyLineRisk, isBrandFamilyPin } from "../../../src/services/basket/lineRisk.js";
 
 describe("classifyLineRisk", () => {
   it("commodity: shortlist agrees on one class -> auto", () => {
@@ -51,6 +51,15 @@ describe("classifyLineRisk", () => {
     if (risk.kind === "brand_pinned") {
       expect(risk.pinnedBrand).toMatch(/טסטרס/);
     }
+  });
+
+  it("does not brand-pin a bare commodity noun that equals brand_extracted", () => {
+    expect(isBrandFamilyPin("קולה", "קולה")).toBe(false);
+    expect(
+      classifyLineRisk("קולה", [
+        { productClass: "soft_drink", brand: "קולה", intentTier: 1, classL1: "beverage" },
+      ]).kind,
+    ).toBe("commodity");
   });
 
   it("brand_pinned tolerates a curly apostrophe (U+2019) in the brand spelling", () => {

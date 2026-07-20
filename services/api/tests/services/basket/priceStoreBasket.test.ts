@@ -388,6 +388,247 @@ describe("priceStoreBasket", () => {
     expect(result!.lines[0]!.substituted).toBe(false);
   });
 
+  it("commodity intent picks a cheaper approved equivalent even when primary is stocked", () => {
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 3,
+      qtyMode: "packs",
+      amount: 3,
+      unit: "יח",
+      productId: "red",
+      name: "יין אדום",
+      resolvedBy: "query",
+      resolutionStatus: "resolved",
+      intentMode: "commodity",
+      confidence: 0.95,
+      lowConfidence: false,
+      candidates: [
+        {
+          productId: "red",
+          name: "יין אדום קברנה",
+          score: 0.95,
+          matchedVia: "product",
+          sizeQty: 750,
+          sizeUnit: "ml",
+          pieceCount: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "alcohol",
+          classL1: "alcohol",
+          classL2: "wine",
+          classL3: "red_wine",
+        },
+      ],
+      primaryProductId: "red",
+      primaryName: "יין אדום קברנה",
+      substitution: null,
+      equivalents: [
+        {
+          productId: "red",
+          name: "יין אדום קברנה",
+          score: 0.95,
+          matchedVia: "product",
+          sizeQty: 750,
+          sizeUnit: "ml",
+          pieceCount: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "alcohol",
+        },
+        {
+          productId: "white",
+          name: "יין לבן יבש",
+          score: 0.95,
+          matchedVia: "product",
+          sizeQty: 750,
+          sizeUnit: "ml",
+          pieceCount: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "alcohol",
+        },
+      ],
+    };
+
+    const listingByChainAndProduct = new Map<string, Map<string, ListingRow[]>>([
+      [
+        "chain",
+        new Map([
+          [
+            "red",
+            [
+              {
+                id: "list-red",
+                product_id: "red",
+                chain_id: "chain",
+                item_code: "red",
+                name: "יין אדום קברנה",
+                gtin: null,
+              },
+            ],
+          ],
+          [
+            "white",
+            [
+              {
+                id: "list-white",
+                product_id: "white",
+                chain_id: "chain",
+                item_code: "white",
+                name: "יין לבן יבש",
+                gtin: null,
+              },
+            ],
+          ],
+        ]),
+      ],
+    ]);
+    const priceByListingAndStore = new Map<string, StorePriceRow>([
+      [
+        "list-red:store",
+        {
+          listing_id: "list-red",
+          store_id: "store",
+          price: "49.90",
+          currency: "ILS",
+          source_ts: "2026-01-01T00:00:00Z",
+          ingested_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      [
+        "list-white:store",
+        {
+          listing_id: "list-white",
+          store_id: "store",
+          price: "29.90",
+          currency: "ILS",
+          source_ts: "2026-01-01T00:00:00Z",
+          ingested_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    ]);
+
+    const result = priceStoreBasket(STORE, [item], listingByChainAndProduct, priceByListingAndStore, new Map());
+    expect(result).not.toBeNull();
+    expect(result!.lines[0]!.productId).toBe("white");
+    expect(result!.lines[0]!.unitPrice).toBe(29.9);
+    expect(result!.lines[0]!.substituted).toBe(true);
+  });
+
+  it("exact intent keeps the stocked primary even when an equivalent is cheaper", () => {
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: "red",
+      name: "יין אדום",
+      resolvedBy: "query",
+      resolutionStatus: "resolved",
+      intentMode: "exact",
+      confidence: 1,
+      lowConfidence: false,
+      candidates: [
+        {
+          productId: "red",
+          name: "יין אדום קברנה",
+          score: 1,
+          matchedVia: "product",
+          sizeQty: 750,
+          sizeUnit: "ml",
+          pieceCount: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "alcohol",
+        },
+      ],
+      primaryProductId: "red",
+      primaryName: "יין אדום קברנה",
+      substitution: null,
+      equivalents: [
+        {
+          productId: "white",
+          name: "יין לבן",
+          score: 1,
+          matchedVia: "product",
+          sizeQty: 750,
+          sizeUnit: "ml",
+          pieceCount: null,
+          hasPrice: true,
+          hasLocalPrice: true,
+          productClass: "alcohol",
+        },
+      ],
+    };
+
+    const result = priceStoreBasket(
+      STORE,
+      [item],
+      new Map([
+        [
+          "chain",
+          new Map([
+            [
+              "red",
+              [
+                {
+                  id: "list-red",
+                  product_id: "red",
+                  chain_id: "chain",
+                  item_code: "red",
+                  name: "יין אדום קברנה",
+                  gtin: null,
+                },
+              ],
+            ],
+            [
+              "white",
+              [
+                {
+                  id: "list-white",
+                  product_id: "white",
+                  chain_id: "chain",
+                  item_code: "white",
+                  name: "יין לבן",
+                  gtin: null,
+                },
+              ],
+            ],
+          ]),
+        ],
+      ]),
+      new Map([
+        [
+          "list-red:store",
+          {
+            listing_id: "list-red",
+            store_id: "store",
+            price: "49.90",
+            currency: "ILS",
+            source_ts: "2026-01-01T00:00:00Z",
+            ingested_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        [
+          "list-white:store",
+          {
+            listing_id: "list-white",
+            store_id: "store",
+            price: "29.90",
+            currency: "ILS",
+            source_ts: "2026-01-01T00:00:00Z",
+            ingested_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      ]),
+      new Map(),
+    );
+
+    expect(result!.lines[0]!.productId).toBe("red");
+    expect(result!.lines[0]!.unitPrice).toBe(49.9);
+  });
+
   it("falls back to cheapest equivalent when confirmed primary is not stocked", () => {
     const item: ResolvedItem = {
       index: 0,

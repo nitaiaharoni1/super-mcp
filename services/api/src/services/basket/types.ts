@@ -3,8 +3,22 @@ import type { SearchProductHit } from "../search/types.js";
 import type { GeoPoint } from "../../lib/geo.js";
 import type { StoreLocationMetadata } from "../../lib/resolveStoreLocation.js";
 
-export type BasketSelectionEffect = "representative" | "pin";
-export type BasketIntentMode = "exact" | "commodity" | "needs_confirmation" | "unresolved";
+/**
+ * How a confirmation answer should resume pricing identity:
+ * - representative → commodity (cheapest safe peer)
+ * - brand_family → same brand + family + compatible pack peers
+ * - pin → exact SKU (hard GTIN/product identity)
+ */
+export type BasketSelectionEffect = "representative" | "brand_family" | "pin";
+
+/**
+ * Request-time identity scope for pricing / coverage:
+ * - exact — hard SKU (GTIN / product_id / size+variant pin)
+ * - brand_family — same brand + family + compatible packs; larger packs as alternatives
+ * - commodity — cheapest same-class safe peer
+ */
+export type BasketPricingIntent = "exact" | "brand_family" | "commodity";
+export type BasketIntentMode = BasketPricingIntent | "needs_confirmation" | "unresolved";
 
 export interface BasketItemInput {
   productId?: string;
@@ -17,13 +31,29 @@ export interface BasketItemInput {
   /** Unit for amount: kg, g, L, ml, unit, יח, etc. */
   unit?: string;
   /** Internal only; never accepted from the public initial schema. */
-  intentModeOverride?: Extract<BasketIntentMode, "exact" | "commodity">;
+  intentModeOverride?: BasketPricingIntent;
+}
+
+/** Provenance of a resolved user origin (never includes raw location text). */
+export interface BasketLocationOrigin {
+  precision: "address" | "street" | "neighborhood" | "city" | "coordinates";
+  provider: "nominatim" | "city_centroid" | "coordinates";
+  cached: boolean;
+  fallbackApplied: boolean;
+  displayName: string | null;
+  attribution: string | null;
+  warning: string | null;
 }
 
 export interface BasketLocationInput {
   city?: string;
   near?: GeoPoint;
   radiusKm?: number;
+  /**
+   * Set by the boundary adapter after resolving `location` / `near`.
+   * Frozen into the signed continuation so resume never re-geocodes.
+   */
+  locationOrigin?: BasketLocationOrigin;
 }
 
 export interface BasketInitialInput extends BasketLocationInput {
@@ -65,6 +95,12 @@ export interface BasketContinuationV1 {
   expiresAt: number;
   input: BasketInitialInput;
   questions: BasketContinuationQuestion[];
+  /**
+   * Opaque nonce for the in-process resolution snapshot (resolutionCache). Lets a
+   * resume reuse the initial call's resolved lines instead of re-searching them.
+   * Absent on older tokens → resume simply re-resolves (correct, just slower).
+   */
+  resolutionKey?: string;
 }
 
 export type ResolvedBy = "product_id" | "gtin" | "query" | "unresolved";
@@ -115,6 +151,12 @@ export interface ResolvedItem {
   resolvedBy: ResolvedBy;
   /** Discrete resolution outcome when deterministic-first policy is active. */
   resolutionStatus?: ResolutionStatus;
+  /**
+   * Pricing intent: commodity compares approved equivalents by line total;
+   * brand_family prefers the primary then same-brand compatible packs;
+   * exact prefers the pinned primary whenever stocked. Stamped during coverage.
+   */
+  intentMode?: BasketPricingIntent;
   confidence: number | null;
   lowConfidence: boolean;
   candidates: BasketCandidate[];
@@ -123,11 +165,16 @@ export interface ResolvedItem {
   primaryName: string | null;
   substitution: BasketSubstitutionMeta | null;
   /**
-   * Gated same-class candidates a chain may price interchangeably. Present only
-   * on auto-resolved query lines whose confirmation was pure same-class margin
-   * ambiguity (commodity risk); never on brand-pinned or cross-class lines.
+   * Gated candidates a chain may price interchangeably (commodity peers or
+   * brand-family auto-compatible packs). Never includes hard-pin exact SKUs'
+   * class-wide peers.
    */
   equivalents?: BasketCandidate[];
+  /**
+   * Same brand-family peers that are NOT auto-compatible (e.g. larger pack).
+   * Surfaced as alternative_available when no auto peer is priced locally.
+   */
+  alternatives?: BasketCandidate[];
 }
 
 export interface BasketItemStatus {
@@ -170,11 +217,21 @@ export interface BasketLine {
   freshness: Freshness;
 }
 
+export interface BasketMissingAlternative {
+  productId: string;
+  name: string;
+  sizeQty: number | null;
+  sizeUnit: string | null;
+  pieceCount: number | null;
+}
+
 export interface BasketMissingItem {
   itemIndex: number;
   productId: string | null;
   name: string | null;
-  reason: "product_not_found" | "not_carried_by_chain" | "no_price_data";
+  reason: "product_not_found" | "not_carried_by_chain" | "no_price_data" | "alternative_available";
+  /** Present when reason is alternative_available — a same-family larger/other pack. */
+  alternative?: BasketMissingAlternative;
 }
 
 export interface BasketStoreResult {

@@ -477,6 +477,33 @@ type ResolvedPack = {
 };
 
 /**
+ * Reconcile a canonical g/ml measure against the product NAME. Feeds sometimes
+ * deliver the name's quantity under the wrong family (a bottle named "1.5 ליטר"
+ * stored as 1500 g). When the name parses to the SAME canonical quantity in the
+ * OTHER g/ml family, the name is ground truth for the family.
+ */
+export function reconcileMeasureFamilyWithName(
+  name: string | null | undefined,
+  measure: NormalizedMeasure,
+): NormalizedMeasure {
+  const inferred = inferPackSizeFromName(name);
+  const inferredPack = inferred ? normalizeMeasure(inferred.quantity, inferred.unit) : null;
+  return flipFamilyIfNameConflicts(measure, inferredPack);
+}
+
+function flipFamilyIfNameConflicts(
+  db: NormalizedMeasure,
+  inferredPack: NormalizedMeasure | null,
+): NormalizedMeasure {
+  if (db.unparseable || (db.unit !== "g" && db.unit !== "ml")) return db;
+  if (!inferredPack || inferredPack.unparseable) return db;
+  if (inferredPack.unit !== "g" && inferredPack.unit !== "ml") return db;
+  if (inferredPack.unit === db.unit) return db;
+  if (inferredPack.quantity !== db.quantity) return db;
+  return { ...db, unit: inferredPack.unit };
+}
+
+/**
  * Effective pack measure for equivalence: prefer parseable DB size; fall back to
  * name inference. A name-inferred unit pack (count>1) wins over a DB weight label
  * (multipack pita shelved as 1000g).
@@ -500,7 +527,11 @@ function resolveEffectivePack(input: PackSizeInput): ResolvedPack {
   if (unit) {
     const db = normalizeMeasure(qtyPresent ? input.sizeQty! : 1, unit);
     if (!db.unparseable) {
-      return { measure: db, nameInfersUnitPack: false, qtyMissing: !qtyPresent };
+      return {
+        measure: flipFamilyIfNameConflicts(db, inferredPack),
+        nameInfersUnitPack: false,
+        qtyMissing: !qtyPresent,
+      };
     }
   }
 

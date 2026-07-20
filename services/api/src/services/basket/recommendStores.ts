@@ -1,5 +1,8 @@
 import type { BasketStoreResult } from "./types.js";
 
+/** Default shekels of "cost" per km when ranking equal-coverage stores. */
+export const DEFAULT_DISTANCE_PENALTY_PER_KM = 3;
+
 export interface RecommendationOptions {
   /** Shekels of "cost" per km of distance when comparing equal-coverage stores. */
   distancePenaltyPerKm: number;

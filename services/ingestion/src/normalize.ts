@@ -7,6 +7,7 @@ import {
   lookupChainNames,
   normalizeGtin,
   normalizeMeasure,
+  reconcileMeasureFamilyWithName,
   scrubJson,
   scrubNullChars,
   scrubOptionalText,
@@ -492,12 +493,17 @@ export class Normalizer {
           if (label) this.noteMiss("unit_unparseable", label, { chainId: cleanChainId });
         }
 
+        // Feeds sometimes label a bottle's ml quantity as grams (or vice versa);
+        // when the name parses to the same quantity in the other family, trust
+        // the name. Quantity is unchanged so unit-price math stays valid.
+        const measure = reconcileMeasureFamilyWithName(name, unit.measure);
+
         const packFacts = derivePackSaleFacts({
           name,
           isWeighted: record.isWeighted,
           rawQty: record.qty,
-          canonicalUnit: unit.measure.unit,
-          measureUnparseable: unit.measure.unparseable,
+          canonicalUnit: measure.unit,
+          measureUnparseable: measure.unparseable,
         });
 
         const chainId = scrubNullChars(record.chainId);
@@ -522,11 +528,11 @@ export class Normalizer {
           brand: brand ?? null,
           rawQty: record.qty,
           unitLabel,
-          canonicalQty: unit.measure.quantity,
-          canonicalUnit: unit.measure.unit,
-          measureUnparseable: unit.measure.unparseable,
-          sizeQty: unit.measure.quantity,
-          sizeUnit: unit.measure.unit,
+          canonicalQty: measure.quantity,
+          canonicalUnit: measure.unit,
+          measureUnparseable: measure.unparseable,
+          sizeQty: measure.quantity,
+          sizeUnit: measure.unit,
           isWeighted: packFacts.isWeighted,
           saleBasis: packFacts.saleBasis,
           pieceCount: packFacts.pieceCount,

@@ -46,6 +46,9 @@ function selectionEffectForRisk(risk: LineRisk): BasketSelectionEffect {
     case "commodity":
       return "representative";
     case "brand_pinned":
+      // Resume as brand_family: seed with the chosen SKU but allow same-brand
+      // compatible packs (95g↔100g Taster's), not a hard GTIN pin.
+      return "brand_family";
     case "cross_class":
     case "opaque":
       return "pin";

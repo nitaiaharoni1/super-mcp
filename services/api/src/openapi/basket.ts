@@ -32,10 +32,23 @@ const basketLocationRequestProperties = {
   city: {
     type: "string",
     description:
-      "Hebrew or English city (or CBS locality code). Aliases match one place — e.g. הרצליה / Herzliya / 6400.",
+      "Hebrew or English city (or CBS locality code). Aliases match one place — e.g. הרצליה / Herzliya / 6400. " +
+      "May be combined with location as a disambiguation hint / store filter.",
   },
-  near: { type: "string", description: "'lat,lng', e.g. '32.078,34.774'." },
-  radius_km: { type: "number", default: 10, description: "Default 10km when 'near' is set." },
+  near: { type: "string", description: "'lat,lng', e.g. '32.078,34.774'. Do not combine with location." },
+  location: {
+    type: "string",
+    minLength: 3,
+    maxLength: 300,
+    description:
+      "Free-text neighborhood or address in Israel, e.g. 'נווה עמל, הרצליה'. Resolved to coordinates via " +
+      "cached Nominatim. Do not combine with near.",
+  },
+  radius_km: {
+    type: "number",
+    default: 10,
+    description: "Default 10km when near or location resolves to a point.",
+  },
 };
 
 export const basketInitialRequestSchema = {
@@ -164,7 +177,12 @@ const basketQuestionSchema = {
     prompt: { type: "string" },
     reason: { type: "string" },
     required: { type: "boolean", enum: [true] },
-    selectionEffect: { type: "string", enum: ["representative", "pin"] },
+    selectionEffect: {
+      type: "string",
+      enum: ["representative", "brand_family", "pin"],
+      description:
+        "representative → commodity peers; brand_family → same-brand compatible packs; pin → exact SKU",
+    },
     options: {
       type: "array",
       items: {
@@ -283,10 +301,11 @@ export const basketPaths = {
     post: {
       summary: "Resolve and price a shopping basket (resumable)",
       description:
-        "Call once with the original shopping list (city or near required). If status is " +
+        "Call once with the original shopping list (city, near, or location required). If status is " +
         "needs_confirmation, ask every returned question and call again with only continuation and " +
         "answers. If status is complete, use bestSingleStore, cheapestCompleteStore, and multiStore. " +
-        "Never reconstruct items and do not call search_products per line.",
+        "Never reconstruct items and do not call search_products per line. Prefer location for " +
+        "neighborhoods/addresses; near remains lat,lng.",
       requestBody: {
         required: true,
         content: { "application/json": { schema: basketOptimizeRequestSchema } },

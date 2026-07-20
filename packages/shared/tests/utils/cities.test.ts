@@ -18,6 +18,12 @@ describe("canonicalizeCity", () => {
   it("keeps unknown free text", () => {
     expect(canonicalizeCity("אילת")).toBe("אילת");
   });
+
+  it("drops the bare-zero null-city placeholder instead of storing '0'", () => {
+    expect(canonicalizeCity("0")).toBeUndefined();
+    expect(canonicalizeCity("000")).toBeUndefined();
+    expect(canonicalizeCity(" 0 ")).toBeUndefined();
+  });
 });
 
 describe("cityMatchKeys", () => {

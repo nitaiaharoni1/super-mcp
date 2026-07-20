@@ -12,6 +12,7 @@ import {
 import type { SearchProductHit } from "../search/types.js";
 import { queryHeadAnchored } from "./equivalence.js";
 import type { ResolutionStatus } from "./types.js";
+import { isVectorOnly } from "./vectorOnly.js";
 
 export interface ResolutionDecision {
   status: ResolutionStatus;
@@ -47,18 +48,6 @@ const FORM_CLASS_KEYS = ["form", "product_class"] as const;
 
 function effectiveLexicalScore(candidate: ResolutionCandidate): number | null {
   return candidate.lexicalScore ?? candidate.evidence?.lexicalScore ?? null;
-}
-
-function isVectorOnly(candidate: ResolutionCandidate): boolean {
-  const lex = effectiveLexicalScore(candidate);
-  const ev = candidate.evidence;
-  const hasLexicalEvidence =
-    (lex != null && lex > 0) ||
-    Boolean(ev?.exactName || ev?.exactPhrase || ev?.aliasMatched);
-  return (
-    !hasLexicalEvidence &&
-    (candidate.vectorDistance != null || candidate.matchedVia === "vector")
-  );
 }
 
 function hasDominantPhrase(candidate: ResolutionCandidate): boolean {

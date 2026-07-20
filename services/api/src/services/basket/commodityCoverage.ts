@@ -6,10 +6,23 @@ import {
   queryTokensSatisfied,
   tokenizeNormalized,
 } from "@super-mcp/shared";
+import { allowsCountToWeight } from "./countWeightPolicy.js";
+import { resolveCoverageClassScope, type CoverageClassScope } from "./coverageScope.js";
+import { diversifyByChain } from "./diversifyByChain.js";
 import { queryHeadAnchored } from "./equivalence.js";
 import { buildBasketIntentProfile } from "./intentProfile.js";
+import { brandMatches, riskTokens } from "./lineRisk.js";
+import { packageFormsCompatible } from "./packageForm.js";
 import { loadProductClasses } from "./productClasses.js";
 import type { BasketCandidate, BasketItemInput, ResolvedItem } from "./types.js";
+
+// Re-export extracted helpers so existing test/import paths stay stable.
+export { diversifyByChain } from "./diversifyByChain.js";
+export {
+  packageFormKind,
+  packageFormsCompatible,
+  type PackageFormKind,
+} from "./packageForm.js";
 
 /** Bounded concurrency for the per-line coverage queries (DB-heavy). */
 const COVERAGE_CONCURRENCY = 6;
@@ -24,31 +37,39 @@ interface CarriedProductRow {
   piece_count: number | null;
   /** Chain that carries a priced listing — used to diversify the capped peer set. */
   chain_id?: string | null;
+  /** Cheapest in-scope store price for this product — used to retain store minima. */
+  min_price?: number | string | null;
+  /** Catalog brand_extracted for brand-family equality checks. */
+  brand_extracted?: string | null;
+}
+
+export interface BrandFamilyPeerSets {
+  /** Same brand + form + packSizesCompatible — may auto-price. */
+  auto: CarriedProductRow[];
+  /** Same brand + form but incompatible pack size (e.g. 200g vs 95g) — alternatives only. */
+  alternatives: CarriedProductRow[];
 }
 
 /**
- * Products actually priced in the in-scope stores that share the primary's
- * commodity CLASS (deepest known level: L3 else L2 else L1) AND its VARIANT
- * (regular/cherry_grape/diet_zero/organic...). Class rules out cross-category
- * drift (allspice for pepper, canned/pickled for fresh, lime for lemon); variant
- * rules out same-class variety drift (cherry tomato / Coke Zero / organic under a
- * generic line) — this is what the old NEUTRAL_TOKENS word list did by hand.
- * Peers whose variant is NULL (unclassified) are allowed and filtered by the
- * query-token check downstream. Only classified products qualify.
+ * Products actually priced in the in-scope stores that share the query-aware
+ * commodity CLASS scope AND the primary's VARIANT. Scope depth comes from the
+ * user query (bare יין → wine family; יין אדום → red_wine leaf), not solely from
+ * the representative SKU's deepest leaf.
  */
 async function fetchCarriedClassPeers(
   primary: BasketCandidate,
   storeIds: string[],
+  scope: CoverageClassScope,
 ): Promise<CarriedProductRow[]> {
   const conds: string[] = ["m.class_l1 = $2"];
-  const params: unknown[] = [storeIds, primary.classL1];
-  if (primary.classL2) {
+  const params: unknown[] = [storeIds, scope.classL1];
+  if (scope.classL2) {
     conds.push(`m.class_l2 = $${params.length + 1}`);
-    params.push(primary.classL2);
+    params.push(scope.classL2);
   }
-  if (primary.classL3) {
+  if (scope.classL3) {
     conds.push(`m.class_l3 = $${params.length + 1}`);
-    params.push(primary.classL3);
+    params.push(scope.classL3);
   }
   // EXACT variant match (default a stale/unknown primary to regular). A NULL peer
   // variant is NOT a wildcard: a stale row (classified before the variant pass)
@@ -60,7 +81,7 @@ async function fetchCarriedClassPeers(
   const res = await query<CarriedProductRow>(
     `WITH priced AS (
        SELECT DISTINCT ON (l.product_id) l.product_id, p.name, p.size_qty, p.size_unit,
-              p.piece_count, l.chain_id, sp.price
+              p.piece_count, l.chain_id, sp.price, m.brand_extracted
          FROM product p
          JOIN product_class_map m ON m.product_id = p.id AND m.input_name = p.name
          JOIN listing l ON l.product_id = p.id
@@ -69,17 +90,127 @@ async function fetchCarriedClassPeers(
         ORDER BY l.product_id, sp.price ASC
      ),
      ranked AS (
-       SELECT product_id, name, size_qty, size_unit, piece_count, chain_id,
+       SELECT product_id, name, size_qty, size_unit, piece_count, chain_id, price AS min_price,
+              brand_extracted,
               row_number() OVER (PARTITION BY chain_id ORDER BY price ASC, product_id) AS rn
          FROM priced
      )
-     SELECT product_id, name, size_qty, size_unit, piece_count, chain_id
+     SELECT product_id, name, size_qty, size_unit, piece_count, chain_id, min_price, brand_extracted
        FROM ranked
       WHERE rn <= 40
       LIMIT 400`,
     params,
   );
   return res.rows;
+}
+
+/** Same brand via catalog brand_extracted, or all brand tokens present in the peer name. */
+function sameBrandFamily(primaryBrand: string, row: CarriedProductRow): boolean {
+  const rowBrand = row.brand_extracted?.trim() || null;
+  if (brandMatches(primaryBrand, rowBrand)) return true;
+  if (rowBrand) return false;
+  const brandToks = riskTokens(primaryBrand);
+  if (brandToks.length === 0) return false;
+  const nameToks = new Set(riskTokens(row.name));
+  return brandToks.every((t) => nameToks.has(t));
+}
+
+/**
+ * Same-brand, same-form peers for brand_family intent. Auto peers must also pass
+ * packSizesCompatible; larger/incompatible packs become alternatives (not priced
+ * coverage). Other brands, decaf/variant mismatches (SQL), and form mismatches
+ * are dropped entirely.
+ */
+export function classifyBrandFamilyPeers(
+  queryText: string,
+  primary: BasketCandidate,
+  rows: CarriedProductRow[],
+  opts: { allowCountToWeight?: boolean } = {},
+): BrandFamilyPeerSets {
+  const brand = primary.brandExtracted?.trim() || null;
+  if (!brand) return { auto: [], alternatives: [] };
+
+  const allowCountToWeight = opts.allowCountToWeight ?? false;
+  const requireQueryTokens = Boolean(queryText.trim());
+  const queryTokenList = tokenizeNormalized(normalizeEmbedInput(queryText));
+  const seen = new Set<string>();
+  const auto: CarriedProductRow[] = [];
+  const alternatives: CarriedProductRow[] = [];
+
+  for (const row of rows) {
+    if (seen.has(row.product_id)) continue;
+    if (row.product_id === primary.productId) continue;
+    if (!sameBrandFamily(brand, row)) continue;
+
+    if (requireQueryTokens && queryTokenList.length > 0) {
+      if (!queryTokensSatisfied(queryTokenList, row.name)) continue;
+      if (!queryHeadAnchored(queryText, row.name)) continue;
+    }
+
+    if (
+      !packageFormsCompatible(
+        { name: primary.name, pieceCount: primary.pieceCount },
+        { name: row.name, pieceCount: row.piece_count },
+      )
+    ) {
+      continue;
+    }
+
+    seen.add(row.product_id);
+    const packOk = packSizesCompatible(
+      { sizeQty: primary.sizeQty, sizeUnit: primary.sizeUnit, name: primary.name },
+      { sizeQty: row.size_qty, sizeUnit: row.size_unit, name: row.name },
+      { allowCountToWeight },
+    ).compatible;
+    if (packOk) auto.push(row);
+    else alternatives.push(row);
+  }
+
+  return {
+    auto: diversifyByChain(auto, MAX_COVERAGE_EQUIVALENTS),
+    alternatives: diversifyByChain(alternatives, MAX_COVERAGE_EQUIVALENTS),
+  };
+}
+
+function candidateFromPeerRow(
+  row: CarriedProductRow,
+  primary: BasketCandidate,
+  scope: CoverageClassScope,
+): BasketCandidate {
+  return {
+    productId: row.product_id,
+    name: row.name,
+    score: primary.score,
+    matchedVia: "product",
+    sizeQty: row.size_qty,
+    sizeUnit: row.size_unit,
+    pieceCount: row.piece_count,
+    hasPrice: true,
+    hasLocalPrice: true,
+    productClass: primary.productClass,
+    classL1: scope.classL1,
+    classL2: scope.classL2 ?? primary.classL2,
+    classL3: scope.classL3 ?? null,
+    variant: primary.variant,
+    brandExtracted: row.brand_extracted ?? primary.brandExtracted,
+    intentTier: primary.intentTier,
+  };
+}
+
+function mergeCoverageEquivalents(
+  primary: BasketCandidate,
+  existing: BasketCandidate[] | undefined,
+  peerRows: CarriedProductRow[],
+  scope: CoverageClassScope,
+): BasketCandidate[] {
+  const byId = new Map<string, BasketCandidate>();
+  const push = (c: BasketCandidate) => {
+    if (!byId.has(c.productId)) byId.set(c.productId, c);
+  };
+  push(primary);
+  for (const c of existing ?? []) push(c);
+  for (const row of peerRows) push(candidateFromPeerRow(row, primary, scope));
+  return [...byId.values()];
 }
 
 export interface FilterClassPeersOptions {
@@ -110,7 +241,11 @@ export function filterClassPeers(
   if (requireQueryTokens && queryTokens.length === 0) return [];
   const allowCountToWeight =
     opts.allowCountToWeight ??
-    (primary.classL1 === "produce" || primary.classL2 === "pita_flatbread");
+    allowsCountToWeight({
+      classL1: primary.classL1,
+      classL2: primary.classL2,
+      productClass: primary.productClass,
+    });
   const seen = new Set<string>();
   const compatible: CarriedProductRow[] = [];
   for (const row of rows) {
@@ -131,44 +266,9 @@ export function filterClassPeers(
     compatible.push(row);
   }
   // Cap peers but prefer chain diversity so one chain's SKU flood doesn't starve
-  // others of equivalents (false not_carried_by_chain).
+  // others of equivalents (false not_carried_by_chain). Always retain the
+  // globally cheapest compatible peer so a soft cap cannot hide the store minimum.
   return diversifyByChain(compatible, MAX_COVERAGE_EQUIVALENTS);
-}
-
-/** Round-robin across chains, then fill remaining slots in original order. */
-function diversifyByChain(rows: CarriedProductRow[], max: number): CarriedProductRow[] {
-  if (rows.length <= max) return rows;
-  const byChain = new Map<string, CarriedProductRow[]>();
-  const noChain: CarriedProductRow[] = [];
-  for (const row of rows) {
-    const key = row.chain_id?.trim();
-    if (!key) {
-      noChain.push(row);
-      continue;
-    }
-    const list = byChain.get(key) ?? [];
-    list.push(row);
-    byChain.set(key, list);
-  }
-  const out: CarriedProductRow[] = [];
-  const queues = [...byChain.values()];
-  let progressed = true;
-  while (out.length < max && progressed) {
-    progressed = false;
-    for (const q of queues) {
-      if (out.length >= max) break;
-      const next = q.shift();
-      if (next) {
-        out.push(next);
-        progressed = true;
-      }
-    }
-  }
-  for (const row of noChain) {
-    if (out.length >= max) break;
-    out.push(row);
-  }
-  return out;
 }
 
 /** Query text for peer filtering: prefer the line's free-text query, else primary name. */
@@ -214,17 +314,13 @@ function applyClassInfo(primary: BasketCandidate, info: { l1: string; l2: string
 }
 
 /**
- * Broaden resolved commodity lines to the SKUs the in-scope stores actually
- * carry. Loose produce/deli goods fragment into a per-chain product id (no shared
- * barcode), so the in-memory shortlist sees only a few, leaving most chains
- * showing not_carried_by_chain even though they stock the item.
+ * Broaden resolved lines for commodity or brand_family intent to SKUs the
+ * in-scope stores actually carry.
  *
- * Peer broadening runs only for commodity intent. Exact intent (product_id /
- * gtin without query, brand/variant pins, or pin confirmation answers) keeps
- * the confirmed SKU identity — fetching class peers would swap Taster's Choice
- * for Turkish coffee or Coke Zero for regular Coke. Those lines still get class
- * metadata stamped when missing; any equivalents already attached earlier in
- * resolution are left untouched.
+ * - commodity: cheapest same-class safe peer (produce / bare wine, etc.)
+ * - brand_family: same-brand compatible packs as auto equivalents; larger packs
+ *   as alternatives (not priced coverage)
+ * - exact: keep confirmed SKU identity (product_id / GTIN / pin / variant)
  */
 export async function enrichCommodityCoverage(
   items: BasketItemInput[],
@@ -252,22 +348,43 @@ export async function enrichCommodityCoverage(
     const primary = item.candidates.find((c) => c.productId === item.productId);
     if (!primary) return;
 
+    const input = items[item.index];
     if (!primary.classL1) {
       const info = item.productId ? classMap.get(item.productId) : undefined;
-      if (!info?.l1) return;
+      if (!info?.l1) {
+        // Still stamp intent so pricing knows commodity vs exact without class.
+        item.intentMode = buildBasketIntentProfile(input, primary).mode;
+        return;
+      }
       applyClassInfo(primary, info);
     }
 
-    const input = items[item.index];
+    // Stamp intent once after optional class/variant stamp so pricing knows
+    // commodity vs exact (variant may force exact).
     const intent = buildBasketIntentProfile(input, primary);
+    item.intentMode = intent.mode;
     // Exact intent must not broaden to class peers (Turkish coffee ≠ Taster's
     // Choice; Coke Zero ≠ regular Coke). Keep primary and any equivalents that
     // already passed query gates.
     if (intent.mode === "exact") return;
 
     const queryText = intent.queryText || coverageQueryText(input, primary);
+    const scope = resolveCoverageClassScope(queryText, primary);
+    if (!scope) return;
 
-    const rows = await fetchCarriedClassPeers(primary, storeIds);
+    const rows = await fetchCarriedClassPeers(primary, storeIds, scope);
+
+    if (intent.mode === "brand_family") {
+      const { auto, alternatives } = classifyBrandFamilyPeers(queryText, primary, rows, {
+        allowCountToWeight: intent.allowCountToWeight,
+      });
+      item.equivalents = mergeCoverageEquivalents(primary, item.equivalents, auto, scope);
+      if (alternatives.length > 0) {
+        item.alternatives = alternatives.map((row) => candidateFromPeerRow(row, primary, scope));
+      }
+      return;
+    }
+
     // Commodity intent: require query tokens so specificity holds (אבטיח≠מלון
     // even when both are misclassified under the same L3).
     const peers = filterClassPeers(queryText, primary, rows, {
@@ -276,32 +393,6 @@ export async function enrichCommodityCoverage(
     });
     if (peers.length === 0) return;
 
-    const existing = new Map<string, BasketCandidate>();
-    const push = (c: BasketCandidate) => {
-      if (!existing.has(c.productId)) existing.set(c.productId, c);
-    };
-    push(primary);
-    for (const c of item.equivalents ?? []) push(c);
-    for (const row of peers) {
-      push({
-        productId: row.product_id,
-        name: row.name,
-        score: primary.score, // inherit so priceStoreBasket's worse-match guard keeps them
-        matchedVia: "product",
-        sizeQty: row.size_qty,
-        sizeUnit: row.size_unit,
-        pieceCount: row.piece_count,
-        hasPrice: true,
-        hasLocalPrice: true,
-        productClass: primary.productClass,
-        classL1: primary.classL1,
-        classL2: primary.classL2,
-        classL3: primary.classL3,
-        variant: primary.variant,
-        brandExtracted: primary.brandExtracted,
-        intentTier: primary.intentTier,
-      });
-    }
-    item.equivalents = [...existing.values()];
+    item.equivalents = mergeCoverageEquivalents(primary, item.equivalents, peers, scope);
   });
 }

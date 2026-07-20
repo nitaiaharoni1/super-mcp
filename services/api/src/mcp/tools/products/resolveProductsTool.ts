@@ -2,9 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { mapPool } from "@super-mcp/shared";
 import { searchProductsScored } from "../../../services/search/index.js";
-import { resolveRadiusKm } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
-import { locationShape, toGeo } from "../shared/location.js";
+import { locationShape, resolveToolLocation } from "../shared/location.js";
 
 export function registerResolveProductsTool(server: McpServer): void {
   registerTool(
@@ -31,8 +30,8 @@ export function registerResolveProductsTool(server: McpServer): void {
         store_id: z.string().uuid().optional().describe("Optional store UUID to prefer locally stocked products."),
       },
     },
-    async ({ queries, city, near, radius_km, store_id }) => {
-      const geo = toGeo(near);
+    async ({ queries, city, near, location, radius_km, store_id }) => {
+      const loc = await resolveToolLocation({ city, near, location, radius_km });
       const results = await mapPool(queries, 6, async (q, index) => {
         if (!q.query && !q.gtin) {
           return { index, query: q.query ?? null, gtin: q.gtin ?? null, candidates: [] };
@@ -41,9 +40,9 @@ export function registerResolveProductsTool(server: McpServer): void {
           q: q.query ?? "",
           gtin: q.gtin,
           limit: q.limit ?? 5,
-          city,
-          near: geo,
-          radiusKm: resolveRadiusKm(geo, radius_km),
+          city: loc.city,
+          near: loc.near,
+          radiusKm: loc.radiusKm,
           storeIds: store_id ? [store_id] : undefined,
         });
         return { index, query: q.query ?? null, gtin: q.gtin ?? null, candidates };

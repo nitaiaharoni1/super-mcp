@@ -33,25 +33,7 @@ import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.j
 import { decideResolution } from "./resolutionDecision.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
 import type { BasketCandidate, BasketSubstitutionMeta } from "./types.js";
-
-/**
- * A candidate that may participate in the commodity auto-resolve override.
- * Mirrors `isVectorOnly` in resolutionDecision.ts EXACTLY: a hit with no lexical
- * evidence (no lexicalScore > 0 and no exact/phrase/alias name evidence) that was
- * recalled only via the vector index. The invariant "vector-only never auto-prices"
- * MUST hold here, so we never widen/override such a top pick.
- */
-function isVectorOnlyHit(hit: SearchProductHit): boolean {
-  const ev = hit.evidence;
-  const lex = hit.lexicalScore ?? ev?.lexicalScore ?? null;
-  const hasLexicalEvidence =
-    (lex != null && lex > 0) ||
-    Boolean(ev?.exactName || ev?.exactPhrase || ev?.aliasMatched);
-  return (
-    !hasLexicalEvidence &&
-    (hit.vectorDistance != null || hit.matchedVia === "vector")
-  );
-}
+import { isVectorOnly } from "./vectorOnly.js";
 
 /**
  * Single-token spirits/beer generics that must not auto-resolve via commodity
@@ -510,7 +492,7 @@ export function rankQueryCandidates(
     overrideSafe &&
     candidates[0] != null &&
     shortlist[0] != null &&
-    !isVectorOnlyHit(shortlist[0]) &&
+    !isVectorOnly(shortlist[0]) &&
     queryHeadAnchored(queryText, candidates[0].name)
   ) {
     const equivalents = buildCommodityEquivalents(
@@ -552,7 +534,7 @@ export function rankQueryCandidates(
     overrideSafe &&
     candidates[0] != null &&
     shortlist[0] != null &&
-    !isVectorOnlyHit(shortlist[0])
+    !isVectorOnly(shortlist[0])
   ) {
     const equivalents = buildAvailabilityEquivalents(candidates, queryText, {
       maxEquivalents: searchConfig?.maxEquivalents ?? 5,
@@ -589,7 +571,7 @@ export function rankQueryCandidates(
     risk.kind === "commodity" &&
     base.productId != null &&
     shortlist[0] != null &&
-    !isVectorOnlyHit(shortlist[0])
+    !isVectorOnly(shortlist[0])
   ) {
     const primary = candidates.find((c) => c.productId === base.productId) ?? candidates[0]!;
     const equivalents = buildCommodityEquivalents(

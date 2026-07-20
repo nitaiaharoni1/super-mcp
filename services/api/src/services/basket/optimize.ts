@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { AppError } from "@super-mcp/shared";
 import { resolveRadiusKm } from "../../lib/defaults.js";
+import { applyLocationOriginHonesty } from "../../lib/locationInput.js";
 import {
   resolveStoreLocation,
   type StoreLocationMetadata,
@@ -15,6 +17,7 @@ import {
 } from "./continuation.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
 import { loadBasketPricingData, loadCandidateAvailability } from "./loadPricingData.js";
+import { getResolution, putResolution } from "./resolutionCache.js";
 import { priceStoreBasket } from "./priceStoreBasket.js";
 import {
   DEFAULT_QUESTION_OPTIONS_LIMIT,
@@ -23,9 +26,11 @@ import {
   selectQuestionCandidateShortlist,
 } from "./questionAvailability.js";
 import { buildRecommendationPlans } from "./recommendationPlans.js";
+import { DEFAULT_DISTANCE_PENALTY_PER_KM } from "./recommendStores.js";
 import { resolveItems } from "./resolve.js";
 import { applyStorePlanSubstitutions } from "./substitutions.js";
 import type {
+  BasketContinuationV1,
   BasketInitialInput,
   BasketItemStatus,
   BasketLocationInput,
@@ -38,8 +43,6 @@ import type {
   ResolvedItem,
   ResolutionStatus,
 } from "./types.js";
-
-const DEFAULT_DISTANCE_PENALTY_PER_KM = 3;
 
 export interface ResolvedBasketLines {
   resolvedItems: ResolvedItem[];
@@ -60,7 +63,7 @@ function assertBasketInput(input: BasketLocationInput & { items: BasketInitialIn
   if (!input.city && !input.near) {
     throw new AppError(
       "bad_request",
-      "a location is required: provide either 'city' or 'near' (lat,lng) to scope candidate stores",
+      "a location is required: provide 'city', 'near' (lat,lng), or 'location' (free text)",
       400,
     );
   }
@@ -88,6 +91,7 @@ export function buildItemStatuses(resolvedItems: ResolvedItem[]): BasketItemStat
 /** Shared resolve path — location scope + resolve. */
 export async function resolveBasketLines(
   input: BasketLocationInput & { items: BasketInitialInput["items"] },
+  reuse?: Map<number, ResolvedItem>,
 ): Promise<ResolvedBasketLines> {
   assertBasketInput(input);
 
@@ -97,6 +101,10 @@ export async function resolveBasketLines(
     near: input.near,
     radiusKm,
   });
+  const location = applyLocationOriginHonesty(
+    locationResult.location,
+    input.locationOrigin,
+  );
   const candidateStores = locationResult.stores;
   const storeIds = candidateStores.map((s) => s.id);
 
@@ -108,6 +116,7 @@ export async function resolveBasketLines(
       radiusKm,
       storeIds: storeIds.length > 0 ? storeIds : undefined,
     }),
+    reuse,
   );
 
   return {
@@ -115,7 +124,7 @@ export async function resolveBasketLines(
     itemStatuses: buildItemStatuses(resolvedItems),
     candidateStores,
     storeIds,
-    location: locationResult.location,
+    location,
   };
 }
 
@@ -201,28 +210,49 @@ function emitBasketOptimizeTelemetry(fields: {
   );
 }
 
+/**
+ * Build the resume reuse map: the initial call's resolved lines for every index
+ * that was NOT questioned (answered lines must be re-resolved against the chosen
+ * product_id + intent). A cache miss (restart/eviction/expiry) yields undefined →
+ * full re-resolve, which is correct, just slower.
+ */
+function buildResumeReuse(
+  payload: BasketContinuationV1,
+  now: number | undefined,
+): Map<number, ResolvedItem> | undefined {
+  if (!payload.resolutionKey) return undefined;
+  const cached = getResolution(payload.resolutionKey, now);
+  if (!cached) return undefined;
+  const answered = new Set(payload.questions.map((q) => q.itemIndex));
+  const reuse = new Map<number, ResolvedItem>();
+  cached.forEach((item, index) => {
+    if (!answered.has(index)) reuse.set(index, item);
+  });
+  return reuse;
+}
+
 export async function optimizeBasket(
   request: BasketOptimizeRequest,
   options: BasketOptimizeOptions,
 ): Promise<BasketOptimizeResult> {
-  const protocolState = isResumeRequest(request) ? "resume" : "initial";
-  const input = isResumeRequest(request)
-    ? applyBasketAnswers(
-        decodeBasketContinuation(
-          request.continuation,
-          options.continuationSecret,
-          options.now,
-        ),
-        request.answers,
-      )
-    : request;
-  return optimizeInitialOrResumedBasket(input, options, protocolState);
+  if (isResumeRequest(request)) {
+    const payload = decodeBasketContinuation(
+      request.continuation,
+      options.continuationSecret,
+      options.now,
+    );
+    const input = applyBasketAnswers(payload, request.answers);
+    const reuse = buildResumeReuse(payload, options.now);
+    return optimizeInitialOrResumedBasket(input, options, "resume", reuse);
+  }
+  return optimizeInitialOrResumedBasket(request, options, "initial");
 }
 
 async function optimizeInitialOrResumedBasket(
   input: BasketInitialInput,
   options: BasketOptimizeOptions,
   protocolState: "initial" | "resume",
+  reuse?: Map<number, ResolvedItem>,
 ): Promise<BasketOptimizeResult> {
   const startedAt = Date.now();
   const timings: BasketPhaseTimings = {
@@ -235,7 +265,7 @@ async function optimizeInitialOrResumedBasket(
 
   const searchStarted = Date.now();
   const { resolvedItems, itemStatuses, candidateStores, storeIds, location } =
-    await resolveBasketLines(input);
+    await resolveBasketLines(input, reuse);
   timings.searchMs = Date.now() - searchStarted;
 
   const availabilityStarted = Date.now();
@@ -259,6 +289,11 @@ async function optimizeInitialOrResumedBasket(
     .length;
 
   if (questions.length > 0) {
+    // Snapshot this call's resolved lines so the resume can reuse the lines that
+    // weren't questioned instead of re-searching them. Pure performance: the key
+    // is frozen into the signed continuation and a miss falls back to re-resolve.
+    const resolutionKey = randomUUID();
+    putResolution(resolutionKey, resolvedItems, options.now);
     const payload = createBasketContinuationPayload(
       input,
       questions.map((question) => ({
@@ -267,6 +302,7 @@ async function optimizeInitialOrResumedBasket(
         allowedProductIds: question.options.map((option) => option.productId),
       })),
       options.now,
+      resolutionKey,
     );
     const continuation = encodeBasketContinuation(payload, options.continuationSecret);
     emitBasketOptimizeTelemetry({

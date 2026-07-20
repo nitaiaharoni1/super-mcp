@@ -84,7 +84,13 @@ export const productPaths = {
         { name: "gtin", in: "query", schema: { type: "string" } },
         { name: "limit", in: "query", schema: { type: "integer", default: 20, maximum: 100 } },
         { name: "city", in: "query", schema: { type: "string" }, description: "Prefer products priced in this city" },
-        { name: "near", in: "query", schema: { type: "string" }, description: "lat,lng — prefer products priced nearby" },
+        { name: "near", in: "query", schema: { type: "string" }, description: "lat,lng — prefer products priced nearby. Do not combine with location." },
+        {
+          name: "location",
+          in: "query",
+          schema: { type: "string", minLength: 3, maxLength: 300 },
+          description: "Free-text neighborhood/address; resolved to coordinates. Do not combine with near.",
+        },
         { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
         { name: "store_id", in: "query", schema: { type: "string", format: "uuid" } },
         { name: "in_stock_only", in: "query", schema: { type: "boolean", default: false } },
@@ -114,7 +120,13 @@ export const productPaths = {
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         { name: "city", in: "query", schema: { type: "string" } },
-        { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'" },
+        { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'. Do not combine with location." },
+        {
+          name: "location",
+          in: "query",
+          schema: { type: "string", minLength: 3, maxLength: 300 },
+          description: "Free-text neighborhood/address. Do not combine with near.",
+        },
         { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
         {
           name: "sort",
@@ -136,7 +148,13 @@ export const productPaths = {
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         { name: "city", in: "query", schema: { type: "string" } },
-        { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'" },
+        { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'. Do not combine with location." },
+        {
+          name: "location",
+          in: "query",
+          schema: { type: "string", minLength: 3, maxLength: 300 },
+          description: "Free-text neighborhood/address. Do not combine with near.",
+        },
         { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
         { name: "limit", in: "query", schema: { type: "integer", default: 10, maximum: 50 } },
         { name: "cheaper_only", in: "query", schema: { type: "boolean", default: true } },

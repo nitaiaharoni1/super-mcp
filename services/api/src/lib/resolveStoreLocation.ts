@@ -5,7 +5,6 @@ import {
   type StoreSummary,
 } from "../services/stores/index.js";
 import { resolveRadiusKm } from "./defaults.js";
-
 export type StoreLocationScope = "unscoped" | "city" | "near" | "city_near";
 export type StoreLocationPrecision = "none" | "city" | "radius";
 
@@ -14,6 +13,16 @@ const COORD_EPSILON = 1e-5;
 
 const CENTROID_WARNING =
   "Distance ranking suppressed: store coordinates are city-level centroids, not branch addresses.";
+
+/** Provenance of the user origin — mirrors LocationOriginMeta without importing it. */
+export interface StoreLocationOriginMeta {
+  precision: "address" | "street" | "neighborhood" | "city" | "coordinates";
+  provider: "nominatim" | "city_centroid" | "coordinates";
+  cached: boolean;
+  fallbackApplied: boolean;
+  displayName: string | null;
+  attribution: string | null;
+}
 
 export interface StoreLocationMetadata {
   scope: StoreLocationScope;
@@ -24,6 +33,7 @@ export interface StoreLocationMetadata {
    * False when a near-scope query only has city_centroid (or identically shared)
    * coordinates — distance ranking must not treat those as branch addresses.
    * True when near was not requested, or at least one store has address/feed geo.
+   * Also false when the user origin was only city-precision (geocoded location).
    */
   distanceReliable: boolean;
   requested: {
@@ -31,6 +41,8 @@ export interface StoreLocationMetadata {
     near: GeoPoint | null;
     radiusKm: number | null;
   };
+  /** Provenance of the user origin point when `location` or `near` was resolved. */
+  origin?: StoreLocationOriginMeta;
 }
 
 export interface ResolvedStoreLocation {

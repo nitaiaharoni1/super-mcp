@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { parseNear } from "../../lib/geo.js";
+import { resolveLocationInput } from "../../lib/locationInput.js";
 import { optimizeBasket } from "../../services/basket/index.js";
 import type { BasketOptimizeRequest } from "../../services/basket/types.js";
 import { createHandler } from "../shared/handlers.js";
@@ -31,6 +31,12 @@ export async function registerBasketRoutes(app: FastifyInstance): Promise<void> 
         };
       } else {
         const initial = basketInitialBodySchema.parse(body);
+        const loc = await resolveLocationInput({
+          city: initial.city,
+          near: initial.near,
+          location: initial.location,
+          radiusKm: initial.radius_km,
+        });
         request = {
           items: initial.items.map((item) => ({
             productId: item.product_id,
@@ -40,9 +46,10 @@ export async function registerBasketRoutes(app: FastifyInstance): Promise<void> 
             amount: item.amount,
             unit: item.unit,
           })),
-          city: initial.city,
-          near: parseNear(initial.near),
-          radiusKm: initial.radius_km,
+          city: loc.city,
+          near: loc.near,
+          radiusKm: loc.radiusKm,
+          locationOrigin: loc.locationOrigin,
           includeClub: initial.include_club,
           storesLimit: initial.stores_limit,
           distancePenaltyPerKm: initial.distance_penalty_per_km,

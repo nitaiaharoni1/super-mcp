@@ -6,10 +6,14 @@ vi.mock("@super-mcp/db", () => ({
 }));
 
 import {
+  classifyBrandFamilyPeers,
   coverageQueryText,
+  diversifyByChain,
   enrichCommodityCoverage,
   filterClassPeers,
   isCoverageTarget,
+  packageFormKind,
+  packageFormsCompatible,
 } from "../../../src/services/basket/commodityCoverage.js";
 import type { BasketCandidate, BasketItemInput, ResolvedItem } from "../../../src/services/basket/types.js";
 
@@ -138,6 +142,34 @@ describe("filterClassPeers", () => {
     expect(kept.map((r) => r.product_id).sort()).toEqual(["a", "b"]);
   });
 
+  it("keeps wine unit-stub primary with 750ml branch peers (יין count↔volume)", () => {
+    const wineStub = primary({
+      name: "יין זמירות אכסוף",
+      productClass: "alcohol",
+      classL1: "alcohol",
+      classL2: "wine",
+      classL3: null,
+      sizeUnit: "unit",
+      sizeQty: 1,
+    });
+    const kept = filterClassPeers(
+      "יין",
+      wineStub,
+      [
+        row("stub", "יין זמירות אכסוף", "unit", 1),
+        row("ml-cheap", "יין לבן זול", "ml", 750),
+        row("ml-red", "יין אדום 750", "ml", 750),
+        row("box", "יין בקרטון 3 ל", "ml", 3000),
+      ],
+      { allowCountToWeight: true },
+    );
+    // 750ml bottles must survive; larger boxed wine may also pass pack tolerance.
+    expect(kept.map((r) => r.product_id)).toEqual(
+      expect.arrayContaining(["ml-cheap", "ml-red", "stub"]),
+    );
+    expect(kept.some((r) => r.product_id === "ml-cheap")).toBe(true);
+  });
+
   it("diversifies capped peers across chains", () => {
     const onion = primary({
       name: "בצל",
@@ -163,6 +195,28 @@ describe("filterClassPeers", () => {
     const kept = filterClassPeers("בצל", onion, many);
     expect(kept).toHaveLength(20);
     expect(kept.some((r) => r.product_id === "other")).toBe(true);
+  });
+
+  it("retains the globally cheapest peer when more than 20 compatible wines exist", () => {
+    const expensive = Array.from({ length: 25 }, (_, i) => ({
+      product_id: `w-${String(i).padStart(2, "0")}`,
+      name: `יין אדום ${i}`,
+      size_qty: 750,
+      size_unit: "ml",
+      chain_id: "chain-a",
+      min_price: 40 + i,
+    }));
+    const cheapest = {
+      product_id: "cheap-white",
+      name: "יין לבן זול",
+      size_qty: 750,
+      size_unit: "ml",
+      chain_id: "chain-b",
+      min_price: 19.9,
+    };
+    const kept = diversifyByChain([...expensive, cheapest], 20);
+    expect(kept).toHaveLength(20);
+    expect(kept.some((r) => r.product_id === "cheap-white")).toBe(true);
   });
 
   it("returns [] on an empty query", () => {
@@ -261,6 +315,34 @@ describe("enrichCommodityCoverage identity pin", () => {
     // No peer SQL — confirmed SKU without free-text query pins identity.
     expect(query).not.toHaveBeenCalled();
     expect(line.equivalents).toBeUndefined();
+    expect(line.intentMode).toBe("exact");
+  });
+
+  it("GTIN-only request does not gain class peers or substitute another product", async () => {
+    const coke = primary({
+      productId: "coke",
+      name: "קוקה קולה 1.5 ל",
+      productClass: "beverage",
+      classL1: "beverage",
+      classL2: "soda",
+      classL3: "cola",
+      sizeUnit: "ml",
+      sizeQty: 1500,
+    });
+    const line = resolvedLine({
+      productId: "coke",
+      name: coke.name,
+      resolvedBy: "gtin",
+      resolutionStatus: "resolved",
+      candidates: [coke],
+      equivalents: undefined,
+    });
+
+    await enrichCommodityCoverage([{ gtin: "7290000000001", packQty: 1 }], [line], ["store-1"]);
+
+    expect(query).not.toHaveBeenCalled();
+    expect(line.equivalents).toBeUndefined();
+    expect(line.intentMode).toBe("exact");
   });
 
   it("product_id + query עגבניות still broadens to class peers", async () => {
@@ -431,5 +513,128 @@ describe("enrichCommodityCoverage identity pin", () => {
 
     expect(query).not.toHaveBeenCalled();
     expect(line.equivalents?.map((c) => c.productId)).toEqual(["coke", "crystal"]);
+  });
+});
+
+describe("classifyBrandFamilyPeers / package form", () => {
+  const tasters95 = primary({
+    productId: "tasters-95",
+    name: "נסקפה טייסטרס צ'ויס 95ג",
+    productClass: "beverage",
+    classL1: "beverage",
+    classL2: "coffee",
+    classL3: "instant_coffee",
+    brandExtracted: "טייסטרס צ'ויס",
+    sizeQty: 95,
+    sizeUnit: "g",
+  });
+
+  it("auto-accepts same-brand compatible packs and alternatives for larger packs", () => {
+    const { auto, alternatives } = classifyBrandFamilyPeers(
+      "טייסטרס צ׳ויס",
+      tasters95,
+      [
+        {
+          product_id: "tasters-100",
+          name: "נסקפה טייסטרס צ'ויס מקורי 100ג",
+          size_qty: 100,
+          size_unit: "g",
+          piece_count: null,
+          brand_extracted: "טייסטרס צ'ויס",
+        },
+        {
+          product_id: "tasters-200",
+          name: "נסקפה טייסטרס צ'ויס 200ג",
+          size_qty: 200,
+          size_unit: "g",
+          piece_count: null,
+          brand_extracted: "טייסטרס צ'ויס",
+        },
+        {
+          product_id: "elite",
+          name: "קפה נמס עלית 100ג",
+          size_qty: 100,
+          size_unit: "g",
+          piece_count: null,
+          brand_extracted: "עלית",
+        },
+        {
+          product_id: "sachets",
+          name: "טייסטרס צ'ויס 20 מנות",
+          size_qty: 36,
+          size_unit: "g",
+          piece_count: 20,
+          brand_extracted: "טייסטרס צ'ויס",
+        },
+      ],
+    );
+    expect(auto.map((r) => r.product_id)).toEqual(["tasters-100"]);
+    expect(alternatives.map((r) => r.product_id)).toEqual(["tasters-200"]);
+  });
+
+  it("treats sachets/multipacks as a different form from jar packs", () => {
+    expect(packageFormKind("טייסטרס צ'ויס 20 מנות", 20)).toBe("multipack");
+    expect(packageFormKind("נסקפה טייסטרס צ'ויס 100ג", null)).toBe("standard");
+    expect(
+      packageFormsCompatible(
+        { name: "נסקפה טייסטרס צ'ויס 100ג", pieceCount: null },
+        { name: "טייסטרס צ'ויס 20 מנות", pieceCount: 20 },
+      ),
+    ).toBe(false);
+  });
+
+  it("brand_family enrich attaches auto peers and alternatives", async () => {
+    query.mockResolvedValue({
+      rows: [
+        {
+          product_id: "tasters-100",
+          name: "נסקפה טייסטרס צ'ויס מקורי 100ג",
+          size_qty: 100,
+          size_unit: "g",
+          piece_count: null,
+          chain_id: "c1",
+          min_price: 31.9,
+          brand_extracted: "טייסטרס צ'ויס",
+        },
+        {
+          product_id: "tasters-200",
+          name: "נסקפה טייסטרס צ'ויס 200ג",
+          size_qty: 200,
+          size_unit: "g",
+          piece_count: null,
+          chain_id: "c1",
+          min_price: 39.9,
+          brand_extracted: "טייסטרס צ'ויס",
+        },
+      ],
+    });
+
+    const line = resolvedLine({
+      productId: "tasters-95",
+      name: tasters95.name,
+      resolvedBy: "product_id",
+      resolutionStatus: "resolved",
+      candidates: [tasters95],
+    });
+
+    await enrichCommodityCoverage(
+      [
+        {
+          productId: "tasters-95",
+          query: "טייסטרס צ׳ויס",
+          packQty: 1,
+          intentModeOverride: "brand_family",
+        },
+      ],
+      [line],
+      ["store-1"],
+    );
+
+    expect(line.intentMode).toBe("brand_family");
+    expect(line.equivalents?.map((c) => c.productId).sort()).toEqual([
+      "tasters-100",
+      "tasters-95",
+    ]);
+    expect(line.alternatives?.map((c) => c.productId)).toEqual(["tasters-200"]);
   });
 });

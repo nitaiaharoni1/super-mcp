@@ -6,8 +6,10 @@ import {
   encodeBasketContinuation,
 } from "../../../src/services/basket/continuation.js";
 import type { BasketContinuationV1 } from "../../../src/services/basket/types.js";
+import { optimizeBasketBodySchema } from "../../../src/routes/basket/schemas.js";
 
 const SECRET = "test-only-basket-continuation-secret-ok";
+const UUID = "11111111-1111-4111-8111-111111111111";
 
 const PAYLOAD: BasketContinuationV1 = {
   version: 1,
@@ -44,6 +46,23 @@ const PIN_PAYLOAD: BasketContinuationV1 = {
       itemIndex: 0,
       selectionEffect: "pin",
       allowedProductIds: ["coke-zero"],
+    },
+  ],
+};
+
+const BRAND_FAMILY_PAYLOAD: BasketContinuationV1 = {
+  version: 1,
+  issuedAt: 1_000,
+  expiresAt: 1_000 + 30 * 60 * 1000,
+  input: {
+    city: "Herzliya",
+    items: [{ query: "טייסטרס צ׳ויס", packQty: 1 }],
+  },
+  questions: [
+    {
+      itemIndex: 0,
+      selectionEffect: "brand_family",
+      allowedProductIds: ["tasters-95", "tasters-200"],
     },
   ],
 };
@@ -92,20 +111,43 @@ describe("basket continuation codec", () => {
 });
 
 describe("applyBasketAnswers", () => {
-  it("applies a representative answer without dropping the original query", () => {
+  it("representative answer retains query, amount/unit, selected productId, and commodity override", () => {
     const resumed = applyBasketAnswers(PAYLOAD, [{ itemIndex: 3, productId: "pita-10" }]);
-    expect(resumed.items[3]).toMatchObject({
+    expect(resumed.city).toBe("Herzliya");
+    expect(resumed.items).toHaveLength(4);
+    expect(resumed.items[0]).toEqual({ query: "עגבניות", amount: 1, unit: "kg" });
+    expect(resumed.items[3]).toEqual({
       productId: "pita-10",
       query: "פיתות",
       amount: 20,
       unit: "יח",
+      gtin: undefined,
       intentModeOverride: "commodity",
     });
   });
 
-  it("applies a pin answer as exact intent", () => {
+  it("pin answer retains query and quantity with exact intent override", () => {
     const resumed = applyBasketAnswers(PIN_PAYLOAD, [{ itemIndex: 0, productId: "coke-zero" }]);
-    expect(resumed.items[0]?.intentModeOverride).toBe("exact");
+    expect(resumed.items[0]).toEqual({
+      productId: "coke-zero",
+      query: "קולה זירו",
+      packQty: 2,
+      gtin: undefined,
+      intentModeOverride: "exact",
+    });
+  });
+
+  it("brand_family answer retains query with brand_family intent override", () => {
+    const resumed = applyBasketAnswers(BRAND_FAMILY_PAYLOAD, [
+      { itemIndex: 0, productId: "tasters-95" },
+    ]);
+    expect(resumed.items[0]).toEqual({
+      productId: "tasters-95",
+      query: "טייסטרס צ׳ויס",
+      packQty: 1,
+      gtin: undefined,
+      intentModeOverride: "brand_family",
+    });
   });
 
   it("rejects missing, duplicate, unknown, and unoffered answers", () => {
@@ -113,5 +155,23 @@ describe("applyBasketAnswers", () => {
     expect(() => applyBasketAnswers(PAYLOAD, DUPLICATES)).toThrow(/duplicate answer/i);
     expect(() => applyBasketAnswers(PAYLOAD, UNKNOWN)).toThrow(/unknown item index/i);
     expect(() => applyBasketAnswers(PAYLOAD, UNOFFERED)).toThrow(/not offered/i);
+  });
+});
+
+describe("resume boundary rejects reconstructed baskets", () => {
+  it("rejects mixed initial fields with continuation", () => {
+    const mixed = optimizeBasketBodySchema.safeParse({
+      continuation: "body.signature",
+      answers: [{ item_index: 0, product_id: UUID }],
+      items: [{ query: "פיתות", amount: 20, unit: "יח" }],
+      city: "Herzliya",
+    });
+    expect(mixed.success).toBe(false);
+
+    const resumeOnly = optimizeBasketBodySchema.safeParse({
+      continuation: "body.signature",
+      answers: [{ item_index: 0, product_id: UUID }],
+    });
+    expect(resumeOnly.success).toBe(true);
   });
 });

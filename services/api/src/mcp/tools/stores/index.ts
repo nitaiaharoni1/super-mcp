@@ -1,11 +1,13 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  applyLocationOriginHonesty,
+} from "../../../lib/locationInput.js";
 import { resolveStoreLocation } from "../../../lib/resolveStoreLocation.js";
 import { listPromotions } from "../../../services/promotions/index.js";
-import { resolveRadiusKm } from "../../../lib/defaults.js";
 import { DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
-import { locationShape, toGeo } from "../shared/location.js";
+import { locationShape, resolveToolLocation } from "../shared/location.js";
 
 export function registerStoreTools(server: McpServer): void {
   registerTool(
@@ -14,23 +16,26 @@ export function registerStoreTools(server: McpServer): void {
     {
       title: "List store branches",
       description:
-        "List physical store branches, optionally filtered by chain id, city, or near a point + radius_km " +
-        `(default ${DEFAULT_RADIUS_KM}km). Use to discover which branches exist in an area before scoping ` +
-        "compare_prices/optimize_basket.",
+        "List physical store branches, optionally filtered by chain id, city, near=lat,lng, or " +
+        `location (free-text neighborhood/address) + radius_km (default ${DEFAULT_RADIUS_KM}km). ` +
+        "Use to discover which branches exist in an area before scoping compare_prices/optimize_basket.",
       inputSchema: {
         chain: z.string().optional().describe("Chain id (the chain's legal barcode id) to filter by."),
         ...locationShape,
       },
     },
-    async ({ chain, city, near, radius_km }) => {
-      const geo = toGeo(near);
+    async ({ chain, city, near, location, radius_km }) => {
+      const loc = await resolveToolLocation({ city, near, location, radius_km });
       const result = await resolveStoreLocation({
         chain,
-        city,
-        near: geo,
-        radiusKm: resolveRadiusKm(geo, radius_km),
+        city: loc.city,
+        near: loc.near,
+        radiusKm: loc.radiusKm,
       });
-      return result;
+      return {
+        stores: result.stores,
+        location: applyLocationOriginHonesty(result.location, loc.locationOrigin),
+      };
     },
   );
 

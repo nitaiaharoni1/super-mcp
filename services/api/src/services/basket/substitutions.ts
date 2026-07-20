@@ -49,6 +49,24 @@ export function chainEquivalentReason(primaryName: string | null, selectedName: 
   return `chain_equivalent: priced this chain's "${selectedName}" as a same-class equivalent of "${primary}".`;
 }
 
+/**
+ * Provenance for a same-brand compatible pack priced under brand_family intent
+ * (e.g. selected 95g Taster's → local 100g original).
+ */
+export function brandFamilyEquivalentReason(
+  primaryName: string | null,
+  selectedName: string,
+  primarySizeQty: number | null | undefined,
+  selectedSizeQty: number | null | undefined,
+): string {
+  const primary = primaryName ?? "the resolved product";
+  const sizes =
+    primarySizeQty != null && selectedSizeQty != null
+      ? ` (${primarySizeQty}→${selectedSizeQty})`
+      : "";
+  return `brand_family_equivalent: priced same-brand compatible pack "${selectedName}"${sizes} for "${primary}".`;
+}
+
 export function substitutionReasonForLine(
   item: ResolvedItem,
   substituted: boolean,
@@ -89,34 +107,156 @@ export function applyStorePlanSubstitutions(
   }
 }
 
+/**
+ * Extra shekels a store must shave off the running total to justify one more
+ * shopping stop. Prevents the plan from spreading to a 7th store to save loose
+ * change — a naive cheapest-per-item split did exactly that.
+ */
+const MULTISTORE_MIN_MARGINAL_SAVINGS = 20;
+/** Hard ceiling on cost-only store additions once full coverage is reached. */
+const MULTISTORE_MAX_STORES = 4;
+
+export interface MultiStorePlanOptions {
+  /** Marginal savings (₪) required to add a cost-only store. */
+  minMarginalSavings?: number;
+  /** Cap on total stores (coverage still takes precedence over this cap). */
+  maxStores?: number;
+}
+
+/**
+ * Practical multi-store split. A previous cheapest-per-item pass spread the
+ * basket across every store that happened to hold the single cheapest SKU (7
+ * stores for a 19-line list) — technically minimal, uselessly impractical.
+ *
+ * Instead:
+ *  1. Greedy set-cover picks the FEWEST stores that price every coverable line
+ *     (full coverage is preserved — never traded for fewer stops), preferring
+ *     the store that adds the most new coverage, then the cheapest such store.
+ *  2. A bounded cost pass then adds another store ONLY when the cheaper prices it
+ *     unlocks beat MULTISTORE_MIN_MARGINAL_SAVINGS, up to maxStores.
+ * Each covered line is finally priced at the cheapest SKU among the chosen stores.
+ */
 export function buildMultiStorePlan(
   resolvedItems: ResolvedItem[],
   storeResults: BasketStoreResult[],
+  opts: MultiStorePlanOptions = {},
 ): MultiStorePlanDraft | null {
   if (storeResults.length === 0) return null;
+  const minSavings = opts.minMarginalSavings ?? MULTISTORE_MIN_MARGINAL_SAVINGS;
+  const maxStores = opts.maxStores ?? MULTISTORE_MAX_STORES;
 
-  const lines: MultiStoreLine[] = [];
+  // Cheapest line per (item, store) and the set of coverable item indexes.
+  const pricing: Array<{ itemIndex: number; byStore: Map<string, BasketLine> }> = [];
   const missingItemIndexes: number[] = [];
-
   for (const item of resolvedItems) {
     if (!item.productId) {
       missingItemIndexes.push(item.index);
       continue;
     }
-    let best: { store: BasketStoreResult; line: BasketLine } | null = null;
+    const byStore = new Map<string, BasketLine>();
     for (const store of storeResults) {
       const line = store.lines.find((l) => l.itemIndex === item.index);
-      if (!line) continue;
-      if (!best || line.lineTotal < best.line.lineTotal) {
-        best = { store, line };
-      }
+      if (line) byStore.set(store.storeId, line);
     }
-    if (!best) {
+    if (byStore.size === 0) {
       missingItemIndexes.push(item.index);
       continue;
     }
+    pricing.push({ itemIndex: item.index, byStore });
+  }
+  if (pricing.length === 0) return null;
+
+  const storeById = new Map(storeResults.map((s) => [s.storeId, s]));
+  const orderedStoreIds = storeResults.map((s) => s.storeId);
+
+  const planTotalFor = (stores: Set<string>): number => {
+    let total = 0;
+    for (const p of pricing) {
+      let min = Number.POSITIVE_INFINITY;
+      for (const sid of stores) {
+        const line = p.byStore.get(sid);
+        if (line && line.lineTotal < min) min = line.lineTotal;
+      }
+      if (min < Number.POSITIVE_INFINITY) total += min;
+    }
+    return total;
+  };
+
+  const selected = new Set<string>();
+
+  // Phase 1 — greedy set cover: fewest stores that cover every coverable line.
+  const uncovered = new Set(pricing.map((p) => p.itemIndex));
+  while (uncovered.size > 0) {
+    let bestStore: string | null = null;
+    let bestNewCover = 0;
+    let bestAddedCost = Number.POSITIVE_INFINITY;
+    for (const sid of orderedStoreIds) {
+      if (selected.has(sid)) continue;
+      let newCover = 0;
+      let addedCost = 0;
+      for (const p of pricing) {
+        if (!uncovered.has(p.itemIndex)) continue;
+        const line = p.byStore.get(sid);
+        if (line) {
+          newCover += 1;
+          addedCost += line.lineTotal;
+        }
+      }
+      if (newCover === 0) continue;
+      if (
+        newCover > bestNewCover ||
+        (newCover === bestNewCover && addedCost < bestAddedCost)
+      ) {
+        bestStore = sid;
+        bestNewCover = newCover;
+        bestAddedCost = addedCost;
+      }
+    }
+    if (!bestStore) break; // remaining items unpriceable anywhere
+    selected.add(bestStore);
+    for (const p of pricing) {
+      if (uncovered.has(p.itemIndex) && p.byStore.has(bestStore)) {
+        uncovered.delete(p.itemIndex);
+      }
+    }
+  }
+
+  // Phase 2 — add a cost-only store only when it clears the marginal threshold.
+  while (selected.size < maxStores) {
+    const currentTotal = planTotalFor(selected);
+    let bestStore: string | null = null;
+    let bestSavings = 0;
+    for (const sid of orderedStoreIds) {
+      if (selected.has(sid)) continue;
+      const trial = new Set(selected);
+      trial.add(sid);
+      const savings = currentTotal - planTotalFor(trial);
+      if (savings > bestSavings) {
+        bestStore = sid;
+        bestSavings = savings;
+      }
+    }
+    if (!bestStore || bestSavings < minSavings) break;
+    selected.add(bestStore);
+  }
+
+  // Price each covered line at the cheapest SKU among the chosen stores.
+  const lines: MultiStoreLine[] = [];
+  for (const p of pricing) {
+    let best: { store: BasketStoreResult; line: BasketLine } | null = null;
+    for (const sid of selected) {
+      const line = p.byStore.get(sid);
+      if (!line) continue;
+      if (!best || line.lineTotal < best.line.lineTotal) {
+        best = { store: storeById.get(sid)!, line };
+      }
+    }
+    if (!best) {
+      missingItemIndexes.push(p.itemIndex);
+      continue;
+    }
     lines.push({
-      itemIndex: item.index,
+      itemIndex: p.itemIndex,
       productId: best.line.productId,
       name: best.line.name,
       qty: best.line.qty,
@@ -131,6 +271,8 @@ export function buildMultiStorePlan(
   }
 
   if (lines.length === 0) return null;
+  lines.sort((a, b) => a.itemIndex - b.itemIndex);
+  missingItemIndexes.sort((a, b) => a - b);
 
   const storeCount = new Set(lines.map((l) => l.storeId)).size;
   const total = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;

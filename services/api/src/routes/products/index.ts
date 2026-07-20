@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { AppError } from "@super-mcp/shared";
-import { DEFAULT_RADIUS_KM } from "../../lib/defaults.js";
-import { parseNear } from "../../lib/geo.js";
+import { resolveLocationInput } from "../../lib/locationInput.js";
 import {
   getProductById,
   getProductHistory,
@@ -22,16 +21,21 @@ export async function registerProductRoutes(app: FastifyInstance): Promise<void>
   app.get(
     "/v1/products",
     createHandler({ query: searchQuerySchema }, async ({ query }) => {
-      const near = parseNear(query.near);
+      const loc = await resolveLocationInput({
+        city: query.city,
+        near: query.near,
+        location: query.location,
+        radiusKm: query.radius_km,
+      });
       return searchProducts({
         q: query.q,
         category: query.category,
         brand: query.brand,
         gtin: query.gtin,
         limit: query.limit,
-        city: query.city,
-        near,
-        radiusKm: near ? (query.radius_km ?? DEFAULT_RADIUS_KM) : query.radius_km,
+        city: loc.city,
+        near: loc.near,
+        radiusKm: loc.radiusKm,
         storeIds: query.store_id ? [query.store_id] : undefined,
         inStockOnly: query.in_stock_only,
       });
@@ -52,11 +56,16 @@ export async function registerProductRoutes(app: FastifyInstance): Promise<void>
   app.get(
     "/v1/products/:id/prices",
     createHandler({ params: uuidParamSchema, query: pricesQuerySchema }, async ({ params, query }) => {
-      const near = parseNear(query.near);
-      return getProductPrices(params.id, {
+      const loc = await resolveLocationInput({
         city: query.city,
-        near,
+        near: query.near,
+        location: query.location,
         radiusKm: query.radius_km,
+      });
+      return getProductPrices(params.id, {
+        city: loc.city,
+        near: loc.near,
+        radiusKm: loc.radiusKm,
         includeClub: query.include_club,
         sortBy: query.sort,
       });
@@ -66,11 +75,16 @@ export async function registerProductRoutes(app: FastifyInstance): Promise<void>
   app.get(
     "/v1/products/:id/substitutes",
     createHandler({ params: uuidParamSchema, query: substitutesQuerySchema }, async ({ params, query }) => {
-      const near = parseNear(query.near);
-      return suggestSubstitutes(params.id, {
+      const loc = await resolveLocationInput({
         city: query.city,
-        near,
+        near: query.near,
+        location: query.location,
         radiusKm: query.radius_km,
+      });
+      return suggestSubstitutes(params.id, {
+        city: loc.city,
+        near: loc.near,
+        radiusKm: loc.radiusKm,
         limit: query.limit,
         cheaperOnly: query.cheaper_only,
       });

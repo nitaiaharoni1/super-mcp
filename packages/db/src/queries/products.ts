@@ -1,5 +1,7 @@
+import { normalizeMeasure, reconcileMeasureFamilyWithName } from "@super-mcp/shared";
 import type { PoolClient } from "pg";
 import { getPool } from "../client/index.js";
+import { query } from "./query.js";
 
 export interface ResolveProductInput {
   gtin: string | null;
@@ -76,4 +78,58 @@ export async function resolveProduct(
     [input.sourceKey!, name, brand, sizeQty, sizeUnit, pieceCount, packMetadataSource],
   );
   return res.rows[0]!.id;
+}
+
+export interface SizeUnitHealResult {
+  scanned: number;
+  healed: number;
+}
+
+/**
+ * Self-heal product rows whose stored g/ml size_unit conflicts with the product
+ * NAME at the same canonical quantity — a bottle named "1.5 ליטר" ingested as
+ * 1500 g. The name is ground truth for the unit FAMILY (reconcileMeasureFamily-
+ * WithName); quantity is preserved so unit-price math stays valid.
+ *
+ * Idempotent: only rows whose family actually flips are rewritten, so re-running
+ * is a no-op. Ingestion already reconciles at write time via normalize.ts; this
+ * sweep additionally repairs stragglers not present in the current feed slice
+ * and any legacy rows written before the reconcile guard existed.
+ */
+export async function healSizeUnitFamily(): Promise<SizeUnitHealResult> {
+  const res = await query<{ id: string; name: string; size_qty: string; size_unit: string }>(
+    `SELECT id, name, size_qty, size_unit
+       FROM product
+      WHERE size_qty IS NOT NULL AND size_qty > 0
+        AND size_unit IN ('g', 'kg', 'ml', 'l')`,
+  );
+
+  const ids: string[] = [];
+  const qtys: number[] = [];
+  const units: string[] = [];
+  for (const row of res.rows) {
+    const db = normalizeMeasure(Number(row.size_qty), row.size_unit);
+    if (db.unparseable) continue;
+    const reconciled = reconcileMeasureFamilyWithName(row.name, db);
+    if (reconciled.unit !== db.unit) {
+      ids.push(row.id);
+      qtys.push(reconciled.quantity);
+      units.push(reconciled.unit);
+    }
+  }
+
+  if (ids.length > 0) {
+    // Canonical quantity may differ from the stored one (kg→g scaling), so write
+    // both fields from the reconciled measure.
+    await query(
+      `UPDATE product p
+          SET size_qty = v.qty::numeric, size_unit = v.unit, updated_at = now()
+         FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::numeric[]) AS qty,
+                      unnest($3::text[]) AS unit) v
+        WHERE p.id = v.id`,
+      [ids, qtys, units],
+    );
+  }
+
+  return { scanned: res.rows.length, healed: ids.length };
 }

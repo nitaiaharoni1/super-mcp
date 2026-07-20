@@ -21,8 +21,12 @@ import type {
   ResolveLocationScope,
 } from "./types.js";
 
-/** Bounded concurrency for basket line resolution (search is DB-heavy). */
-export const RESOLVE_ITEMS_CONCURRENCY = 6;
+/**
+ * Bounded concurrency for basket line resolution (search is DB-heavy). The pg
+ * pool is sized to at least 20, so 10 in-flight lines leaves headroom for the
+ * per-line follow-up queries without starving coverage's own pool budget.
+ */
+export const RESOLVE_ITEMS_CONCURRENCY = 10;
 
 type ValidatedItem = {
   index: number;
@@ -46,7 +50,14 @@ type Phase1Query = {
   ctx: QuerySearchContext;
 };
 
-type Phase1Result = Phase1Direct | Phase1Query;
+/** A line whose resolution is reused verbatim from a prior call's snapshot. */
+type Phase1Reused = {
+  kind: "reused";
+  index: number;
+  resolved: ResolvedItem;
+};
+
+type Phase1Result = Phase1Direct | Phase1Query | Phase1Reused;
 
 type ProductRow = {
   id: string;
@@ -242,15 +253,27 @@ async function resolveDirectItem(
   throw new AppError("bad_request", `items[${index}] must include one of product_id, gtin, or query`, 400);
 }
 
-/** Resolve all basket lines concurrently (bounded — search is DB-heavy). */
+/**
+ * Resolve all basket lines concurrently (bounded — search is DB-heavy).
+ *
+ * `reuse` supplies already-resolved lines from a prior call keyed by item index
+ * (resume path): those indexes skip search/ranking/classification entirely and
+ * are placed verbatim, so a resume only pays to resolve the answered lines.
+ */
 export async function resolveItems(
   items: BasketItemInput[],
   location?: ResolveLocationScope,
+  reuse?: Map<number, ResolvedItem>,
 ): Promise<ResolvedItem[]> {
   await getActiveOntology();
   const started = Date.now();
   const searchLocation = toSearchLocationParams(location ?? {});
-  const queryLineCount = items.filter((item) => !item.productId && !item.gtin && item.query).length;
+  const reusedCount = reuse
+    ? items.reduce((n, _item, index) => (reuse.has(index) ? n + 1 : n), 0)
+    : 0;
+  const queryLineCount = items.filter(
+    (item, index) => !reuse?.has(index) && !item.productId && !item.gtin && item.query,
+  ).length;
 
   const validated = items.map((item, index) => validateItem(index, item));
 
@@ -265,6 +288,10 @@ export async function resolveItems(
     validated,
     RESOLVE_ITEMS_CONCURRENCY,
     async (entry): Promise<Phase1Result> => {
+      const reused = reuse?.get(entry.index);
+      if (reused) {
+        return { kind: "reused", index: entry.index, resolved: reused };
+      }
       if (entry.item.query && !entry.item.productId && !entry.item.gtin) {
         const ctx = await searchQueryItem(
           entry.item,
@@ -319,6 +346,11 @@ export async function resolveItems(
   const mergedProfileCache = new Map<string, SemanticProfile>();
   const resolved = new Array<ResolvedItem>(items.length);
   for (const row of phase1) {
+    if (row.kind === "reused") {
+      // Already fully resolved + class-stamped in the prior call — place as-is.
+      resolved[row.index] = row.resolved;
+      continue;
+    }
     if (row.kind === "direct") {
       stampDirectResolvedClasses(row.resolved, classMap);
       resolved[row.index] = row.resolved;
@@ -343,6 +375,7 @@ export async function resolveItems(
       event: "basket_resolve",
       itemCount: items.length,
       queryLineCount,
+      reusedCount,
       durationMs: Date.now() - started,
       concurrency: RESOLVE_ITEMS_CONCURRENCY,
       profileBatchMs,

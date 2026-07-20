@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@super-mcp/db": ["../../packages/db/src/index.ts"],
+      "@super-mcp/db/*": ["../../packages/db/src/*"],
+      "@super-mcp/shared": ["../../packages/shared/src/index.ts"],
+      "@super-mcp/shared/*": ["../../packages/shared/src/*"]
+    }
+  }
+}

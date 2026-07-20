@@ -44,8 +44,9 @@ export const storeLocationMetadataSchema = {
     distanceReliable: {
       type: "boolean",
       description:
-        "False when near-scope results only have city_centroid (or identically shared) coordinates; " +
-        "distance ranking is suppressed. True when near was not requested or at least one store has address/feed geo.",
+        "False when near-scope results only have city_centroid (or identically shared) coordinates, " +
+        "or when the user origin was only city-precision; distance ranking is suppressed. " +
+        "True when near was not requested or at least one store has address/feed geo and the origin is finer than city.",
     },
     requested: {
       type: "object",
@@ -57,6 +58,25 @@ export const storeLocationMetadataSchema = {
           properties: { lat: { type: "number" }, lng: { type: "number" } },
         },
         radiusKm: { type: "number", nullable: true },
+      },
+    },
+    origin: {
+      type: "object",
+      nullable: true,
+      description: "Provenance of the resolved user origin point (never includes raw location text).",
+      properties: {
+        precision: {
+          type: "string",
+          enum: ["address", "street", "neighborhood", "city", "coordinates"],
+        },
+        provider: {
+          type: "string",
+          enum: ["nominatim", "city_centroid", "coordinates"],
+        },
+        cached: { type: "boolean" },
+        fallbackApplied: { type: "boolean" },
+        displayName: { type: "string", nullable: true },
+        attribution: { type: "string", nullable: true },
       },
     },
   },
@@ -109,7 +129,13 @@ export const storePaths = {
       parameters: [
         { name: "chain", in: "query", schema: { type: "string" } },
         { name: "city", in: "query", schema: { type: "string" } },
-        { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'" },
+        { name: "near", in: "query", schema: { type: "string" }, description: "'lat,lng'. Do not combine with location." },
+        {
+          name: "location",
+          in: "query",
+          schema: { type: "string", minLength: 3, maxLength: 300 },
+          description: "Free-text neighborhood/address, e.g. 'נווה עמל, הרצליה'. Do not combine with near.",
+        },
         { name: "radius_km", in: "query", schema: { type: "number", default: 10 } },
       ],
       responses: {

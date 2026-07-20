@@ -3,6 +3,10 @@ import { registerProductTools } from "../../../src/mcp/tools/products/index.js";
 import { registerBasketTools } from "../../../src/mcp/tools/basket/index.js";
 import { registerStoreTools } from "../../../src/mcp/tools/stores/index.js";
 import { MCP_SERVER_INSTRUCTIONS } from "../../../src/mcp/server.js";
+import {
+  BASKET_PROTOCOL_ID,
+  parseProtocolIdentityLine,
+} from "../../../src/mcp/protocolIdentity.js";
 import type { z } from "zod";
 
 describe("MCP domain tool registrars", () => {
@@ -83,5 +87,62 @@ describe("MCP domain tool registrars", () => {
     expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/prepare_basket/i);
     expect(MCP_SERVER_INSTRUCTIONS).toContain("pack_qty");
     expect(MCP_SERVER_INSTRUCTIONS).toContain("amount=20, unit=יח");
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/location/i);
+    expect(MCP_SERVER_INSTRUCTIONS).toContain("נווה עמל");
+    const identity = parseProtocolIdentityLine(MCP_SERVER_INSTRUCTIONS);
+    expect(identity?.protocol).toBe(BASKET_PROTOCOL_ID);
+    expect(identity?.build).toBeTruthy();
+  });
+
+  it("advertises location on optimize_basket / list_stores / search_products", () => {
+    const definitions = new Map<string, { inputSchema: { shape: Record<string, unknown> } }>();
+    const server = {
+      registerTool: (name: string, def: { inputSchema: { shape: Record<string, unknown> } }) => {
+        definitions.set(name, def);
+      },
+    } as unknown as Parameters<typeof registerBasketTools>[0];
+
+    registerBasketTools(server);
+    registerStoreTools(server);
+    registerProductTools(server);
+
+    for (const name of ["optimize_basket", "list_stores", "search_products"] as const) {
+      const shape = definitions.get(name)?.inputSchema.shape;
+      expect(shape?.location, `${name} missing location`).toBeDefined();
+      expect(shape?.near, `${name} missing near`).toBeDefined();
+      expect(shape?.city, `${name} missing city`).toBeDefined();
+    }
+  });
+
+  it("rejects mixed resume/initial optimize_basket args", async () => {
+    const handlers = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
+    const server = {
+      registerTool: (
+        name: string,
+        _def: unknown,
+        handler: (args: Record<string, unknown>) => Promise<unknown>,
+      ) => {
+        handlers.set(name, handler);
+      },
+    } as unknown as Parameters<typeof registerBasketTools>[0];
+
+    registerBasketTools(server);
+    const handler = handlers.get("optimize_basket");
+    expect(handler).toBeDefined();
+
+    const mixed = await handler!({
+      continuation: "body.sig",
+      answers: [{ item_index: 0, product_id: "11111111-1111-4111-8111-111111111111" }],
+      items: [{ query: "מלח", pack_qty: 1 }],
+      city: "הרצליה",
+    });
+    expect(JSON.stringify(mixed)).toMatch(/only continuation and answers/i);
+
+    const answersOnly = await handler!({
+      answers: [{ item_index: 0, product_id: "11111111-1111-4111-8111-111111111111" }],
+      city: "הרצליה",
+      items: [{ query: "מלח", pack_qty: 1 }],
+    });
+    expect(JSON.stringify(answersOnly)).toMatch(/answers require continuation/i);
   });
 });

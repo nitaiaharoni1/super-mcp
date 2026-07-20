@@ -155,9 +155,14 @@ const CITY_ALIASES: Record<string, string> = {
   "מבשרת-ציון": "מבשרת ציון",
 };
 
-/** CBS locality code digits when `city` is numeric; otherwise null. */
+/**
+ * CBS locality code digits when `city` is numeric; otherwise null. A bare "0"
+ * (feeds emit it as a null-city placeholder) is not a real locality — return
+ * null so it is dropped rather than stored as the literal city "0".
+ */
 export function parseLocalityCode(city: string): string | null {
-  const digits = scrubNullChars(city).trim().replace(/^0+/, "") || "0";
+  const digits = scrubNullChars(city).trim().replace(/^0+/, "");
+  if (!digits) return null;
   return /^\d+$/.test(digits) ? digits : null;
 }
 
@@ -175,6 +180,9 @@ export function canonicalizeCity(city: string | null | undefined): string | unde
   if (city == null) return undefined;
   const scrubbed = scrubNullChars(city).trim();
   if (!scrubbed) return undefined;
+  // Feeds emit a bare "0" (or "000") as a null-city placeholder; treat as absent
+  // so it is neither stored as the literal city "0" nor proposed as an alias.
+  if (/^0+$/.test(scrubbed)) return undefined;
 
   const digits = parseLocalityCode(scrubbed);
   if (digits && LOCALITY_CODE_TO_CITY[digits]) {

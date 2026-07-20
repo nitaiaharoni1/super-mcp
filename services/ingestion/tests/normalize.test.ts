@@ -126,6 +126,25 @@ describe("Normalizer", () => {
     );
   });
 
+  it("flips a grams-labeled feed size to ml when the name says liters at the same quantity", async () => {
+    const record: RawPriceRecord = {
+      ...priceRecord("001"),
+      itemCode: "7290000003003",
+      name: "קוקה קולה 1.5 ליטר",
+      qty: 1500,
+      unit: "גרם",
+      isWeighted: false,
+      price: 9.5,
+    };
+    const n = new Normalizer("test");
+    await n.apply([record]);
+    expect(bulkUpsertListings).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ canonicalQty: 1500, canonicalUnit: "ml" }),
+      ]),
+    );
+  });
+
   it("persists multipack piece_count from name when feed qty is one pack", async () => {
     const record: RawPriceRecord = {
       ...priceRecord("001"),

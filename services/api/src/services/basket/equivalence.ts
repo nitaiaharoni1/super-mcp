@@ -6,6 +6,8 @@ import {
   stemHebrewToken,
   tokenizeNormalized,
 } from "@super-mcp/shared";
+import { allowsCountToWeight } from "./countWeightPolicy.js";
+import { resolveCoverageClassScope, scopedClassesConflict } from "./coverageScope.js";
 import type { BasketCandidate } from "./types.js";
 
 export { queryTokensSatisfied } from "@super-mcp/shared";
@@ -19,8 +21,18 @@ function classPathOf(c: BasketCandidate) {
  * The LLM taxonomy places these two in DIFFERENT classes (compared at the deepest
  * level both carry) — never interchangeable. "unknown" (either unclassified) is
  * not a disagreement, so pre-classification behavior is preserved.
+ * When queryText is provided, bare wine-family queries treat L3 color leaves as
+ * interchangeable under the wine L2 family.
  */
-function classesConflict(a: BasketCandidate, b: BasketCandidate): boolean {
+function classesConflict(
+  a: BasketCandidate,
+  b: BasketCandidate,
+  queryText = "",
+): boolean {
+  if (queryText.trim()) {
+    const scope = resolveCoverageClassScope(queryText, a);
+    if (scope) return scopedClassesConflict(a, b, scope);
+  }
   return compareClassPaths(classPathOf(a), classPathOf(b)) === "different";
 }
 
@@ -54,6 +66,9 @@ const NON_COMMODITY_LEADERS: ReadonlySet<string> = new Set([
   // Include common plurals; queryHeadAnchored also checks stemmed leaders.
   "עוגת", "עוגה", "עוגות", "מאפה", "מאפי", "מאפים", "לקריץ", "סוכריות", "סוכריה",
   "גלידת", "גלידה", "גלידות", "ליקר",
+  // stuffed-dough hosts — the DISH is dumplings/ravioli/burekas, not the filling:
+  // "בשר" ≠ "כיסונים בשר בקר"; "גבינה" ≠ "בורקס גבינה". Plurals stemmed automatically.
+  "כיסונים", "כיסון", "בורקס", "בורקסים", "רביולי", "טורטליני",
 ]);
 
 /** Stemmed forms of NON_COMMODITY_LEADERS so plurals (עוגות→עוג) still match. */
@@ -92,17 +107,25 @@ function queryLooksLikeProduce(queryText: string): boolean {
   return tokens.some((t) => PRODUCE_QUERY_STEMS.has(stemHebrewToken(t)));
 }
 
-function classAllowsCountWeight(c: BasketCandidate): boolean {
-  const l1 = c.classL1 ?? c.productClass;
-  return l1 === "produce" || c.classL2 === "pita_flatbread";
-}
-
 function allowCountToWeight(
   a: BasketCandidate,
   b: BasketCandidate,
   queryText: string,
 ): boolean {
-  if (classAllowsCountWeight(a) || classAllowsCountWeight(b)) return true;
+  if (
+    allowsCountToWeight({
+      classL1: a.classL1,
+      classL2: a.classL2,
+      productClass: a.productClass,
+    }) ||
+    allowsCountToWeight({
+      classL1: b.classL1,
+      classL2: b.classL2,
+      productClass: b.productClass,
+    })
+  ) {
+    return true;
+  }
   const aMissing = a.sizeUnit == null || a.sizeUnit === "";
   const bMissing = b.sizeUnit == null || b.sizeUnit === "";
   if (aMissing && bMissing) return queryLooksLikeProduce(queryText);
@@ -244,7 +267,7 @@ export function buildCommodityEquivalents(
     if (out.length > maxEquivalents) break;
     if (c.productId === top.productId) continue;
     if (c.productClass !== top.productClass) continue;
-    if (classesConflict(top, c)) continue; // different L3 (onion≠scallion, lemon≠lime)
+    if (classesConflict(top, c, queryText)) continue; // different L3 (onion≠scallion); bare יין allows color peers
     if (variantConflict(top, c)) continue; // regular≠cherry/zero/organic
     if (!packsCompatible(top, c, queryText, packTolerance)) continue;
     // Prepared-food hosts share a produce token ("עוגת לימונים") but must not join.
