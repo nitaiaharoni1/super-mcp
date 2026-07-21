@@ -13,9 +13,9 @@ export function Hero() {
         fill
         priority
         sizes="100vw"
-        className="object-cover object-[65%_center]"
+        className="object-cover object-[30%_center]"
       />
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,oklch(0.97_0.015_95_/_0.98)_0%,oklch(0.97_0.015_95_/_0.9)_35%,oklch(0.97_0.015_95_/_0.08)_72%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(90deg,oklch(0.97_0.015_95_/_0.08)_0%,oklch(0.97_0.015_95_/_0.9)_65%,oklch(0.97_0.015_95_/_0.98)_100%)]" />
       <Container className="relative flex min-h-[100dvh] items-center pt-20 pb-16">
         <div className="max-w-xl">
           <p className="mb-5 text-sm font-medium text-[var(--color-olive)]">
