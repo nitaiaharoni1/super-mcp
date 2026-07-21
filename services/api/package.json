@@ -21,7 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@super-mcp/db": "workspace:*",
     "@super-mcp/shared": "workspace:*",
-    "dotenv": "^16.5.0",
+    "dotenv": "^17.4.2",
     "fastify": "^5.3.3",
     "posthog-node": "^5.46.0",
     "zod": "^3.25.28"
