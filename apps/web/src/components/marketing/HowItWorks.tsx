@@ -12,6 +12,9 @@ export function HowItWorks() {
           <h2 className="mt-3 font-[family-name:var(--font-secular)] text-[clamp(1.85rem,3.6vw,2.75rem)] leading-[1.12] tracking-[-0.02em]">
             {he.howItWorks.title}
           </h2>
+          <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-[var(--color-ink-muted)] md:text-base">
+            {he.howItWorks.intro}
+          </p>
         </MotionReveal>
 
         <ol className="mx-auto mt-12 grid max-w-4xl gap-8 md:grid-cols-3 md:gap-6">
@@ -29,6 +32,17 @@ export function HowItWorks() {
             </li>
           ))}
         </ol>
+
+        <div className="mx-auto mt-14 grid max-w-4xl gap-10 md:grid-cols-2 md:gap-12">
+          {he.howItWorks.explain.map((block, index) => (
+            <MotionReveal key={block.title} delay={0.08 + 0.05 * index} className="text-center md:text-start">
+              <h3 className="text-xl font-semibold tracking-tight">{block.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-[var(--color-ink-muted)] md:text-base md:leading-8">
+                {block.body}
+              </p>
+            </MotionReveal>
+          ))}
+        </div>
       </Container>
     </Section>
   );
