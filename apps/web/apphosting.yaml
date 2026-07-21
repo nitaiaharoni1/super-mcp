@@ -1,0 +1,12 @@
+runConfig:
+  runtime: nodejs22
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: NEXT_PUBLIC_MCP_URL
+    secret: NEXT_PUBLIC_MCP_URL
+    availability:
+      - BUILD
+      - RUNTIME
