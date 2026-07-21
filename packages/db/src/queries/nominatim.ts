@@ -34,7 +34,7 @@ function baseUrl(): string {
 function userAgent(): string {
   return (
     process.env.NOMINATIM_USER_AGENT?.trim() ||
-    "super-mcp-geocode/1.0 (contact: nitaiaharoni1@gmail.com)"
+    "super-mcp-geocode/1.0 (contact: you@example.com)"
   );
 }
 

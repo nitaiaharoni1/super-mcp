@@ -1,7 +1,7 @@
 # Label-first resolution: cleanup + 2 new labels + alias dictionary
 
 **Status:** planned, not started. Builds on the shipped classification (migration 017,
-97.2% coverage, commit 8fd90fc). Cost of the extra classification pass: ~$1–3 on handi
+97.2% coverage, commit 8fd90fc). Cost of the extra classification pass: ~$1–3 on Vertex
 Vertex credits (flash-lite, same pipeline).
 
 ## Why (one line each)

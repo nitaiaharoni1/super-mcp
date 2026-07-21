@@ -2,6 +2,7 @@
   "name": "super-mcp",
   "private": true,
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "description": "Canonical supermarket data API + MCP for AI agents (Israel first)",
   "packageManager": "pnpm@9.15.0",
   "engines": {

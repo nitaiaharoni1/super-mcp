@@ -1,8 +1,23 @@
 node_modules/
 dist/
 .local/
+founder-outputs/
+
+# Env files — keep only committed *.example templates
 .env
+.env.*
 !.env.example
+!apps/web/.env.example
+
+# Credentials / keys that must never be committed
+*.pem
+*.p12
+*.pfx
+*credentials*.json
+*serviceAccount*.json
+.firebaserc
+firebase.json
+
 data/raw/
 *.log
 *.tsbuildinfo

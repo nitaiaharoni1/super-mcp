@@ -1,6 +1,12 @@
 export const SHUFERSAL_CHAIN_ID = "7290027600007";
 export const SHUFERSAL_BASE = "https://prices.shufersal.co.il";
 
+/** Hosts Shufersal discovery may download from (portal + Azure blob). */
+export const SHUFERSAL_ALLOWED_HOSTS = [
+  "prices.shufersal.co.il",
+  "pricesprodpublic.blob.core.windows.net",
+] as const;
+
 /** Portal categories from `#ddlCategory` on the transparency site. */
 export const CAT_PRICES_FULL = 2;
 export const CAT_PROMOS_FULL = 4;

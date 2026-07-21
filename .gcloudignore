@@ -1,0 +1,16 @@
+# Keep the Cloud Build upload context tight (Docker build itself uses .dockerignore).
+.git
+.github
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+.env
+.local
+data/raw
+*.log
+.claude
+.superpowers
+founder-outputs

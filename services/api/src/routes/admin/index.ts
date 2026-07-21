@@ -38,6 +38,14 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     createHandler({ body: createKeyBody }, async ({ body }, request) => {
       const auth = request.auth;
       if (!auth) throw new AppError("unauthorized", "Missing API key", 401);
+      // Masters are break-glass only — mint via CLI (`pnpm create-key -- --role=master`), not HTTP.
+      if (body.role === "master") {
+        throw new AppError(
+          "forbidden",
+          "Master API keys cannot be created via HTTP; use the create-key CLI",
+          403,
+        );
+      }
       return createApiKey(body, auth.apiKeyId);
     }),
   );

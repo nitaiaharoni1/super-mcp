@@ -20,14 +20,14 @@ import { closePool, getPool } from "../client/index.js";
  * called from the request path. Writes product_class_map (migration 017).
  *
  * Dedupes by product name (same name = same class) and fans the result to every
- * product_id sharing it. Vertex AI on the handi project; structured output with
+ * product_id sharing it. Vertex AI (your GCP project); structured output with
  * enum-constrained fields; hierarchy validated in code with one re-ask.
  *
  *   --scope=herzliya|all     which products to classify (default herzliya pilot)
  *   --model=<id>             gemini-2.5-flash-lite (default) | gemini-2.5-flash
  *   --region=<r>             us-central1 (default; me-west1 has no Gemini)
- *   --account=<email>        nitai@handi.co.il (default)
- *   --project=<id>           handi-project (default)
+ *   --account=<email>        gcloud account (or GOOGLE_CLOUD_ACCOUNT) — required
+ *   --project=<id>           GCP project id (or GOOGLE_CLOUD_PROJECT) — required
  *   --batch-size=N           names per request (default 50)
  *   --concurrency=N          parallel requests (default 12)
  *   --limit=N                cap distinct names (bake-off / smoke)
@@ -57,8 +57,8 @@ function parseArgs(argv: string[]): Args {
     scope: "herzliya",
     model: "gemini-2.5-flash-lite",
     region: "us-central1",
-    account: "nitai@handi.co.il",
-    project: "handi-project",
+    account: process.env.GOOGLE_CLOUD_ACCOUNT?.trim() ?? "",
+    project: process.env.GOOGLE_CLOUD_PROJECT?.trim() ?? "",
     batchSize: 50,
     concurrency: 12,
     limit: null,
@@ -85,6 +85,12 @@ function parseArgs(argv: string[]): Args {
     else if (arg.startsWith("--out=")) a.out = arg.slice(6);
     else if (arg.startsWith("--names-file=")) a.namesFile = arg.slice(13);
     else throw new Error(`unknown arg ${arg}`);
+  }
+  if (!a.account.trim()) {
+    throw new Error("classifyProducts requires --account=<email> or GOOGLE_CLOUD_ACCOUNT");
+  }
+  if (!a.project.trim()) {
+    throw new Error("classifyProducts requires --project=<id> or GOOGLE_CLOUD_PROJECT");
   }
   return a;
 }

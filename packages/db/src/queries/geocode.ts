@@ -178,9 +178,12 @@ async function geocodeOverpassPoi(
   way["shop"~"supermarket|convenience"](around:8000,${centroid.lat},${centroid.lng});
 );
 out center tags;`;
+  const ua =
+    process.env.NOMINATIM_USER_AGENT?.trim() ||
+    "super-mcp-geocode/1.0 (contact: you@example.com)";
   const resp = await fetch("https://overpass-api.de/api/interpreter", {
     method: "POST",
-    headers: { "User-Agent": "super-mcp-geocode/1.0 (contact: nitaiaharoni1@gmail.com)" },
+    headers: { "User-Agent": ua },
     body: `data=${encodeURIComponent(q)}`,
   });
   if (!resp.ok) return null;

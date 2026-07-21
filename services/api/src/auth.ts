@@ -76,13 +76,20 @@ export function authorize(auth: AuthContext, capability: Capability): void {
 }
 
 /**
- * Sliding 60s window per standard key, held in memory.
- * Follow-up: replace this with a DB-atomic limiter before horizontally scaling standard-key traffic.
- * Master keys bypass this function explicitly, so their behavior is consistent across instances.
+ * Sliding 60s window per key, held in memory (single-instance only).
+ * Follow-up: replace with a shared/DB limiter before horizontally scaling.
+ * Master keys use a finite cap (configured rate, or DEFAULT_MASTER_RATE_LIMIT when unset/0).
  */
 const RATE_WINDOWS = new Map<string, number[]>();
 const WINDOW_MS = 60_000;
+/** Default rpm when a master key has rate_limit_per_minute <= 0. */
+export const DEFAULT_MASTER_RATE_LIMIT = 6_000;
 let lastSweep = 0;
+
+export function effectiveRateLimit(role: ApiKeyRole, rateLimitPerMinute: number): number {
+  if (rateLimitPerMinute > 0) return rateLimitPerMinute;
+  return role === "master" ? DEFAULT_MASTER_RATE_LIMIT : 60;
+}
 
 /**
  * Drops keys whose window has fully expired so the Map doesn't retain an entry for every
@@ -126,9 +133,7 @@ export async function authenticate(request: FastifyRequest): Promise<AuthContext
     throw new AppError("unauthorized", "Missing API key. Use Authorization: Bearer <key>", 401);
   }
   const ctx = await resolveApiKey(raw);
-  if (ctx.role === "standard") {
-    checkRateLimit(ctx.apiKeyId, ctx.rateLimitPerMinute);
-  }
+  checkRateLimit(ctx.apiKeyId, effectiveRateLimit(ctx.role, ctx.rateLimitPerMinute));
   request.auth = ctx;
   return ctx;
 }

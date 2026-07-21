@@ -9,6 +9,7 @@ import { classifyFeedFile, parseFeedFileMeta } from "../common/feedMeta.js";
 import { storeCountCap } from "../../ingestCaps.js";
 import { selectRegionalFeedFiles } from "../../selectRegionalFiles.js";
 import type { StoreLocationHint } from "../../regions.js";
+import { fetchAllowedFeed } from "../common/allowedFetch.js";
 import { fetchPublishPriceDay } from "./fetchDay.js";
 import { fileUrl, jerusalemDateKeys, mergePublishPriceDayFiles } from "./parseHtml.js";
 import {
@@ -18,8 +19,13 @@ import {
   type PublishPricePortal,
 } from "./types.js";
 
+function portalAllowedHosts(portal: PublishPricePortal): string[] {
+  return [new URL(portal.baseUrl).hostname];
+}
+
 export function createPublishPriceAdapter(portal: PublishPricePortal): SourceAdapter {
   const maxStores = storeCountCap(20);
+  const allowedHosts = portalAllowedHosts(portal);
 
   return {
     sourceId: portal.sourceId,
@@ -83,7 +89,7 @@ export function createPublishPriceAdapter(portal: PublishPricePortal): SourceAda
       const storesFile = candidates.find((f) => f.kind === "stores");
       if (storesFile) {
         try {
-          const storesRes = await fetch(storesFile.remotePath, {
+          const storesRes = await fetchAllowedFeed(storesFile.remotePath, allowedHosts, {
             headers: { "User-Agent": "super-mcp/0.1 (+local-dev)" },
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
           });
@@ -118,7 +124,7 @@ export function createPublishPriceAdapter(portal: PublishPricePortal): SourceAda
     },
 
     async fetch(file: FeedFile): Promise<RawBlob> {
-      const res = await fetch(file.remotePath, {
+      const res = await fetchAllowedFeed(file.remotePath, allowedHosts, {
         headers: { "User-Agent": "super-mcp/0.1 (+local-dev)" },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });

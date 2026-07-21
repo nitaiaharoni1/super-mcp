@@ -1,7 +1,7 @@
 # One-time LLM classification of the product catalog (product_class L1/L2/L3)
 
-**Status:** planned, not started. Approved budget: ~$5 (Vertex credits on handi cover it).
-**Owner decision points:** Phase 0 results must be reviewed by Nitai before the full run.
+**Status:** planned, not started. Approved budget: ~$5 (Vertex AI credits on your GCP project).
+**Owner decision points:** Phase 0 results must be reviewed before the full run.
 
 ## Goal
 
@@ -23,12 +23,12 @@ Why (evidence from 2026-07-18/19 E2E sessions):
 
 ## Provider & model
 
-- **Vertex AI on the handi project** (`$HANDI_PROJECT`), account `nitai@handi.co.il`
-  (the default gcloud account; credits live here. Tesse GCP is dead — do not use it).
-- Auth: ADC via existing gcloud login. `--project=$HANDI_PROJECT` inline. Never set
-  GOOGLE_APPLICATION_CREDENTIALS. For raw REST: `gcloud auth print-access-token`
+- **Vertex AI on your GCP project** (`$GOOGLE_CLOUD_PROJECT`) with a gcloud account that
+  can call Vertex (`--account` / `GOOGLE_CLOUD_ACCOUNT`). Do not commit project IDs.
+- Auth: ADC via gcloud login. Pass `--project=$GOOGLE_CLOUD_PROJECT` inline. Never set
+  GOOGLE_APPLICATION_CREDENTIALS in the repo. For raw REST: `gcloud auth print-access-token`
   (refresh on 401 or every ~45 min).
-- Endpoint: `https://{region}-aiplatform.googleapis.com/v1/projects/$HANDI_PROJECT/locations/{region}/publishers/google/models/{model}:generateContent`
+- Endpoint: `https://{region}-aiplatform.googleapis.com/v1/projects/$GOOGLE_CLOUD_PROJECT/locations/{region}/publishers/google/models/{model}:generateContent`
   Region: try `me-west1` (Israel) first for latency, fall back to `us-central1`
   (broadest model availability) or the `global` endpoint.
 - **Committed baseline candidates:** `gemini-2.5-flash-lite` and `gemini-2.5-flash`
@@ -58,7 +58,7 @@ Why (evidence from 2026-07-18/19 E2E sessions):
 | gemini-3.5-flash | TBV (Vertex pricing not in card) | thinking budget MUST be 0 or output cost inflates |
 
 Wall time at concurrency 16–24 with backoff: **under ~30 min** for the full catalog.
-All costs land on handi Vertex credits.
+All costs land on your Vertex AI billing account.
 
 ## Taxonomy (closed vocabulary, checked into the repo)
 

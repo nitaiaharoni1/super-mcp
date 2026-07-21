@@ -89,7 +89,7 @@ describe("API key authentication and authorization", () => {
     expect(() => authorize(master, "global_usage")).not.toThrow();
   });
 
-  it("explicitly bypasses rate limiting for master keys", async () => {
+  it("applies a finite default rate limit when a master key has rate_limit_per_minute 0", async () => {
     query.mockResolvedValue({
       rows: [{ id: "master-id", name: "master", role: "master", rate_limit_per_minute: 0 }],
     });
