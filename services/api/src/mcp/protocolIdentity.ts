@@ -69,6 +69,9 @@ export function validateMcpBasketContract(input: ContractCheckInput): ContractCh
   if (!names.has("optimize_basket")) {
     errors.push("optimize_basket is missing");
   }
+  if (input.toolNames.length > 0 && input.toolNames[0] !== "optimize_basket") {
+    errors.push("optimize_basket must be the first registered tool");
+  }
 
   const optimize = input.tools.find((t) => t.name === "optimize_basket");
   const props = optimize?.inputSchema?.properties ?? {};

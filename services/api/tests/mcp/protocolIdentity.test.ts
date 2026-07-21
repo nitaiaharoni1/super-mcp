@@ -33,6 +33,9 @@ describe("protocol identity", () => {
     const instructions = buildMcpServerInstructions({ SUPER_MCP_BUILD_REVISION: "rev1" });
     expect(instructions).toMatch(/optimize_basket/i);
     expect(instructions).not.toMatch(/prepare_basket/i);
+    expect(instructions).toMatch(
+      /^Shopping list → call optimize_basket exactly once with all items and location\./,
+    );
     expect(parseProtocolIdentityLine(instructions)).toEqual({
       protocol: BASKET_PROTOCOL_ID,
       build: "rev1",
@@ -77,6 +80,16 @@ describe("validateMcpBasketContract", () => {
     });
     expect(result.ok).toBe(false);
     expect(result.errors.join(" ")).toMatch(/prepare_basket/);
+  });
+
+  it("rejects when optimize_basket is not the first registered tool", () => {
+    const result = validateMcpBasketContract({
+      toolNames: ["search_products", "optimize_basket"],
+      tools: goodTools,
+      instructions: goodInstructions,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/first registered tool/);
   });
 
   it("rejects optimize_basket without continuation/answers/mode fields or with qty", () => {

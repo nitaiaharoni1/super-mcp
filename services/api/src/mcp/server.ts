@@ -15,16 +15,20 @@ export function buildMcpServerInstructions(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   return (
+    "Shopping list → call optimize_basket exactly once with all items and location. " +
+    "Accept the default fast best-effort choices unless the user explicitly requests " +
+    "exact products; then set resolution_mode=strict. " +
+    "Never search or compare each basket line separately. " +
     "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness " +
     "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. " +
-    "For shopping lists: call optimize_basket with items[{query|gtin|product_id, pack_qty|amount+unit}] " +
+    "Call optimize_basket with items[{query|gtin|product_id, pack_qty|amount+unit}] " +
     "and city (Hebrew/English), near=lat,lng, or location (free-text neighborhood/address, e.g. " +
     "'נווה עמל, הרצליה'). Prefer location for neighborhoods; near remains coordinates. Do not combine " +
     "near with location. If status is needs_confirmation, answer every required question and call again " +
     "with only {continuation, answers}. If status is complete, use bestSingleStore / cheapestCompleteStore " +
     "/ multiStore. Plan totals sum priced lines only — check totalScope; priced_lines_only is not the " +
-    "full basket total. Do not call search_products per line first; use search_products / resolve_products only " +
-    "for unresolved or missing lines. Use amount+unit for natural counts and weighed goods " +
+    "full basket total. Use search_products / resolve_products only for unresolved or missing lines. " +
+    "Use amount+unit for natural counts and weighed goods " +
     "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). Location filters default to 10km when a " +
     "point is resolved. Use get_promotions to explain discounts. " +
     protocolIdentityLine(env)

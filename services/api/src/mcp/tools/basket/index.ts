@@ -122,10 +122,13 @@ export function registerBasketTools(server: McpServer): void {
     server,
     "optimize_basket",
     {
-      title: "Resolve and price a shopping basket (resumable)",
+      title: "Optimize a grocery shopping list in one call",
       description:
-        "Call once with the original shopping list. If status is needs_confirmation, ask every " +
-        "returned question and call the same tool once more with only continuation and answers. " +
+        "For a multi-item grocery shopping list, find the cheapest store or suitable nearby " +
+        "multi-store option in one call. Fast mode is the default and returns a compact " +
+        "best-effort result without product-by-product searches. " +
+        "If status is needs_confirmation (strict mode), ask every returned question and call " +
+        "the same tool once more with only continuation and answers. " +
         "selectionEffect: representative→commodity peers, brand_family→same-brand compatible packs " +
         "(larger packs may appear as alternative_available), pin→exact SKU. " +
         "When status is complete, plan totals (bestSingleStore / cheapestCompleteStore / multiStore) " +

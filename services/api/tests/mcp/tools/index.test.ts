@@ -6,6 +6,7 @@ vi.mock("../../../src/services/basket/index.js", () => ({
   optimizeBasket: (...args: unknown[]) => optimizeBasket(...args),
 }));
 
+import { registerTools } from "../../../src/mcp/tools/index.js";
 import { registerProductTools } from "../../../src/mcp/tools/products/index.js";
 import { registerBasketTools } from "../../../src/mcp/tools/basket/index.js";
 import { registerStoreTools } from "../../../src/mcp/tools/stores/index.js";
@@ -16,6 +17,10 @@ import {
 } from "../../../src/mcp/protocolIdentity.js";
 import type { z } from "zod";
 
+const PRODUCT_LIST_STEER =
+  "Do not use this for a shopping list or after optimize_basket has started. " +
+  "Use optimize_basket directly; strict confirmation options are sufficient to resume.";
+
 describe("MCP domain tool registrars", () => {
   afterEach(() => {
     vi.clearAllMocks();
@@ -25,6 +30,39 @@ describe("MCP domain tool registrars", () => {
     expect(typeof registerProductTools).toBe("function");
     expect(typeof registerBasketTools).toBe("function");
     expect(typeof registerStoreTools).toBe("function");
+  });
+
+  it("registers optimize_basket first with a discovery-first description lead", () => {
+    const registered: { name: string; title: string; description: string }[] = [];
+    const server = {
+      registerTool: (name: string, def: { title: string; description: string }) => {
+        registered.push({ name, title: def.title, description: def.description });
+      },
+    } as unknown as Parameters<typeof registerTools>[0];
+
+    registerTools(server);
+
+    expect(registered[0]?.name).toBe("optimize_basket");
+    expect(registered[0]?.title).toBe("Optimize a grocery shopping list in one call");
+    const lead = registered[0]!.description.slice(0, 200);
+    expect(lead).toContain("shopping list");
+    expect(lead).toContain("cheapest store");
+    expect(lead).toContain("one call");
+  });
+
+  it("steers product tools away from multi-item shopping lists", () => {
+    const definitions = new Map<string, { description: string }>();
+    const server = {
+      registerTool: (name: string, def: { description: string }) => {
+        definitions.set(name, def);
+      },
+    } as unknown as Parameters<typeof registerProductTools>[0];
+
+    registerProductTools(server);
+
+    for (const name of ["search_products", "resolve_products", "compare_prices"] as const) {
+      expect(definitions.get(name)?.description, name).toContain(PRODUCT_LIST_STEER);
+    }
   });
 
   it("registers only optimize_basket for shopping lists", () => {
@@ -169,6 +207,15 @@ describe("MCP domain tool registrars", () => {
   });
 
   it("directs agents through resumable optimize_basket confirmation", () => {
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(
+      /^Shopping list → call optimize_basket exactly once with all items and location\./,
+    );
+    expect(MCP_SERVER_INSTRUCTIONS).toContain(
+      "Accept the default fast best-effort choices unless the user explicitly requests exact products; then set resolution_mode=strict.",
+    );
+    expect(MCP_SERVER_INSTRUCTIONS).toContain(
+      "Never search or compare each basket line separately.",
+    );
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/optimize_basket/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/needs_confirmation/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/continuation/i);
