@@ -439,7 +439,9 @@ describe("resumable BBQ golden — confirm then complete", () => {
     if (second.status !== "complete") throw new Error("expected completion");
 
     expect(second.bestSingleStore?.pricedLines).toBeGreaterThanOrEqual(16);
-    expect(second.multiStore?.pricedLines).toBe(18);
+    // Summary omits multiStore when one store already prices every line (payload budget).
+    expect(second.bestSingleStore?.pricedLines).toBe(second.bestSingleStore?.requestedLines);
+    expect(second.multiStore).toBeNull();
 
     const pita = second.bestSingleStore?.lines.find((line) => line.itemIndex === 3);
     expect(pita).toMatchObject({ qty: 2, qtyMode: "packs" });

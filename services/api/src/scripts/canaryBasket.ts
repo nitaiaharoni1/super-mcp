@@ -1,18 +1,16 @@
 /**
  * Live canary for optimize_basket against a populated local DB.
  *
- * Fast default (one-call gates):
- *   BASKET_CONTINUATION_SECRET=... pnpm --filter @super-mcp/api canary:basket
+ * Fast default (one-call gates — Tel Aviv staples):
+ *   CANARY_BASKET_LOCATION="רחוב בן גוריון, תל אביב" \
+ *     pnpm --filter @super-mcp/api canary:basket
  *
- * Strict resumable mode:
+ * Strict resumable mode (BBQ fixture):
  *   CANARY_BASKET_RESOLUTION_MODE=strict CANARY_BASKET_AUTO_RESUME=1 \
  *     pnpm --filter @super-mcp/api canary:basket
  *
- * Target branch verification (default: Carrefour Neve Amal):
+ * Target branch verification for strict (default: Carrefour Neve Amal):
  *   CANARY_BASKET_STORE_ID=e0099e24-af29-49c0-976d-97e15c398436
- *
- * Free-text location (requires GEOCODING_CACHE_SECRET):
- *   CANARY_BASKET_LOCATION="נווה עמל, הרצליה"
  *
  * Prints phase timings, coverage, quantity decisions, and store names.
  */
@@ -23,6 +21,7 @@ import { closePool } from "@super-mcp/db";
 import { resolveLocationInput } from "../lib/locationInput.js";
 import { optimizeBasket } from "../services/basket/optimize.js";
 import type {
+  BasketItemInput,
   BasketLocationOrigin,
   BasketResolutionMode,
   BasketResponseDetail,
@@ -34,7 +33,11 @@ import {
   summarizeQuestions,
 } from "./canary/basketCanaryReport.js";
 import { BBQ_ITEMS, DEFAULT_NEVE_AMAL_STORE_ID } from "./canary/bbqBasketFixture.js";
-import { FORBIDDEN_FAST_SELECTIONS } from "./canary/telAvivStaplesFixture.js";
+import {
+  FORBIDDEN_FAST_SELECTIONS,
+  TEL_AVIV_LOCATION,
+  TEL_AVIV_STAPLES_ITEMS,
+} from "./canary/telAvivStaplesFixture.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
@@ -44,7 +47,13 @@ const FAST_RESPONSE_BYTES_BUDGET = 15_000;
 
 /** Canary stdout: keep precision/strategy diagnostics, never echo displayName/address. */
 function locationOriginForLog(
-  origin: BasketLocationOrigin | null | undefined,
+  origin:
+    | Pick<
+        BasketLocationOrigin,
+        "precision" | "provider" | "cached" | "fallbackApplied" | "attribution"
+      > & { warning?: string | null }
+    | null
+    | undefined,
 ): Omit<BasketLocationOrigin, "displayName"> | null {
   if (!origin) return null;
   return {
@@ -53,7 +62,7 @@ function locationOriginForLog(
     cached: origin.cached,
     fallbackApplied: origin.fallbackApplied,
     attribution: origin.attribution,
-    warning: origin.warning,
+    warning: origin.warning ?? null,
   };
 }
 
@@ -80,11 +89,15 @@ async function main(): Promise<void> {
   const resolutionMode = resolveCanaryMode();
   const responseDetail: BasketResponseDetail =
     resolutionMode === "strict" ? "debug" : "summary";
-  const city = process.env.CANARY_BASKET_CITY ?? "הרצליה";
-  // Optional free-text neighborhood/address, or lat,lng anchor:
-  //   CANARY_BASKET_LOCATION="נווה עמל, הרצליה"
-  //   CANARY_BASKET_NEAR="lat,lng" [CANARY_BASKET_RADIUS_KM]
-  const locationText = process.env.CANARY_BASKET_LOCATION?.trim() || undefined;
+  // Fast default: Tel Aviv staples + city-fallback location. Strict keeps BBQ + Herzliya.
+  const locationText =
+    process.env.CANARY_BASKET_LOCATION?.trim() ||
+    (resolutionMode === "fast" ? TEL_AVIV_LOCATION : undefined);
+  const cityEnv = process.env.CANARY_BASKET_CITY?.trim();
+  const city =
+    cityEnv ||
+    (locationText ? undefined : resolutionMode === "strict" ? "הרצליה" : undefined);
+  // Optional lat,lng anchor: CANARY_BASKET_NEAR="lat,lng" [CANARY_BASKET_RADIUS_KM]
   const radiusEnv = process.env.CANARY_BASKET_RADIUS_KM;
   const loc = await resolveLocationInput(
     {
@@ -97,9 +110,11 @@ async function main(): Promise<void> {
   );
   const targetStoreId = process.env.CANARY_BASKET_STORE_ID ?? DEFAULT_NEVE_AMAL_STORE_ID;
   const autoResume = process.env.CANARY_BASKET_AUTO_RESUME === "1";
+  const items: BasketItemInput[] =
+    resolutionMode === "fast" ? TEL_AVIV_STAPLES_ITEMS : BBQ_ITEMS;
 
   const baseInput = {
-    items: BBQ_ITEMS,
+    items,
     city: loc.city,
     near: loc.near,
     radiusKm: loc.radiusKm,
