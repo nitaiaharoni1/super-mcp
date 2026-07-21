@@ -119,6 +119,10 @@ export async function searchQueryItem(
  * Resolve a free-text query line into a product candidate shortlist.
  * Convenience wrapper: search → load profiles for those hits → rank.
  * Prefer the batched path in `resolveItems` for multi-line baskets.
+ *
+ * Confirmation vs best-effort is decided later in `optimizeBasket` via
+ * `resolutionMode` + `applyFastResolutionPolicy` — this path keeps strict
+ * `decideResolution` margins unchanged.
  */
 export async function resolveQueryItem(
   item: BasketItemInput,

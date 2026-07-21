@@ -2,8 +2,10 @@ import { DEFAULT_SEMANTIC_SEARCH_CONFIG, type SemanticSearchConfig } from "@supe
 import { describe, expect, it } from "vitest";
 import {
   decideResolution,
+  isEligibleForFastBestEffortCandidate,
   type ResolutionCandidate,
 } from "../../../src/services/basket/resolutionDecision.js";
+import type { BasketCandidate } from "../../../src/services/basket/types.js";
 
 const config: SemanticSearchConfig = {
   ...DEFAULT_SEMANTIC_SEARCH_CONFIG,
@@ -552,5 +554,42 @@ describe("local availability guard (Coke fix)", () => {
     );
     expect(d.status).toBe("resolved");
     expect(d.productId).toBe("obscure");
+  });
+});
+
+describe("isEligibleForFastBestEffortCandidate", () => {
+  const base: BasketCandidate = {
+    productId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    name: "חלב טרי",
+    score: 0.9,
+    matchedVia: "product",
+    sizeQty: 1,
+    sizeUnit: "L",
+    pieceCount: null,
+    hasPrice: true,
+    hasLocalPrice: true,
+    productClass: "dairy_milk",
+  };
+
+  it("accepts a locally priced non-vector candidate", () => {
+    expect(isEligibleForFastBestEffortCandidate(base, new Map())).toBe(true);
+  });
+
+  it("rejects vector-only candidates even with local price", () => {
+    expect(
+      isEligibleForFastBestEffortCandidate(
+        { ...base, matchedVia: "vector", score: 0.9 },
+        new Map(),
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts non-local candidates that appear in availability", () => {
+    expect(
+      isEligibleForFastBestEffortCandidate(
+        { ...base, hasLocalPrice: false },
+        new Map([[base.productId, { pricedStoreCount: 2, chainCount: 1, minPrice: 5 }]]),
+      ),
+    ).toBe(true);
   });
 });

@@ -10,6 +10,7 @@ import { toSearchLocationParams } from "../search/locationScope.js";
 import { hitToCandidate } from "./candidates.js";
 import { loadProductClasses, type ProductClassInfo } from "./productClasses.js";
 import { rankQueryCandidates } from "./rankQueryCandidates.js";
+import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
 import {
   searchQueryItem,
   type QuerySearchContext,
@@ -159,6 +160,7 @@ function resolveProductIdItem(
     productName: row.name,
     pieceCount: row.piece_count,
   });
+  assertPurchaseQtyPreservesRequest(item, purchase);
   return {
     ...base,
     qty: purchase.qty,
@@ -237,6 +239,7 @@ async function resolveDirectItem(
       productName: hit.name,
       pieceCount: hit.pieceCount,
     });
+    assertPurchaseQtyPreservesRequest(item, purchase);
     return {
       ...base,
       qty: purchase.qty,

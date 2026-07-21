@@ -394,6 +394,8 @@ describe("resumable BBQ golden — confirm then complete", () => {
     city: "הרצליה",
     verbose: false,
     storesLimit: 3,
+    resolutionMode: "strict" as const,
+    responseDetail: "summary" as const,
   });
 
   it("completes the protocol with quantity, safety, coverage, and payload bounds", async () => {

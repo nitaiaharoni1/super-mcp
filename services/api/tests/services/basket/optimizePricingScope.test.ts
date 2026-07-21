@@ -120,6 +120,8 @@ describe("optimizeBasket pricing scope", () => {
           { query: "item 2", packQty: 1 },
         ],
         city: "Herzliya",
+        resolutionMode: "strict",
+        responseDetail: "summary",
       },
       OPTIONS,
     );

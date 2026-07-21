@@ -369,7 +369,7 @@ export interface BasketCompleteResult {
   storesCompared: number;
   storesTruncated: boolean;
   location: StoreLocationMetadata;
-  /** Best-effort choices and omissions surfaced in fast mode (empty until policy ships). */
+  /** Best-effort choices and omissions surfaced in fast mode. */
   assumptions: BasketAssumption[];
 }
 

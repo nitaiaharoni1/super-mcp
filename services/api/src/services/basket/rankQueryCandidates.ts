@@ -33,6 +33,7 @@ import {
 } from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
+import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
 import type { BasketCandidate, BasketSubstitutionMeta } from "./types.js";
 import { isVectorOnly } from "./vectorOnly.js";
@@ -95,6 +96,90 @@ export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[]
  */
 export function selectSafePrimary(input: SafePrimaryInput): BasketCandidate | null {
   return filterSafeCandidates(input)[0] ?? null;
+}
+
+const EMPTY_FAST_AVAILABILITY = {
+  pricedStoreCount: 0,
+  chainCount: 0,
+  minPrice: null as number | null,
+};
+
+/**
+ * Preference order for fast best-effort selection among already-safe candidates:
+ * local price → regular/default → pack match → score → store/chain coverage.
+ */
+export function rankSafeCandidatesForFast(
+  candidates: BasketCandidate[],
+  availability: Map<
+    string,
+    { pricedStoreCount: number; chainCount: number; minPrice: number | null }
+  >,
+  profile: QueryProfile,
+  opts?: { preferCanola?: boolean; preferPlainMilk?: boolean; preferFreshChicken?: boolean },
+): BasketCandidate[] {
+  const pieceWanted =
+    profile.attributes.piece_count != null ? Number(profile.attributes.piece_count) : null;
+  const amountWanted = profile.requestedAmount;
+
+  const packScore = (c: BasketCandidate): number => {
+    if (pieceWanted != null && Number.isFinite(pieceWanted)) {
+      return c.pieceCount === pieceWanted ? 1 : 0;
+    }
+    if (!amountWanted || c.sizeQty == null || !c.sizeUnit) return 0;
+    const unit = amountWanted.unit.trim().toLowerCase();
+    const cUnit = c.sizeUnit.trim().toLowerCase();
+    if (unit !== cUnit && !(unit === "l" && (cUnit === "l" || cUnit === "ליטר"))) return 0;
+    return Math.abs(c.sizeQty - amountWanted.quantity) < 1e-6 ? 1 : 0;
+  };
+
+  const isLocal = (c: BasketCandidate): boolean => {
+    if (c.hasLocalPrice) return true;
+    return (availability.get(c.productId) ?? EMPTY_FAST_AVAILABILITY).pricedStoreCount > 0;
+  };
+
+  const isRegular = (c: BasketCandidate): boolean =>
+    c.variant == null || c.variant === "regular";
+
+  return [...candidates].sort((a, b) => {
+    const localDiff = Number(isLocal(b)) - Number(isLocal(a));
+    if (localDiff !== 0) return localDiff;
+
+    const regDiff = Number(isRegular(b)) - Number(isRegular(a));
+    if (regDiff !== 0) return regDiff;
+
+    const packDiff = packScore(b) - packScore(a);
+    if (packDiff !== 0) return packDiff;
+
+    if (opts?.preferCanola) {
+      const aCanola = Number(normalizeEmbedInput(a.name).includes("קנולה"));
+      const bCanola = Number(normalizeEmbedInput(b.name).includes("קנולה"));
+      if (bCanola !== aCanola) return bCanola - aCanola;
+    }
+    if (opts?.preferPlainMilk) {
+      const flavor = (n: string) => /בטעם|וניל|שוקולד|אגוזי|לוז/.test(normalizeEmbedInput(n));
+      const aPlain = Number(isRegular(a) && !flavor(a.name));
+      const bPlain = Number(isRegular(b) && !flavor(b.name));
+      if (bPlain !== aPlain) return bPlain - aPlain;
+    }
+    if (opts?.preferFreshChicken) {
+      const processed = (n: string) => /קפוא|מעובד|מעושן|נקניק|שניצל|נאגטס/.test(normalizeEmbedInput(n));
+      const aFresh = Number(!processed(a.name));
+      const bFresh = Number(!processed(b.name));
+      if (bFresh !== aFresh) return bFresh - aFresh;
+    }
+
+    if (b.score !== a.score) return b.score - a.score;
+
+    const aCov = (availability.get(a.productId) ?? EMPTY_FAST_AVAILABILITY).pricedStoreCount;
+    const bCov = (availability.get(b.productId) ?? EMPTY_FAST_AVAILABILITY).pricedStoreCount;
+    if (bCov !== aCov) return bCov - aCov;
+
+    const aChains = (availability.get(a.productId) ?? EMPTY_FAST_AVAILABILITY).chainCount;
+    const bChains = (availability.get(b.productId) ?? EMPTY_FAST_AVAILABILITY).chainCount;
+    if (bChains !== aChains) return bChains - aChains;
+
+    return a.productId.localeCompare(b.productId);
+  });
 }
 
 function emptyQueryProfile(query: string): QueryProfile {
@@ -486,6 +571,7 @@ export function rankQueryCandidates(
     productName: chosen.name,
     pieceCount: chosen.pieceCount,
   });
+  assertPurchaseQtyPreservesRequest(item, purchase);
 
   let substitution: BasketSubstitutionMeta | null = null;
   if (

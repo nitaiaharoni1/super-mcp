@@ -92,6 +92,8 @@ describe("optimizeBasket confirmation gate", () => {
       {
         items: Array.from({ length: 18 }, (_, index) => ({ query: `item ${index}`, packQty: 1 })),
         city: "הרצליה",
+        resolutionMode: "strict",
+        responseDetail: "summary",
       },
       OPTIONS,
     );

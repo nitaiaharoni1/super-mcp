@@ -263,6 +263,8 @@ describe("fast one-call Tel Aviv staples golden", () => {
         city: "תל אביב",
         verbose: false,
         storesLimit: 3,
+        resolutionMode: "fast",
+        responseDetail: "summary",
       },
       OPTIONS,
     );
