@@ -9,6 +9,7 @@ import { classifyFeedFile, parseFeedFileMeta } from "../common/feedMeta.js";
 import { storeCountCap } from "../../ingestCaps.js";
 import { selectRegionalFeedFiles } from "../../selectRegionalFiles.js";
 import type { StoreLocationHint } from "../../regions.js";
+import { fetchAllowedFeed } from "../common/allowedFetch.js";
 import {
   BROWSER_UA,
   CAT_PRICES_FULL,
@@ -16,6 +17,7 @@ import {
   CAT_STORES,
   DISCOVER_TIMEOUT_MS,
   FETCH_TIMEOUT_MS,
+  SHUFERSAL_ALLOWED_HOSTS,
   SHUFERSAL_BASE,
   SHUFERSAL_CHAIN_ID,
 } from "./constants.js";
@@ -109,7 +111,7 @@ export function createShufersalAdapter(): SourceAdapter {
       const storesFile = allFiles.find((f) => f.kind === "stores");
       if (storesFile) {
         try {
-          const storesRes = await fetch(storesFile.remotePath, {
+          const storesRes = await fetchAllowedFeed(storesFile.remotePath, SHUFERSAL_ALLOWED_HOSTS, {
             headers: { "User-Agent": BROWSER_UA },
             signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
           });
@@ -139,7 +141,7 @@ export function createShufersalAdapter(): SourceAdapter {
     },
 
     async fetch(file: FeedFile): Promise<RawBlob> {
-      const res = await fetch(file.remotePath, {
+      const res = await fetchAllowedFeed(file.remotePath, SHUFERSAL_ALLOWED_HOSTS, {
         headers: { "User-Agent": BROWSER_UA },
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });

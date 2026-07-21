@@ -174,7 +174,7 @@ Also assert query cache uniqueness on `(query_hash, model)`.
 Run:
 
 ```bash
-DATABASE_URL=postgresql://nitai@localhost:5432/super_mcp \
+DATABASE_URL=postgresql://postgres@localhost:5432/super_mcp \
   pnpm --filter @super-mcp/db test
 ```
 
@@ -246,7 +246,7 @@ Run:
 
 ```bash
 pnpm db:migrate
-DATABASE_URL=postgresql://nitai@localhost:5432/super_mcp \
+DATABASE_URL=postgresql://postgres@localhost:5432/super_mcp \
   pnpm --filter @super-mcp/db test
 ```
 

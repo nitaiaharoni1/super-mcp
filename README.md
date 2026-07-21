@@ -4,7 +4,18 @@ Canonical, queryable, agent-native layer over Israeli supermarket price transpar
 
 **Stack:** TypeScript monorepo · Postgres · Fastify REST · remote MCP (Streamable HTTP)
 
+License: [Apache-2.0](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [Data](./DATA.md)
+
 See [docs/SPEC.md](./docs/SPEC.md) for the full product/engineering plan.
+
+## Hosted vs self-host
+
+| Mode | What you get |
+|------|----------------|
+| **Hosted** (operator-run MCP/API) | Issued **standard** API keys for the operator’s endpoint. You do **not** get cloud credentials, database access, or deploy rights to that environment. |
+| **Self-host** (this repo) | Run your own Postgres, secrets, and deploy. The open-source tree contains **no** path into the operator’s cloud. |
+
+Production hostnames and secrets are configured in the hosting environment only — never required defaults in git. Deploy boundary: [docs/DEPLOY.md](./docs/DEPLOY.md).
 
 ## Local setup
 
@@ -12,18 +23,18 @@ See [docs/SPEC.md](./docs/SPEC.md) for the full product/engineering plan.
 
 - Node 22+
 - pnpm 9+
-- Homebrew Postgres 17 (`brew services start postgresql@17`)
+- Postgres 16+ with [`pgvector`](https://github.com/pgvector/pgvector) (Homebrew, Docker, or other)
 
 ### Database
 
-A dedicated local database is used:
-
 ```bash
-createdb super_mcp   # already created as postgresql://nitai@localhost:5432/super_mcp
+createdb super_mcp
+# Example URL: postgresql://postgres@localhost:5432/super_mcp
 ```
 
 ```bash
 cp .env.example .env
+# Set DATABASE_URL and a random BASKET_CONTINUATION_SECRET (≥32 bytes).
 pnpm install
 pnpm db:migrate
 pnpm db:seed          # demo catalog + writes API key to .local/api-key.txt
@@ -180,18 +191,20 @@ Raw feeds archive to `data/raw/` (local stand-in for GCS).
 # Standard shopping key
 pnpm create-key -- --name=my-agent
 
-# Bootstrap a revocable, expiring master key (raw key prints once)
+# Break-glass master key (CLI only — HTTP admin cannot mint masters)
 pnpm create-key -- --name=operations --role=master --expires-at=2026-12-31T23:59:59Z
 ```
 
 Keys are stored only as SHA-256 hashes. Keep the one-time raw value in a secret
 manager and send it as `Authorization: Bearer <key>`; do not put it in config,
-URLs, logs, or this repository. Master keys can create, list, rotate, and revoke
-keys under `/v1/admin/keys`, and read global usage at `/v1/admin/usage`. Rotation
-returns the replacement raw key once and revokes the prior key atomically.
+URLs, logs, or this repository. Issue **standard** keys to external users. Master
+keys can list/rotate/revoke and mint **standard** keys under `/v1/admin/keys`, and
+read global usage at `/v1/admin/usage`. Rotation returns the replacement raw key
+once and revokes the prior key atomically.
 
 Query-string credentials are rejected by default. Legacy MCP-only query auth
-can be explicitly enabled with `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1`.
+can be explicitly enabled with `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1` — never on a
+public host.
 
 ## Packages
 

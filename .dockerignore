@@ -1,0 +1,38 @@
+# Force a clean install/build inside the image; never ship host artifacts.
+node_modules
+**/node_modules
+dist
+**/dist
+*.tsbuildinfo
+**/*.tsbuildinfo
+apps/web/.next
+**/.next
+
+# Secrets and local-only state
+.env
+.env.*
+!.env.example
+!apps/web/.env.example
+.local
+.git
+.github
+
+# Credentials
+*.pem
+*.p12
+*.pfx
+*credentials*.json
+*serviceAccount*.json
+.firebaserc
+firebase.json
+
+# Large raw feed archives (production pulls fresh from FTP)
+data/raw
+
+# Logs / editor / agent cruft
+*.log
+.claude
+.superpowers
+.vscode
+founder-outputs
+docs

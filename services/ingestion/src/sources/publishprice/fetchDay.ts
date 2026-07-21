@@ -1,5 +1,10 @@
+import { fetchAllowedFeed } from "../common/allowedFetch.js";
 import { parsePublishPriceHtml } from "./parseHtml.js";
 import { DISCOVER_TIMEOUT_MS, type ParsedPublishPricePage, type PublishPricePortal } from "./types.js";
+
+function portalAllowedHosts(portal: PublishPricePortal): string[] {
+  return [new URL(portal.baseUrl).hostname];
+}
 
 export async function fetchPublishPriceDay(
   portal: PublishPricePortal,
@@ -7,7 +12,7 @@ export async function fetchPublishPriceDay(
 ): Promise<ParsedPublishPricePage | null> {
   const url = `${portal.baseUrl.replace(/\/$/, "")}/?date=${encodeURIComponent(dateKey)}`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchAllowedFeed(url, portalAllowedHosts(portal), {
       headers: { "User-Agent": "super-mcp/0.1 (+local-dev)" },
       redirect: "follow",
       signal: AbortSignal.timeout(DISCOVER_TIMEOUT_MS),

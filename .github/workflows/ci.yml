@@ -6,6 +6,16 @@ on:
   pull_request:
 
 jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -49,8 +59,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - name: Assemble DATABASE_URL
-        # Built from parts so no literal user:pass@host connection string sits
-        # in the repo (the secret-scan pre-commit hook rejects those).
+        # Built from parts so no literal user:pass@host connection string sits in the repo.
+        # Secret scanning is enforced by the gitleaks job above.
         run: |
           CRED="$PGUSER:$PGPASSWORD"
           echo "DATABASE_URL=postgres://$CRED@$PGHOST:$PGPORT/$PGDATABASE" >> "$GITHUB_ENV"

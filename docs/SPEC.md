@@ -61,7 +61,7 @@ Be the **canonical, queryable, agent-native layer** over supermarket data: inges
 
 - **Runtime:** Node 22 + TypeScript, Fastify (REST), `@modelcontextprotocol/sdk` (remote MCP, Streamable HTTP).
 - **DB:** Postgres. Start on **Neon** (serverless, cheap, branching for dev); Cloud SQL is the fallback if ingestion write volume outgrows it. Search v1 uses Postgres `pg_trgm` + `tsvector` (Hebrew needs trigram, not stemming); a dedicated search engine (Meilisearch/Typesense) is P1 if quality demands.
-- **Compute:** GCP Cloud Run (API/MCP service, scale-to-zero) + Cloud Run Jobs triggered by Cloud Scheduler (ingestion). Tesse GCP project + startup credits.
+- **Compute:** GCP Cloud Run (API/MCP service, scale-to-zero) + Cloud Run Jobs triggered by Cloud Scheduler (ingestion). Use your own GCP project; never commit project IDs or deploy credentials.
 - **Storage:** GCS bucket for raw fetched feed files (replay/debug/audit).
 
 ### Architecture

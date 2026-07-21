@@ -19,6 +19,9 @@ const PUBLIC_PATHS = new Set(["/health", "/ready", "/openapi.json"]);
 
 function isPublicPath(url: string): boolean {
   const path = url.split("?")[0] ?? url;
+  if (path === "/ready" && process.env.SUPER_MCP_READY_REQUIRE_AUTH === "1") {
+    return false;
+  }
   return PUBLIC_PATHS.has(path);
 }
 
@@ -30,10 +33,23 @@ function capabilityForUrl(url: string): Capability {
   return "shopping";
 }
 
+function corsOriginOption(): boolean | string[] {
+  const raw = process.env.CORS_ORIGINS?.trim();
+  if (!raw) return false;
+  const origins = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return origins.length > 0 ? origins : false;
+}
+
 export async function buildApp(): Promise<FastifyInstance> {
   assertBasketContinuationSecret(process.env.BASKET_CONTINUATION_SECRET ?? "");
 
   const app = Fastify({
+    bodyLimit: 1_048_576,
+    connectionTimeout: 60_000,
+    requestTimeout: 120_000,
     logger: {
       level: process.env.LOG_LEVEL ?? "info",
       // Strip query strings from logged URLs (legacy ?api_key= on /mcp when enabled) and
@@ -42,7 +58,7 @@ export async function buildApp(): Promise<FastifyInstance> {
         req(request) {
           return {
             method: request.method,
-            url: (request.url.split("?")[0] ?? request.url),
+            url: request.url.split("?")[0] ?? request.url,
           };
         },
       },
@@ -58,7 +74,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.decorateRequest("privilegedAuditId", null);
   app.decorateRequest("privilegedAuditErrorCode", null);
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, { origin: corsOriginOption() });
+
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header("Cross-Origin-Resource-Policy", "same-site");
+    return payload;
+  });
 
   app.get("/health", async () => ({ status: "ok", time: new Date().toISOString() }));
   await registerReadinessRoute(app);

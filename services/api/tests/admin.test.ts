@@ -21,7 +21,8 @@ const masterRow = {
   id: "22222222-2222-2222-2222-222222222222",
   name: "master",
   role: "master",
-  rate_limit_per_minute: 1,
+  // High enough that suite requests against the shared in-memory limiter do not 429.
+  rate_limit_per_minute: 6_000,
 };
 
 describe("master administration routes", () => {
@@ -66,7 +67,26 @@ describe("master administration routes", () => {
     await app.close();
   });
 
-  it("audits before creating a master key and returns its raw value once", async () => {
+  it("rejects minting master keys over HTTP (CLI break-glass only)", async () => {
+    query
+      .mockResolvedValueOnce({ rows: [masterRow] })
+      .mockResolvedValueOnce({ rows: [{ id: "audit-id" }] })
+      .mockResolvedValue({ rows: [] });
+    const app = await buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/admin/keys?ignored=not-a-secret",
+      headers: { authorization: "Bearer smcp_master" },
+      payload: { name: "next-master", role: "master", expiresAt: "2026-08-01T00:00:00Z" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO api_key"))).toBe(false);
+    await app.close();
+  });
+
+  it("audits before creating a standard key and returns its raw value once", async () => {
     query
       .mockResolvedValueOnce({ rows: [masterRow] })
       .mockResolvedValueOnce({ rows: [{ id: "audit-id" }] })
@@ -78,7 +98,7 @@ describe("master administration routes", () => {
       method: "POST",
       url: "/v1/admin/keys?ignored=not-a-secret",
       headers: { authorization: "Bearer smcp_master" },
-      payload: { name: "next-master", role: "master", expiresAt: "2026-08-01T00:00:00Z" },
+      payload: { name: "agent-key", role: "standard", expiresAt: "2026-08-01T00:00:00Z" },
     });
 
     expect(response.statusCode).toBe(200);

@@ -36,7 +36,7 @@ const masterRow = {
   id: "22222222-2222-2222-2222-222222222222",
   name: "master",
   role: "master",
-  rate_limit_per_minute: 1,
+  rate_limit_per_minute: 6_000,
 };
 
 describe("MCP master auditing", () => {
