@@ -236,6 +236,178 @@ describe("resolveQuery risk + equivalence wiring", () => {
     expect(item.name).not.toMatch(/חולץ|פותחן/);
   });
 
+  it("selectSafePrimary excludes produce/pack/personal-care traps before display primary", () => {
+    const ontology = heRetailOntologyFixture();
+    const classMap = new Map<string, ProductClassInfo>([
+      [
+        "fresh-t",
+        { l1: "produce", l2: "vegetable_fresh", l3: "tomato", variant: "regular", brand: null },
+      ],
+      [
+        "crushed",
+        {
+          l1: "canned_preserved",
+          l2: "tomato_paste_sauce",
+          l3: null,
+          variant: "regular",
+          brand: null,
+        },
+      ],
+      [
+        "fresh-p",
+        { l1: "produce", l2: "vegetable_fresh", l3: "potato", variant: "regular", brand: null },
+      ],
+      [
+        "flour",
+        { l1: "pantry_dry", l2: "flour_baking", l3: null, variant: "regular", brand: null },
+      ],
+      [
+        "gnocchi",
+        { l1: "frozen", l2: "frozen_prepared", l3: null, variant: "regular", brand: null },
+      ],
+      [
+        "oil",
+        { l1: "pantry_dry", l2: "oil_vinegar", l3: null, variant: "regular", brand: null },
+      ],
+      [
+        "bath",
+        { l1: "personal_care", l2: "hygiene", l3: null, variant: "regular", brand: null },
+      ],
+      [
+        "eggs12",
+        { l1: "dairy_eggs", l2: "eggs", l3: null, variant: "regular", brand: null },
+      ],
+      [
+        "eggs6",
+        { l1: "dairy_eggs", l2: "eggs", l3: null, variant: "regular", brand: null },
+      ],
+    ]);
+
+    const tomato = rankQueryCandidates(
+      {
+        item: { query: "עגבניות", amount: 1, unit: "kg" },
+        base: { index: 0, amount: 1, unit: "kg" },
+        hasAmount: true,
+        wantsPackSize: false,
+        hits: [
+          hit("crushed", "עגבניות מרוסקות 850 גרם", 0.99, {
+            sizeQty: 850,
+            sizeUnit: "g",
+            evidence: { exactPhrase: true, matchedTokenCount: 1, queryTokenCount: 1 },
+          }),
+          hit("fresh-t", "עגבניות חממה", 0.95, {
+            sizeQty: 1,
+            sizeUnit: "kg",
+            evidence: { exactPhrase: true, matchedTokenCount: 1, queryTokenCount: 1 },
+          }),
+        ],
+        searchMs: 0,
+        candidateLimit: 20,
+        semantic: true,
+        ontology,
+        location: { city: "תל אביב" },
+      },
+      new Map(),
+      { classMap },
+    );
+    const tomatoNames = tomato.candidates.map((c) => c.name);
+    expect(tomatoNames).not.toContain("עגבניות מרוסקות 850 גרם");
+    expect(tomato.name).not.toMatch(/מרוסקות/);
+
+    const potato = rankQueryCandidates(
+      {
+        item: { query: "תפוחי אדמה", amount: 2, unit: "kg" },
+        base: { index: 0, amount: 2, unit: "kg" },
+        hasAmount: true,
+        wantsPackSize: false,
+        hits: [
+          hit("flour", "קמח תפוחי אדמה 500 גרם", 0.99, {
+            sizeQty: 500,
+            sizeUnit: "g",
+            evidence: { exactPhrase: true, matchedTokenCount: 2, queryTokenCount: 2 },
+          }),
+          hit("gnocchi", "ניוקי תפוחי אדמה", 0.98, {
+            evidence: { exactPhrase: true, matchedTokenCount: 2, queryTokenCount: 2 },
+          }),
+          hit("fresh-p", "תפוחי אדמה ארוזים", 0.9, {
+            sizeQty: 2,
+            sizeUnit: "kg",
+            evidence: { exactPhrase: true, matchedTokenCount: 2, queryTokenCount: 2 },
+          }),
+        ],
+        searchMs: 0,
+        candidateLimit: 20,
+        semantic: true,
+        ontology,
+        location: { city: "תל אביב" },
+      },
+      new Map(),
+      { classMap },
+    );
+    const potatoNames = potato.candidates.map((c) => c.name);
+    expect(potatoNames).not.toContain("קמח תפוחי אדמה 500 גרם");
+    expect(potatoNames).not.toContain("ניוקי תפוחי אדמה");
+    expect(potato.name).not.toMatch(/קמח|ניוקי/);
+
+    const oil = rankQueryCandidates(
+      {
+        item: { query: "שמן 1 ליטר" },
+        base: { index: 0, amount: null, unit: null },
+        hasAmount: false,
+        wantsPackSize: true,
+        hits: [
+          hit("bath", "אמול שמן אמבט פורטה", 0.99, {
+            evidence: { exactPhrase: true, matchedTokenCount: 1, queryTokenCount: 2 },
+          }),
+          hit("oil", "שמן קנולה 1 ליטר", 0.9, {
+            sizeQty: 1,
+            sizeUnit: "L",
+            evidence: { exactPhrase: true, matchedTokenCount: 1, queryTokenCount: 2 },
+          }),
+        ],
+        searchMs: 0,
+        candidateLimit: 20,
+        semantic: true,
+        ontology,
+        location: { city: "תל אביב" },
+      },
+      new Map(),
+      { classMap },
+    );
+    const oilNames = oil.candidates.map((c) => c.name);
+    expect(oilNames).not.toContain("אמול שמן אמבט פורטה");
+    expect(oil.name).not.toMatch(/אמבט/);
+
+    const eggs = rankQueryCandidates(
+      {
+        item: { query: "ביצים תבנית 12" },
+        base: { index: 0, amount: null, unit: null },
+        hasAmount: false,
+        wantsPackSize: true,
+        hits: [
+          hit("eggs6", "6 ביצים L", 0.99, {
+            pieceCount: 6,
+            evidence: { exactPhrase: true, matchedTokenCount: 1, queryTokenCount: 3 },
+          }),
+          hit("eggs12", "ביצים תבנית 12", 0.9, {
+            pieceCount: 12,
+            evidence: { exactPhrase: true, matchedTokenCount: 2, queryTokenCount: 3 },
+          }),
+        ],
+        searchMs: 0,
+        candidateLimit: 20,
+        semantic: true,
+        ontology,
+        location: { city: "תל אביב" },
+      },
+      new Map(),
+      { classMap },
+    );
+    const eggNames = eggs.candidates.map((c) => c.name);
+    expect(eggNames).not.toContain("6 ביצים L");
+    expect(eggs.name).not.toMatch(/^6 ביצים/);
+  });
+
   it("bare יין ignores utensil peers that would otherwise create cross_class", () => {
     // Live shortlists mix bottles (alcohol) with openers (household). Risk/override
     // must score only head-anchored bottles so bare יין can auto-pick a good-enough wine.

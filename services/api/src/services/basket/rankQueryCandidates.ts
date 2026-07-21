@@ -9,6 +9,7 @@ import {
   resolvePurchaseQty,
   tokenizeNormalized,
   type OntologySnapshot,
+  type QueryProfile,
   type RetrievalEvidence,
   type SemanticProfile,
 } from "@super-mcp/shared";
@@ -26,6 +27,7 @@ import {
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  isStapleIncompatible,
   preferQueryHeadAnchored,
   queryHeadAnchored,
 } from "./equivalence.js";
@@ -34,6 +36,69 @@ import { decideResolution } from "./resolutionDecision.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
 import type { BasketCandidate, BasketSubstitutionMeta } from "./types.js";
 import { isVectorOnly } from "./vectorOnly.js";
+
+export interface SafePrimaryInput {
+  query: string;
+  profile: QueryProfile;
+  candidates: BasketCandidate[];
+}
+
+/** Candidates compatible with hard query intent (form, pack, domain, brand). */
+export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[] {
+  const { query, profile, candidates } = input;
+  const pieceCountRaw = profile.attributes.piece_count;
+  const pieceCount =
+    pieceCountRaw != null && pieceCountRaw !== ""
+      ? Number(pieceCountRaw)
+      : null;
+  const requireFreshProduce = profile.attributes.form === "fresh";
+  const brandWanted = profile.attributes.brand ?? null;
+  const variantWanted = profile.attributes.variant ?? null;
+
+  return candidates.filter((c) => {
+    if (
+      isStapleIncompatible(query, c, {
+        requireFreshProduce,
+        pieceCount: pieceCount != null && Number.isFinite(pieceCount) ? pieceCount : null,
+        requestedAmount: profile.requestedAmount,
+      })
+    ) {
+      return false;
+    }
+    if (variantWanted && c.variant && c.variant !== "regular") {
+      const dietWanted = variantWanted === "diet" || variantWanted === "diet_zero";
+      const dietGot = c.variant === "diet_zero" || c.variant === "diet";
+      if (dietWanted) {
+        if (!dietGot) return false;
+      } else if (c.variant !== variantWanted) {
+        return false;
+      }
+    }
+    if (brandWanted && c.brandExtracted && !brandMatches(c.brandExtracted, brandWanted)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Pick the first candidate compatible with hard query intent (fresh produce,
+ * pack count/volume, food vs personal-care). Unsafe peers are excluded so the
+ * same primary drives name, productId, equivalence, and question options.
+ */
+export function selectSafePrimary(input: SafePrimaryInput): BasketCandidate | null {
+  return filterSafeCandidates(input)[0] ?? null;
+}
+
+function emptyQueryProfile(query: string): QueryProfile {
+  return {
+    normalizedText: normalizeEmbedInput(query),
+    coreTerms: [],
+    category: null,
+    attributes: {},
+    requestedAmount: null,
+  };
+}
 
 /**
  * Single-token spirits/beer generics that must not auto-resolve via commodity
@@ -221,10 +286,11 @@ export function rankQueryCandidates(
     { tier: 1 | 2 | 3 | 0; relaxed: string[]; penaltyScore: number }
   >();
   let rankMs = 0;
+  let queryProfile: QueryProfile = emptyQueryProfile(item.query ?? "");
 
   if (ontology) {
     const rankStarted = Date.now();
-    const queryProfile = buildQueryProfile(item.query!, ontology, {
+    queryProfile = buildQueryProfile(item.query!, ontology, {
       amount: item.amount ?? null,
       unit: item.unit ?? null,
     });
@@ -346,7 +412,7 @@ export function rankQueryCandidates(
       ...(sharedProfileBatch ? { profileBatchShared: true } : {}),
     }),
   );
-  const chosen = decision.productId
+  let chosen = decision.productId
     ? (shortlist.find((hit) => hit.id === decision.productId) ?? shortlist[0])
     : shortlist[0];
   // Modifier-trap guard at the DECISION level (covers the normal auto-resolve
@@ -371,6 +437,30 @@ export function rankQueryCandidates(
       autoPrice: false,
     };
   }
+
+  // Build candidates first so hard intent can exclude traps before the display /
+  // pricing primary is locked into `base`.
+  const rankedCandidates: BasketCandidate[] = shortlist.map((hit) =>
+    hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
+  );
+  const safeCandidates = filterSafeCandidates({
+    query: item.query ?? "",
+    profile: queryProfile,
+    candidates: rankedCandidates,
+  });
+  const safePrimary = safeCandidates[0] ?? null;
+  const candidates = safeCandidates.length > 0 ? safeCandidates : rankedCandidates;
+  if (safePrimary) {
+    chosen = shortlist.find((hit) => hit.id === safePrimary.productId) ?? chosen;
+    if (decision.productId && decision.productId !== safePrimary.productId) {
+      decision = {
+        ...decision,
+        productId: decision.autoPrice ? safePrimary.productId : null,
+        name: safePrimary.name,
+      };
+    }
+  }
+
   if (!chosen) {
     return {
       qty: item.packQty ?? item.amount ?? 1,
@@ -420,11 +510,6 @@ export function rankQueryCandidates(
     };
   }
 
-  // Build the candidate list once so risk classification, equivalence, and the
-  // response all read the same product_class / intentTier the gate assigned.
-  const candidates: BasketCandidate[] = shortlist.map((hit) =>
-    hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
-  );
   // BasketCandidate drops brand; the risk classifier needs it, so keep the raw
   // hit brand keyed by product id. NOTE: we deliberately do NOT fall back to the
   // LLM brand_extracted here. The commodity+variant+query-token path already pins
@@ -450,7 +535,6 @@ export function rankQueryCandidates(
     substitution,
     resolutionStatus: decision.status,
   };
-
   // Risk-aware overrides. Same-class near-duplicate ambiguity (commodity) is
   // pricing detail, not a user decision; brand-pinning / cross-class ambiguity
   // genuinely changes WHAT the user gets and must still confirm.
