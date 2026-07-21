@@ -91,7 +91,13 @@ const LINE_CATALOG: LineCatalog[] = [
   },
   {
     safeName: "עוף טרי לחזה",
-    traps: [],
+    traps: [
+      "קורקבן עוף טרי",
+      "כבד עוף טרי",
+      "לבבות עוף טרי",
+      "צוואר עוף טרי",
+      "גב עוף טרי",
+    ],
     productClass: "meat_chicken",
   },
   { safeName: "אורז פרסי", traps: [], productClass: "dry_rice", sizeQty: 1, sizeUnit: "kg" },

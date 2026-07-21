@@ -9,7 +9,11 @@ import {
 } from "@super-mcp/shared";
 import { queryHeadAnchored } from "./equivalence.js";
 import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
-import { filterSafeCandidates, rankSafeCandidatesForFast } from "./rankQueryCandidates.js";
+import {
+  chickenNameIsUndesired,
+  filterSafeCandidates,
+  rankSafeCandidatesForFast,
+} from "./rankQueryCandidates.js";
 import { isEligibleForFastBestEffortCandidate } from "./resolutionDecision.js";
 import { isVectorOnly } from "./vectorOnly.js";
 import type {
@@ -36,17 +40,6 @@ export interface FastResolutionPolicyResult {
   items: ResolvedItem[];
   assumptions: BasketAssumption[];
 }
-
-const PROCESSED_CHICKEN_TOKENS: ReadonlySet<string> = new Set([
-  "קפוא",
-  "קפואה",
-  "מעובד",
-  "מעושן",
-  "נקניק",
-  "נקניקיות",
-  "שניצל",
-  "נאגטס",
-]);
 
 function isSafelyPricable(item: ResolvedItem): boolean {
   return item.resolutionStatus === "resolved" || (item.productId != null && !item.lowConfidence);
@@ -113,11 +106,6 @@ function shareCompatibleClass(candidates: BasketCandidate[]): boolean {
     ),
   ];
   return flat.length <= 1;
-}
-
-function nameHasProcessedChicken(name: string): boolean {
-  const tokens = tokenizeNormalized(normalizeEmbedInput(name));
-  return tokens.some((t) => PROCESSED_CHICKEN_TOKENS.has(t));
 }
 
 function assumptionReasonFor(query: string): BasketAssumption["reason"] {
@@ -229,12 +217,9 @@ function filterPool(
     candidates: item.candidates,
   }).filter((c) => !candidateLooksVectorOnly(c));
 
+  const queryTokens = tokenizeNormalized(normalizeEmbedInput(query));
   const withoutProcessedChicken = base.filter(
-    (c) =>
-      !(
-        tokenizeNormalized(normalizeEmbedInput(query)).includes("עוף") &&
-        nameHasProcessedChicken(c.name)
-      ),
+    (c) => !(queryTokens.includes("עוף") && chickenNameIsUndesired(c.name, queryTokens)),
   );
 
   const anchored = withoutProcessedChicken.filter(

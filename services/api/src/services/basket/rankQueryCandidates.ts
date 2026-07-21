@@ -104,6 +104,47 @@ const EMPTY_FAST_AVAILABILITY = {
   minPrice: null as number | null,
 };
 
+/** Processed / prepared chicken — never a safe default for generic עוף. */
+const PROCESSED_CHICKEN_TOKENS: ReadonlySet<string> = new Set([
+  "קפוא",
+  "קפואה",
+  "מעובד",
+  "מעושן",
+  "נקניק",
+  "נקניקיות",
+  "שניצל",
+  "נאגטס",
+]);
+
+/**
+ * Organ / carcass bits that share productClass with fresh chicken and pass
+ * head-anchor on fat catalogs. Reject for generic עוף unless the query names them.
+ */
+const ORGAN_CHICKEN_TOKENS: ReadonlySet<string> = new Set([
+  "קורקבן",
+  "כבד",
+  "לבבות",
+  "צוואר",
+  "גב",
+]);
+
+/**
+ * True when a chicken candidate name is processed or an unrequested organ cut.
+ * Token-based (not substring) so names like עגבניות are unaffected by "גב".
+ */
+export function chickenNameIsUndesired(
+  name: string,
+  queryTokens: readonly string[],
+): boolean {
+  const tokens = tokenizeNormalized(normalizeEmbedInput(name));
+  const querySet = new Set(queryTokens);
+  for (const token of tokens) {
+    if (PROCESSED_CHICKEN_TOKENS.has(token)) return true;
+    if (ORGAN_CHICKEN_TOKENS.has(token) && !querySet.has(token)) return true;
+  }
+  return false;
+}
+
 /**
  * Preference order for fast best-effort selection among already-safe candidates:
  * local price → regular/default → pack match → score → store/chain coverage.
@@ -120,6 +161,7 @@ export function rankSafeCandidatesForFast(
   const pieceWanted =
     profile.attributes.piece_count != null ? Number(profile.attributes.piece_count) : null;
   const amountWanted = profile.requestedAmount;
+  const chickenQueryTokens = tokenizeNormalized(profile.normalizedText);
 
   const packScore = (c: BasketCandidate): number => {
     if (pieceWanted != null && Number.isFinite(pieceWanted)) {
@@ -162,9 +204,8 @@ export function rankSafeCandidatesForFast(
       if (bPlain !== aPlain) return bPlain - aPlain;
     }
     if (opts?.preferFreshChicken) {
-      const processed = (n: string) => /קפוא|מעובד|מעושן|נקניק|שניצל|נאגטס/.test(normalizeEmbedInput(n));
-      const aFresh = Number(!processed(a.name));
-      const bFresh = Number(!processed(b.name));
+      const aFresh = Number(!chickenNameIsUndesired(a.name, chickenQueryTokens));
+      const bFresh = Number(!chickenNameIsUndesired(b.name, chickenQueryTokens));
       if (bFresh !== aFresh) return bFresh - aFresh;
     }
 
