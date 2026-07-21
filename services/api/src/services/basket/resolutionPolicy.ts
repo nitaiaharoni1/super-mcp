@@ -1,10 +1,10 @@
 import {
+  buildQueryProfile,
   normalizeEmbedInput,
   parseExplicitPackConstraints,
-  queryBlocksFreshProduce,
-  queryLooksLikeProduce,
   resolvePurchaseQty,
   tokenizeNormalized,
+  type OntologySnapshot,
   type QueryProfile,
 } from "@super-mcp/shared";
 import { queryHeadAnchored } from "./equivalence.js";
@@ -52,38 +52,30 @@ function isSafelyPricable(item: ResolvedItem): boolean {
   return item.resolutionStatus === "resolved" || (item.productId != null && !item.lowConfidence);
 }
 
-function buildFastQueryProfile(item: BasketItemInput): QueryProfile {
+/**
+ * Same profile builder the resolve/rank path uses (`buildQueryProfile` + ontology
+ * extractConstraints) so brand/variant/dietary/organic/fat hard attrs feed
+ * `filterSafeCandidates`. Lexical-only fallback when ontology is unavailable.
+ */
+function buildProfileForFast(
+  item: BasketItemInput,
+  ontology: OntologySnapshot | null,
+): QueryProfile {
   const query = item.query?.trim() ?? "";
+  if (ontology && query) {
+    return buildQueryProfile(query, ontology, {
+      amount: item.amount ?? null,
+      unit: item.unit ?? null,
+    });
+  }
+
   const parsed = parseExplicitPackConstraints(query);
   const attributes: Record<string, string> = {};
   if (parsed.pieceCount) attributes.piece_count = parsed.pieceCount;
-
   const requestedAmount =
     item.amount != null && item.unit?.trim()
       ? { quantity: item.amount, unit: item.unit.trim() }
       : parsed.requestedAmount;
-
-  if (
-    requestedAmount &&
-    queryLooksLikeProduce(query) &&
-    !queryBlocksFreshProduce(query)
-  ) {
-    const unit = requestedAmount.unit.trim().toLowerCase();
-    if (unit === "kg" || unit === "g" || unit === "קג" || unit === 'ק"ג' || unit === "גרם") {
-      attributes.form = "fresh";
-    }
-  }
-
-  // Weighted chicken with no cut: prefer fresh meat form for staple filters.
-  if (
-    requestedAmount &&
-    (requestedAmount.unit.trim().toLowerCase() === "kg" ||
-      requestedAmount.unit.trim().toLowerCase() === "g") &&
-    tokenizeNormalized(normalizeEmbedInput(query)).includes("עוף") &&
-    !queryBlocksFreshProduce(query)
-  ) {
-    attributes.form = attributes.form ?? "fresh";
-  }
 
   return {
     normalizedText: normalizeEmbedInput(query),
@@ -255,13 +247,14 @@ function resolveFastOutcome(
   item: ResolvedItem,
   input: BasketItemInput,
   availability: Map<string, CandidateAvailability>,
+  ontology: OntologySnapshot | null,
 ): FastResolutionOutcome {
   if (isSafelyPricable(item)) {
     return { kind: "selected", item, assumption: null };
   }
 
   const query = input.query?.trim() ?? "";
-  const profile = buildFastQueryProfile(input);
+  const profile = buildProfileForFast(input, ontology);
   const pool = filterPool(item, query, profile);
 
   if (pool.length === 0) {
@@ -307,13 +300,14 @@ export function applyFastResolutionPolicy(
   items: BasketItemInput[],
   resolvedItems: ResolvedItem[],
   availability: Map<string, CandidateAvailability>,
+  ontology: OntologySnapshot | null = null,
 ): FastResolutionPolicyResult {
   const assumptions: BasketAssumption[] = [];
   const out: ResolvedItem[] = [];
 
   for (const item of resolvedItems) {
     const input = items[item.index] ?? {};
-    const outcome = resolveFastOutcome(item, input, availability);
+    const outcome = resolveFastOutcome(item, input, availability, ontology);
     switch (outcome.kind) {
       case "selected": {
         out.push(outcome.item);

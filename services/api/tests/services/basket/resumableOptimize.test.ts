@@ -24,6 +24,10 @@ vi.mock("../../../src/services/basket/commodityCoverage.js", () => ({
   enrichCommodityCoverage: (...args: unknown[]) => enrichCommodityCoverage(...args),
 }));
 
+vi.mock("../../../src/services/search/ontology.js", () => ({
+  getActiveOntology: vi.fn().mockResolvedValue(null),
+}));
+
 import { optimizeBasket } from "../../../src/services/basket/optimize.js";
 import { clearResolutionCache } from "../../../src/services/basket/resolutionCache.js";
 
@@ -204,6 +208,41 @@ describe("resumable optimizeBasket", () => {
     expect(result.questions[0]?.options[0]?.nearbyPricedStores).toBeGreaterThan(0);
     expect(loadBasketPricingData).not.toHaveBeenCalled();
     expect(enrichCommodityCoverage).not.toHaveBeenCalled();
+  });
+
+  it("keeps recommended-store lines for responseDetail standard (not summary-only trim)", async () => {
+    resolveItems.mockResolvedValue([resolvedSafe()]);
+    const standard = await optimizeBasket(
+      {
+        city: "הרצליה",
+        items: [{ query: "מלח גס", packQty: 1 }],
+        resolutionMode: "fast",
+        responseDetail: "standard",
+      },
+      OPTIONS,
+    );
+    expect(standard.status).toBe("complete");
+    if (standard.status !== "complete") throw new Error("expected complete");
+    expect(standard.bestSingleStore?.lines.length).toBeGreaterThan(0);
+
+    const summary = await optimizeBasket(
+      {
+        city: "הרצליה",
+        items: [{ query: "מלח גס", packQty: 1 }],
+        ...FAST,
+      },
+      OPTIONS,
+    );
+    expect(summary.status).toBe("complete");
+    if (summary.status !== "complete") throw new Error("expected complete");
+    // summary may clear multiStore lines; standard must not force-clear them.
+    if (standard.multiStore) {
+      expect(standard.multiStore.lines.length).toBeGreaterThan(0);
+    }
+    if (summary.multiStore && standard.multiStore) {
+      expect(summary.multiStore.lines.length).toBe(0);
+      expect(standard.multiStore.lines.length).toBeGreaterThan(0);
+    }
   });
 
   it("separates fast completion from strict confirmation on the same ambiguous input", async () => {

@@ -7,6 +7,7 @@ import {
   type StoreLocationMetadata,
 } from "../../lib/resolveStoreLocation.js";
 import { toSearchLocationParams } from "../search/locationScope.js";
+import { getActiveOntology } from "../search/ontology.js";
 import type { StoreSummary } from "../stores/index.js";
 import { enrichCommodityCoverage } from "./commodityCoverage.js";
 import {
@@ -17,9 +18,9 @@ import {
 } from "./continuation.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
 import { loadBasketPricingData, loadCandidateAvailability } from "./loadPricingData.js";
+import { priceStoreBasket } from "./priceStoreBasket.js";
 import { getResolution, putResolution } from "./resolutionCache.js";
 import { applyFastResolutionPolicy } from "./resolutionPolicy.js";
-import { priceStoreBasket } from "./priceStoreBasket.js";
 import {
   DEFAULT_QUESTION_OPTIONS_LIMIT,
   buildBasketQuestions,
@@ -304,7 +305,14 @@ async function optimizeInitialOrResumedBasket(
   }
 
   // Fast mode (or strict with nothing to ask): never return needs_confirmation.
-  const fastPolicy = applyFastResolutionPolicy(input.items, resolvedItems, availability);
+  // Ontology feeds hard query attrs (brand/variant/…) into filterSafeCandidates.
+  const ontology = await getActiveOntology();
+  const fastPolicy = applyFastResolutionPolicy(
+    input.items,
+    resolvedItems,
+    availability,
+    ontology,
+  );
   const pricingItems = fastPolicy.items;
   const assumptions: BasketAssumption[] = fastPolicy.assumptions;
   const pricedStatuses = buildItemStatuses(pricingItems);
@@ -412,11 +420,12 @@ async function optimizeInitialOrResumedBasket(
     cheapestCompleteStore = { ...cheapestCompleteStore, lines: [] };
   }
 
-  // summary/standard: drop multiStore line arrays (bestSingleStore keeps detail).
+  // summary only: trim bulky line arrays for payload bounds (<15KB golden).
+  // standard keeps recommended-store lines (incl. multiStore); compact projection is Task 7.
   let bestSingleStore = plans.bestSingleStore;
   let multiStore = plans.multiStore;
-  if (responseDetail === "summary" || responseDetail === "standard") {
-    if (responseDetail === "summary" && cheapestCompleteStore) {
+  if (responseDetail === "summary") {
+    if (cheapestCompleteStore) {
       cheapestCompleteStore = { ...cheapestCompleteStore, lines: [] };
     }
     if (multiStore) {
