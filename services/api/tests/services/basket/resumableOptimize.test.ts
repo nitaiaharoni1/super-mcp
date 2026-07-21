@@ -210,7 +210,7 @@ describe("resumable optimizeBasket", () => {
     expect(enrichCommodityCoverage).not.toHaveBeenCalled();
   });
 
-  it("keeps recommended-store lines for responseDetail standard (not summary-only trim)", async () => {
+  it("keeps recommended-store lines for summary and standard projections", async () => {
     resolveItems.mockResolvedValue([resolvedSafe()]);
     const standard = await optimizeBasket(
       {
@@ -235,14 +235,15 @@ describe("resumable optimizeBasket", () => {
     );
     expect(summary.status).toBe("complete");
     if (summary.status !== "complete") throw new Error("expected complete");
-    // summary may clear multiStore lines; standard must not force-clear them.
+    // Projection keeps storefront lines on included recommendation plans.
+    expect(summary.bestSingleStore?.lines.length).toBeGreaterThan(0);
     if (standard.multiStore) {
       expect(standard.multiStore.lines.length).toBeGreaterThan(0);
     }
-    if (summary.multiStore && standard.multiStore) {
-      expect(summary.multiStore.lines.length).toBe(0);
-      expect(standard.multiStore.lines.length).toBeGreaterThan(0);
+    if (summary.multiStore) {
+      expect(summary.multiStore.lines.length).toBeGreaterThan(0);
     }
+    expect(summary).not.toHaveProperty("stores");
   });
 
   it("separates fast completion from strict confirmation on the same ambiguous input", async () => {

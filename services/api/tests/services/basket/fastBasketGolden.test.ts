@@ -269,16 +269,22 @@ describe("fast one-call Tel Aviv staples golden", () => {
       OPTIONS,
     );
 
-    // Future contract (RED against today's confirmation-first default):
     expect(result.status).toBe("complete");
-    const future = result as typeof result & {
-      assumptions: Array<{ itemIndex: number }>;
-    };
-    expect(future.assumptions.map((entry) => entry.itemIndex)).toEqual(
+    expect(result).not.toHaveProperty("stores");
+    expect(result.items.every((item) => !("candidates" in item))).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(15_000);
+
+    if (result.status !== "complete") throw new Error("expected complete");
+    expect(result.assumptions.map((entry) => entry.itemIndex)).toEqual(
       expect.arrayContaining([0, 1, 7, 9]),
     );
+    expect(result.coverage).toMatchObject({
+      requestedLines: TEL_AVIV_STAPLES_ITEMS.length,
+      pricedLines: expect.any(Number),
+      omittedLines: expect.any(Number),
+    });
+    expect(Array.isArray(result.omittedItems)).toBe(true);
     expect(JSON.stringify(result)).not.toContain(forbiddenFastSelections.join("|"));
-    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(15_000);
 
     // Quantity invariants — preserve requested physical amounts.
     expect(result.items[4]).toMatchObject({ amount: 1, unit: "kg" });
@@ -286,18 +292,16 @@ describe("fast one-call Tel Aviv staples golden", () => {
     expect(result.items[7]).toMatchObject({ amount: 1.5, unit: "kg" });
     expect(result.items[9]).toMatchObject({ amount: 1, unit: "L" });
 
-    if (result.status === "complete") {
-      const pricedLines = [
-        ...(result.bestSingleStore?.lines ?? []),
-        ...(result.multiStore?.lines ?? []),
-      ];
-      expect(pricedLines.length).toBeGreaterThan(0);
-      for (const line of pricedLines) {
-        expect(line.qty).toBeGreaterThan(0);
-        // Weighted staples must not collapse into unrelated pack fractions.
-        if ([4, 5, 6, 7, 8, 9].includes(line.itemIndex)) {
-          expect(line.qty).not.toBe(0.3);
-        }
+    const pricedLines = [
+      ...(result.bestSingleStore?.lines ?? []),
+      ...(result.multiStore?.lines ?? []),
+    ];
+    expect(pricedLines.length).toBeGreaterThan(0);
+    for (const line of pricedLines) {
+      expect(line.qty).toBeGreaterThan(0);
+      // Weighted staples must not collapse into unrelated pack fractions.
+      if ([4, 5, 6, 7, 8, 9].includes(line.itemIndex)) {
+        expect(line.qty).not.toBe(0.3);
       }
     }
   });

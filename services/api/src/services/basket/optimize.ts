@@ -9,6 +9,7 @@ import {
 import { toSearchLocationParams } from "../search/locationScope.js";
 import { getActiveOntology } from "../search/ontology.js";
 import type { StoreSummary } from "../stores/index.js";
+import { projectBasketResult, resolveResponseDetail } from "./compactResult.js";
 import { enrichCommodityCoverage } from "./commodityCoverage.js";
 import {
   applyBasketAnswers,
@@ -41,6 +42,7 @@ import type {
   BasketOptimizeOptions,
   BasketOptimizeRequest,
   BasketOptimizeResult,
+  BasketPhaseTimings,
   BasketResumeInput,
   BasketStoreResult,
   CandidateAvailability,
@@ -151,29 +153,14 @@ function serializeQuestionStatuses(
   }));
 }
 
-function trimStoreResults(
+function limitStoreResults(
   storeResults: BasketStoreResult[],
   storesLimit: number | undefined,
-  verbose: boolean | undefined,
-  recommendedIds: Array<string | undefined>,
 ): { stores: BasketStoreResult[]; storesTruncated: boolean } {
   const limit =
     storesLimit === 0 ? storeResults.length : Math.max(1, storesLimit ?? DEFAULT_STORES_LIMIT);
-  const trimmed = storeResults.slice(0, limit);
-  const keep = new Set(recommendedIds.filter((id): id is string => Boolean(id)));
-  const stores =
-    verbose ?? false
-      ? trimmed
-      : trimmed.map((s) => (keep.has(s.storeId) ? s : { ...s, lines: [] }));
-  return { stores, storesTruncated: storeResults.length > trimmed.length };
-}
-
-interface BasketPhaseTimings {
-  searchMs: number;
-  classificationMs: number;
-  availabilityMs: number;
-  equivalenceMs: number;
-  pricingMs: number;
+  const stores = storeResults.slice(0, limit);
+  return { stores, storesTruncated: storeResults.length > stores.length };
 }
 
 function emitBasketOptimizeTelemetry(fields: {
@@ -288,20 +275,25 @@ async function optimizeInitialOrResumedBasket(
   // Public default is fast; treat missing mode as fast so one-call callers complete.
   const resolutionMode = input.resolutionMode ?? "fast";
 
+  const responseDetail = resolveResponseDetail(input.responseDetail, input.verbose);
+
   if (resolutionMode === "strict" && questions.length > 0) {
-    return buildNeedsConfirmationResult({
-      input,
-      options,
-      protocolState,
-      questions,
-      resolvedItems,
-      itemStatuses,
-      availability,
-      candidateStores,
-      location,
-      timings,
-      startedAt,
-    });
+    return projectBasketResult(
+      buildNeedsConfirmationResult({
+        input,
+        options,
+        protocolState,
+        questions,
+        resolvedItems,
+        itemStatuses,
+        availability,
+        candidateStores,
+        location,
+        timings,
+        startedAt,
+      }),
+      responseDetail,
+    );
   }
 
   // Fast mode (or strict with nothing to ask): never return needs_confirmation.
@@ -342,18 +334,22 @@ async function optimizeInitialOrResumedBasket(
       bestSingleStoreCoverage: null,
       continuationBytes: 0,
     });
-    return {
-      status: "complete",
-      bestSingleStore: null,
-      cheapestCompleteStore: null,
-      multiStore: null,
-      items: pricedStatuses.map((s) => ({ ...s, candidates: [] })),
-      stores: [],
-      storesCompared: 0,
-      storesTruncated: false,
-      location,
-      assumptions,
-    };
+    return projectBasketResult(
+      {
+        status: "complete",
+        bestSingleStore: null,
+        cheapestCompleteStore: null,
+        multiStore: null,
+        items: pricedStatuses,
+        stores: [],
+        storesCompared: 0,
+        storesTruncated: false,
+        location,
+        assumptions,
+        timings,
+      },
+      responseDetail,
+    );
   }
 
   const pricingStarted = Date.now();
@@ -401,41 +397,7 @@ async function optimizeInitialOrResumedBasket(
     applyStorePlanSubstitutions(pricedStatuses, plans.bestSingleStoreResult);
   }
 
-  const responseDetail = input.responseDetail ?? (input.verbose ? "debug" : "summary");
-  const verbose = responseDetail === "debug" || (input.verbose ?? false);
-
-  const { stores, storesTruncated } = trimStoreResults(
-    storeResults,
-    input.storesLimit,
-    verbose,
-    [plans.bestSingleStore?.storeId, plans.cheapestCompleteStore?.storeId],
-  );
-
-  const items = verbose ? pricedStatuses : pricedStatuses.map((s) => ({ ...s, candidates: [] }));
-
-  // Avoid duplicating the same store's line payload when coverage is already complete.
-  let cheapestCompleteStore = plans.cheapestCompleteStore;
-  if (
-    !verbose &&
-    cheapestCompleteStore &&
-    plans.bestSingleStore &&
-    cheapestCompleteStore.storeId === plans.bestSingleStore.storeId
-  ) {
-    cheapestCompleteStore = { ...cheapestCompleteStore, lines: [] };
-  }
-
-  // summary only: trim bulky line arrays for payload bounds (<15KB golden).
-  // standard keeps recommended-store lines (incl. multiStore); compact projection is Task 7.
-  let bestSingleStore = plans.bestSingleStore;
-  let multiStore = plans.multiStore;
-  if (responseDetail === "summary") {
-    if (cheapestCompleteStore) {
-      cheapestCompleteStore = { ...cheapestCompleteStore, lines: [] };
-    }
-    if (multiStore) {
-      multiStore = { ...multiStore, lines: [] };
-    }
-  }
+  const { stores, storesTruncated } = limitStoreResults(storeResults, input.storesLimit);
 
   emitBasketOptimizeTelemetry({
     protocolState,
@@ -443,27 +405,31 @@ async function optimizeInitialOrResumedBasket(
     resolvedLines,
     confirmedLines,
     unresolvedLines,
-    pricedLines: bestSingleStore?.pricedLines ?? 0,
+    pricedLines: plans.bestSingleStore?.pricedLines ?? 0,
     questionCount: 0,
     candidateStoreCount: candidateStores.length,
     timings,
     totalMs: Date.now() - startedAt,
-    bestSingleStoreCoverage: bestSingleStore?.coverageRatio ?? null,
+    bestSingleStoreCoverage: plans.bestSingleStore?.coverageRatio ?? null,
     continuationBytes: 0,
   });
 
-  return {
-    status: "complete",
-    bestSingleStore,
-    cheapestCompleteStore,
-    multiStore,
-    items,
-    stores,
-    storesCompared: storeResults.length,
-    storesTruncated,
-    location,
-    assumptions,
-  };
+  return projectBasketResult(
+    {
+      status: "complete",
+      bestSingleStore: plans.bestSingleStore,
+      cheapestCompleteStore: plans.cheapestCompleteStore,
+      multiStore: plans.multiStore,
+      items: pricedStatuses,
+      stores,
+      storesCompared: storeResults.length,
+      storesTruncated,
+      location,
+      assumptions,
+      timings,
+    },
+    responseDetail,
+  );
 }
 
 function buildNeedsConfirmationResult(args: {

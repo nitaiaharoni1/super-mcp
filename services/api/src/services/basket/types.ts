@@ -359,12 +359,49 @@ export interface BasketPreview {
   candidateStores: number;
 }
 
+/** Resume guidance for strict needs_confirmation (summary detail). */
+export interface BasketNextStep {
+  tool: "optimize_basket";
+  useOnly: ["continuation", "answers"];
+  doNotCall: ["search_products", "resolve_products", "compare_prices"];
+}
+
+/** Compact coverage counters for summary/standard projections. */
+export interface BasketCoverageSummary {
+  requestedLines: number;
+  pricedLines: number;
+  omittedLines: number;
+}
+
+/** Lines omitted under fast-mode safety (from assumptions). */
+export interface BasketOmittedItem {
+  itemIndex: number;
+  query: string | null;
+  reason: BasketAssumption["reason"];
+  message: string;
+}
+
+/** Phase timings attached on debug detail. */
+export interface BasketPhaseTimings {
+  searchMs: number;
+  classificationMs: number;
+  availabilityMs: number;
+  equivalenceMs: number;
+  pricingMs: number;
+}
+
+/** Item status without candidate shortlist (summary detail). */
+export type BasketSummaryItem = Omit<BasketItemStatus, "candidates">;
+
 export interface BasketNeedsConfirmationResult {
   status: "needs_confirmation";
   continuation: string;
   questions: BasketQuestion[];
   preview: BasketPreview;
-  items: BasketItemStatus[];
+  /** Present on standard/debug; omitted from summary to avoid duplicating question options. */
+  items?: BasketItemStatus[];
+  /** Present on summary detail so agents resume with continuation + answers only. */
+  nextStep?: BasketNextStep;
   location: StoreLocationMetadata;
 }
 
@@ -373,13 +410,19 @@ export interface BasketCompleteResult {
   bestSingleStore: BasketStorePlan | null;
   cheapestCompleteStore: BasketStorePlan | null;
   multiStore: BasketMultiStorePlan | null;
-  items: BasketItemStatus[];
-  stores: BasketStoreResult[];
-  storesCompared: number;
-  storesTruncated: boolean;
+  items: Array<BasketItemStatus | BasketSummaryItem>;
+  /** Omitted from summary; present on standard/debug. */
+  stores?: BasketStoreResult[];
+  storesCompared?: number;
+  storesTruncated?: boolean;
   location: StoreLocationMetadata;
   /** Best-effort choices and omissions surfaced in fast mode. */
   assumptions: BasketAssumption[];
+  /** Compact coverage for summary/standard. */
+  coverage?: BasketCoverageSummary;
+  omittedItems?: BasketOmittedItem[];
+  /** Debug-only phase timings. */
+  timings?: BasketPhaseTimings;
 }
 
 export type BasketOptimizeResult =

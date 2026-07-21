@@ -76,7 +76,7 @@ export const basketInitialRequestSchema = {
       type: "boolean",
       default: false,
       description:
-        "Deprecated. Prefer response_detail=debug. When false, per-store lines are returned only for recommended stores; missingItems always kept.",
+        "Deprecated. Prefer response_detail. When response_detail is absent, verbose=true maps to debug; otherwise ignored.",
     },
     resolution_mode: {
       type: "string",
@@ -89,7 +89,10 @@ export const basketInitialRequestSchema = {
       type: "string",
       enum: ["summary", "standard", "debug"],
       default: "summary",
-      description: "Controls response size. Use debug only for diagnostics.",
+      description:
+        "Controls response size. summary (default) returns compact recommendations + coverage; " +
+        "standard adds item statuses and store breakdowns; debug adds candidates, all store lines, and phase timings. " +
+        "Precedence: response_detail if supplied, else verbose=true → debug, else summary.",
     },
   },
 };
@@ -253,7 +256,7 @@ const basketQuestionSchema = {
 
 export const basketNeedsConfirmationResponseSchema = {
   type: "object",
-  required: ["status", "continuation", "questions", "preview", "items", "location"],
+  required: ["status", "continuation", "questions", "preview", "location"],
   properties: {
     status: { type: "string", enum: ["needs_confirmation"] },
     continuation: { type: "string" },
@@ -268,7 +271,30 @@ export const basketNeedsConfirmationResponseSchema = {
         candidateStores: { type: "integer" },
       },
     },
-    items: { type: "array", items: { type: "object" } },
+    items: {
+      type: "array",
+      items: { type: "object" },
+      description: "Present on standard/debug. Omitted from summary to avoid duplicating question options.",
+    },
+    nextStep: {
+      type: "object",
+      description: "Present on summary detail — resume with continuation + answers only.",
+      required: ["tool", "useOnly", "doNotCall"],
+      properties: {
+        tool: { type: "string", enum: ["optimize_basket"] },
+        useOnly: {
+          type: "array",
+          items: { type: "string", enum: ["continuation", "answers"] },
+        },
+        doNotCall: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["search_products", "resolve_products", "compare_prices"],
+          },
+        },
+      },
+    },
     location: storeLocationMetadataSchema,
   },
 };
@@ -309,9 +335,6 @@ export const basketCompleteResponseSchema = {
     "cheapestCompleteStore",
     "multiStore",
     "items",
-    "stores",
-    "storesCompared",
-    "storesTruncated",
     "location",
     "assumptions",
   ],
@@ -345,12 +368,62 @@ export const basketCompleteResponseSchema = {
         { type: "null" },
       ],
     },
-    items: { type: "array", items: { type: "object" } },
-    stores: { type: "array", items: { type: "object" } },
+    items: {
+      type: "array",
+      items: { type: "object" },
+      description:
+        "summary omits candidates; standard keeps statuses with empty candidates; debug includes candidates.",
+    },
+    stores: {
+      type: "array",
+      items: { type: "object" },
+      description: "Omitted from summary. standard keeps recommended-store lines; debug keeps all.",
+    },
     storesCompared: { type: "integer" },
     storesTruncated: { type: "boolean" },
     location: storeLocationMetadataSchema,
     assumptions: { type: "array", items: basketAssumptionSchema },
+    coverage: {
+      type: "object",
+      required: ["requestedLines", "pricedLines", "omittedLines"],
+      properties: {
+        requestedLines: { type: "integer" },
+        pricedLines: { type: "integer" },
+        omittedLines: { type: "integer" },
+      },
+    },
+    omittedItems: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["itemIndex", "query", "reason", "message"],
+        properties: {
+          itemIndex: { type: "integer" },
+          query: { type: "string", nullable: true },
+          reason: {
+            type: "string",
+            enum: [
+              "commodity_best_effort",
+              "generic_variant_default",
+              "location_city_fallback",
+              "unsafe_line_omitted",
+            ],
+          },
+          message: { type: "string" },
+        },
+      },
+    },
+    timings: {
+      type: "object",
+      description: "Debug-only phase timings (milliseconds).",
+      properties: {
+        searchMs: { type: "number" },
+        classificationMs: { type: "number" },
+        availabilityMs: { type: "number" },
+        equivalenceMs: { type: "number" },
+        pricingMs: { type: "number" },
+      },
+    },
   },
 };
 
