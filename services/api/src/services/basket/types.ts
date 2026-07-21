@@ -278,12 +278,17 @@ export interface BasketCoverage {
   coverageRatio: number;
 }
 
+/** Whether `total` covers every requested line or only the priced subset. */
+export type BasketTotalScope = "complete_basket" | "priced_lines_only";
+
 export interface BasketStorePlan extends BasketCoverage {
   storeId: string;
   storeName: string;
   chainId: string;
   chainName: string;
   total: number;
+  /** complete_basket when coverageRatio === 1; otherwise priced_lines_only. */
+  totalScope: BasketTotalScope;
   currency: string;
   distanceKm: number | null;
   lines: BasketLine[];
@@ -301,12 +306,16 @@ export interface MultiStoreLine {
   address: string | null;
   lineTotal: number;
   unitPrice: number;
+  promoApplied: boolean;
+  promoDescription: string | null;
   /** Storefront link to open this product on the chain's site. Null if the chain has no online store. */
   link: string | null;
 }
 
 export interface BasketMultiStorePlan extends BasketCoverage {
   total: number;
+  /** complete_basket when coverageRatio === 1; otherwise priced_lines_only. */
+  totalScope: BasketTotalScope;
   currency: string;
   storeCount: number;
   lines: MultiStoreLine[];

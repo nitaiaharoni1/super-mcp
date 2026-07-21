@@ -390,6 +390,10 @@ async function optimizeInitialOrResumedBasket(
       distanceReliable: location.distanceReliable,
     },
     input.items.length,
+    {
+      location,
+      storesById: new Map(candidateStores.map((store) => [store.id, store])),
+    },
   );
   timings.pricingMs = Date.now() - pricingStarted;
 

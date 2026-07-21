@@ -266,6 +266,8 @@ export function buildMultiStorePlan(
       address: best.store.address,
       lineTotal: best.line.lineTotal,
       unitPrice: best.line.unitPrice,
+      promoApplied: best.line.promoApplied,
+      promoDescription: best.line.promoDescription,
       link: best.line.link,
     });
   }

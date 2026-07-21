@@ -1,4 +1,4 @@
-import { hasValidStoreCoordinates, type GeoPoint } from "@super-mcp/shared";
+import { cityMatchKeys, hasValidStoreCoordinates, type GeoPoint } from "@super-mcp/shared";
 import {
   listStores,
   type ListStoresParams,
@@ -74,8 +74,73 @@ function isReliableGeoSource(geoSource: string | null): boolean {
   return geoSource === "address" || geoSource === "feed";
 }
 
+/** Branch-level coords safe for radius recommendations (matches priceStoreBasket). */
+function isBranchGeoSource(geoSource: string | null): boolean {
+  return geoSource === "address" || geoSource === "feed" || geoSource === "overpass";
+}
+
 function isCentroidOrUnknown(geoSource: string | null): boolean {
   return geoSource === "city_centroid" || geoSource == null;
+}
+
+function storeMatchesRequestedCity(store: StoreSummary, city: string): boolean {
+  if (store.city == null) return false;
+  const keys = new Set(cityMatchKeys(city));
+  if (keys.has(store.city)) return true;
+  return cityMatchKeys(store.city).some((key) => keys.has(key));
+}
+
+/**
+ * True when a store may appear in distance-scoped recommendations
+ * (bestSingleStore / cheapestCompleteStore / multiStore).
+ *
+ * Reliable near scope: require branch-level coordinates and distanceKm <= radius.
+ * City-level / unreliable distance: city membership only (distance ranking suppressed).
+ */
+export function isEligibleForDistanceRecommendation(
+  store: StoreSummary,
+  location: StoreLocationMetadata,
+): boolean {
+  const near = location.requested.near;
+  const city = location.requested.city;
+
+  if (!near) {
+    if (city) return storeMatchesRequestedCity(store, city);
+    return true;
+  }
+
+  if (!location.distanceReliable || location.precision === "city") {
+    if (city) return storeMatchesRequestedCity(store, city);
+    // Near with city-level honesty and no city filter — cannot honestly recommend.
+    return false;
+  }
+
+  const radiusKm = resolveRadiusKm(near, location.requested.radiusKm ?? undefined);
+  if (radiusKm == null) return isBranchGeoSource(store.geoSource) && store.distanceKm != null;
+  if (!isBranchGeoSource(store.geoSource)) return false;
+  if (store.distanceKm == null) return false;
+  return store.distanceKm <= radiusKm;
+}
+
+/**
+ * Drop known out-of-radius branches from a reliable near result set.
+ * Stores with unknown distance are kept as informational (recommendation filter
+ * excludes them later).
+ */
+function rejectKnownOutOfRadiusStores(
+  stores: StoreSummary[],
+  location: StoreLocationMetadata,
+): StoreSummary[] {
+  const near = location.requested.near;
+  if (!near || !location.distanceReliable || location.precision === "city") {
+    return stores;
+  }
+  const radiusKm = resolveRadiusKm(near, location.requested.radiusKm ?? undefined);
+  if (radiusKm == null) return stores;
+  return stores.filter((store) => {
+    if (store.distanceKm == null) return true;
+    return store.distanceKm <= radiusKm;
+  });
 }
 
 function coordsMatch(a: StoreSummary, b: StoreSummary): boolean {
@@ -155,7 +220,11 @@ export async function resolveStoreLocation(
   const stores = await loadStores(params);
   const location = requestedMetadata(params);
   if (stores.length > 0) {
-    return { stores, location: applyNearDistanceHonesty(stores, location) };
+    const honest = applyNearDistanceHonesty(stores, location);
+    return {
+      stores: rejectKnownOutOfRadiusStores(stores, honest),
+      location: honest,
+    };
   }
 
   if (params.city && params.near) {
@@ -174,7 +243,8 @@ export async function resolveStoreLocation(
           precision: "city",
           fallbackApplied: true,
           // Fell back off near — distance ranking is no longer near-based.
-          distanceReliable: true,
+          // City membership drives eligibility; do not treat as radius-reliable.
+          distanceReliable: false,
           warning:
             "Nearby precision unavailable because matching city branches lack valid coordinates; results use city scope.",
         },
