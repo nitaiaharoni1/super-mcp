@@ -193,6 +193,105 @@ describe("resolveGeocodeQuery", () => {
     );
   });
 
+  it("downgrades a fresh Nominatim hit to city precision when the resolved area is a different neighborhood", async () => {
+    query
+      .mockResolvedValueOnce({ rows: [] }) // cache miss
+      .mockResolvedValueOnce({ rowCount: 1 }); // put cache
+    // "נווה עמל" mis-resolves to a post office in "נווה עובד" (~1km off) at address precision.
+    vi.mocked(fetch).mockImplementation(
+      mockFetchJson(200, [
+        {
+          lat: "32.1667398",
+          lon: "34.8477053",
+          display_name: "בית הדואר הרצליה, 68, סוקולוב, נווה עובד, הרצליה, ישראל",
+          type: "post_office",
+          place_rank: 30,
+        },
+      ]),
+    );
+
+    const result = await resolveGeocodeQuery({ location: "נווה עמל", city: "הרצליה" });
+    expect(result.status).toBe("ok");
+    expect(result.provider).toBe("nominatim");
+    // Raw Nominatim precision was "address"; downgraded because "עמל" is absent from the result.
+    expect(result.precision).toBe("city");
+    expect(result.warning).toMatch(/approximate|different/i);
+    expect(result.point?.lat).toBeCloseTo(32.1667, 3);
+    // The cache still records the RAW nominatim precision; the downgrade is response-only.
+    expect(query.mock.calls[1]![1]).toEqual(
+      expect.arrayContaining(["hit", "nominatim", "address"]),
+    );
+  });
+
+  it("retroactively downgrades a cached wrong-neighborhood address hit", async () => {
+    const key = geocodeCacheKey("נווה עמל", "הרצליה");
+    query
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            query_key: key,
+            display_name: "בית הדואר הרצליה, 68, סוקולוב, נווה עובד, הרצליה, ישראל",
+            lat: 32.1667398,
+            lng: 34.8477053,
+            precision: "address",
+            provider: "nominatim",
+            status: "hit",
+            expires_at: new Date(Date.now() + 60_000),
+            hits: 5,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ rowCount: 1 }); // hits bump
+
+    const result = await resolveGeocodeQuery({ location: "נווה עמל", city: "הרצליה" });
+    expect(result.cached).toBe(true);
+    expect(result.precision).toBe("city");
+    expect(result.warning).toMatch(/approximate|different/i);
+    expect(result.point).toEqual({ lat: 32.1667398, lng: 34.8477053 });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("preserves precision when the resolved area matches the requested neighborhood", async () => {
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 });
+    vi.mocked(fetch).mockImplementation(
+      mockFetchJson(200, [
+        {
+          lat: "32.1674937",
+          lon: "34.8578354",
+          display_name: "נווה עמל, הרצליה, נפת תל אביב, ישראל",
+          addresstype: "suburb",
+        },
+      ]),
+    );
+
+    const result = await resolveGeocodeQuery({ location: "נווה עמל", city: "הרצליה" });
+    expect(result.precision).toBe("neighborhood");
+    expect(result.warning).toBeNull();
+  });
+
+  it("does not downgrade when the display name is transliterated (script mismatch)", async () => {
+    query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 });
+    vi.mocked(fetch).mockImplementation(
+      mockFetchJson(200, [
+        {
+          lat: "32.1674937",
+          lon: "34.8578354",
+          display_name: "Neve Oved, Herzliya, Israel",
+          addresstype: "suburb",
+        },
+      ]),
+    );
+
+    const result = await resolveGeocodeQuery({ location: "נווה עמל", city: "הרצליה" });
+    // Cannot compare Hebrew query tokens against a Latin display name — stay conservative.
+    expect(result.precision).toBe("neighborhood");
+    expect(result.warning).toBeNull();
+  });
+
   it("serializes Nominatim calls with ≥1s spacing", async () => {
     process.env.NOMINATIM_MIN_INTERVAL_MS = "1000";
     query.mockImplementation(async (sql: string) => {

@@ -19,6 +19,11 @@ vi.mock("../../../src/services/basket/loadPricingData.js", () => ({
   loadCandidateAvailability: (...args: unknown[]) => loadCandidateAvailability(...args),
 }));
 
+// commodityCoverage → loadProductClasses hits Postgres; unit tests have no DATABASE_URL in CI.
+vi.mock("../../../src/services/basket/productClasses.js", () => ({
+  loadProductClasses: vi.fn(async () => new Map()),
+}));
+
 import { optimizeBasket } from "../../../src/services/basket/optimize.js";
 
 const OPTIONS = { continuationSecret: "test-only-basket-continuation-secret-ok" };

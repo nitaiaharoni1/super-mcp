@@ -21,6 +21,11 @@ vi.mock("../../../src/lib/features.js", () => ({
   semanticV2Shadow: () => false,
 }));
 
+// resolveItems → loadProductClasses hits Postgres; unit tests have no DATABASE_URL in CI.
+vi.mock("../../../src/services/basket/productClasses.js", () => ({
+  loadProductClasses: vi.fn(async () => new Map()),
+}));
+
 import { resolveItems } from "../../../src/services/basket/resolve.js";
 
 function hitFor(query: string, id: string): SearchProductHit {

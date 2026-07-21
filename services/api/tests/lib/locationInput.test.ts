@@ -143,6 +143,25 @@ describe("applyLocationOriginHonesty", () => {
     expect(merged.origin?.provider).toBe("city_centroid");
   });
 
+  it("suppresses distance ranking for a nominatim origin downgraded to city on mismatch", () => {
+    // resolveGeocodeQuery downgrades a wrong-neighborhood Nominatim hit to city
+    // precision while keeping provider=nominatim; distance must still be suppressed.
+    const merged = applyLocationOriginHonesty(baseLocation(), {
+      precision: "city",
+      provider: "nominatim",
+      cached: false,
+      fallbackApplied: false,
+      displayName: "בית הדואר הרצליה, סוקולוב, נווה עובד, הרצליה",
+      attribution: "© OpenStreetMap contributors",
+      warning:
+        "Approximate match: the geocoder resolved this to a different area than the neighborhood requested; distance ranking may be imprecise.",
+    });
+    expect(merged.distanceReliable).toBe(false);
+    expect(merged.precision).toBe("city");
+    expect(merged.warning).toMatch(/approximate/i);
+    expect(merged.origin?.provider).toBe("nominatim");
+  });
+
   it("keeps distanceReliable for neighborhood origins when stores are reliable", () => {
     const merged = applyLocationOriginHonesty(baseLocation({ distanceReliable: true }), {
       precision: "neighborhood",

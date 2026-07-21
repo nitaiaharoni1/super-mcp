@@ -49,6 +49,98 @@ function cityCentroidFallback(
   return { point: centroid, displayName: canonical };
 }
 
+const APPROXIMATE_MATCH_WARNING =
+  "Approximate match: the geocoder resolved this to a different area than the neighborhood requested; distance ranking may be imprecise.";
+
+/**
+ * Hebrew place words that don't disambiguate a neighborhood on their own
+ * ("נווה עמל" and "נווה עובד" share "נווה"). Dropping them isolates the
+ * distinctive token so a wrong-neighborhood match is detectable.
+ */
+const GENERIC_PLACE_WORDS = new Set([
+  "נווה", "קרית", "קריית", "רמת", "גבעת", "כפר", "שכונת", "שכונה",
+  "מרכז", "העיר", "צפון", "דרום", "מזרח", "מערב", "רחוב", "שדרות",
+  "שד", "דרך", "סניף", "פינת",
+]);
+
+const hasHebrew = (s: string): boolean => /[֐-׿]/.test(s);
+
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/["'’.,\/()־-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The neighborhood portion of a free-text location, excluding the city. */
+function neighborhoodQueryPart(location: string, cityCanon: string | null): string {
+  const normalized = location.normalize("NFC").trim();
+  const firstSegment = normalized.split(",")[0]?.trim() || normalized;
+  if (cityCanon && normalizeForMatch(firstSegment) === normalizeForMatch(cityCanon)) {
+    return normalized.split(cityCanon).join(" ").trim() || normalized;
+  }
+  return firstSegment;
+}
+
+/** Distinctive Hebrew tokens of a place name (drops city, generic, and numeric tokens). */
+function distinctivePlaceTokens(text: string, cityCanon: string | null): string[] {
+  const cityTokens = new Set(
+    cityCanon ? normalizeForMatch(cityCanon).split(" ").filter(Boolean) : [],
+  );
+  return normalizeForMatch(text)
+    .split(" ")
+    .filter(
+      (t) =>
+        t.length >= 2 &&
+        hasHebrew(t) &&
+        !/^\d+$/.test(t) &&
+        !GENERIC_PLACE_WORDS.has(t) &&
+        !cityTokens.has(t),
+    );
+}
+
+/**
+ * True when Nominatim resolved a neighborhood query to a clearly different area:
+ * NONE of the query's distinctive place tokens appear in the returned display
+ * name (e.g. "נווה עמל" → a post office in "נווה עובד"). Gated on Hebrew script
+ * on both sides so transliterated display names never trigger a false positive.
+ */
+function isNeighborhoodMismatch(
+  location: string,
+  cityCanon: string | null,
+  displayName: string | null,
+): boolean {
+  if (!displayName || !hasHebrew(displayName)) return false;
+  const tokens = distinctivePlaceTokens(
+    neighborhoodQueryPart(location, cityCanon),
+    cityCanon,
+  );
+  if (tokens.length === 0) return false;
+  const haystack = normalizeForMatch(displayName);
+  return tokens.every((t) => !haystack.includes(t));
+}
+
+/**
+ * Downgrade a confident Nominatim hit to city precision when it resolved to the
+ * wrong neighborhood. City precision is honest here (we trust the city, not the
+ * sub-city point) and flips distanceReliable=false via applyLocationOriginHonesty.
+ * Applied to fresh and cached hits alike, so it retroactively repairs bad entries.
+ */
+function downgradeOnMismatch(
+  location: string,
+  cityCanon: string | null,
+  displayName: string | null,
+  precision: GeocodePrecision,
+): { precision: GeocodePrecision; warning: string | null } {
+  if (precision === "city") return { precision, warning: null };
+  if (isNeighborhoodMismatch(location, cityCanon, displayName)) {
+    return { precision: "city", warning: APPROXIMATE_MATCH_WARNING };
+  }
+  return { precision, warning: null };
+}
+
 function buildQueryText(location: string, city?: string | null): string {
   const loc = normalizeGeocodeQuery(location);
   const cityCanon = city?.trim() ? canonicalizeCity(city) ?? city.trim() : null;
@@ -89,19 +181,22 @@ export async function resolveGeocodeQuery(
   const cached = await getGeocodeCache(queryKey);
   if (cached) {
     if (cached.status === "hit" && cached.point && cached.precision) {
+      const isNominatim = cached.provider === "nominatim";
+      const adjusted = isNominatim
+        ? downgradeOnMismatch(location, cityCanon, cached.displayName, cached.precision)
+        : { precision: cached.precision, warning: null as string | null };
       return {
         status: "ok",
         point: cached.point,
-        precision: cached.precision,
+        precision: adjusted.precision,
         provider: cached.provider,
         cached: true,
         fallbackApplied: cached.provider === "city_centroid",
         displayName: cached.displayName,
-        attribution: cached.provider === "nominatim" ? osmAttribution() : null,
-        warning:
-          cached.provider === "city_centroid"
-            ? "Resolved via city centroid (cached); distance ranking may be imprecise."
-            : null,
+        attribution: isNominatim ? osmAttribution() : null,
+        warning: isNominatim
+          ? adjusted.warning
+          : "Resolved via city centroid (cached); distance ranking may be imprecise.",
       };
     }
     // Negative cache hit — still allow city centroid fallback when city known.
@@ -137,6 +232,8 @@ export async function resolveGeocodeQuery(
   const outcome = await nominatimSearchFreeText(queryText, { dedupeKey: queryKey });
 
   if (outcome.kind === "hit") {
+    // Cache the raw Nominatim precision; the mismatch downgrade is response-only
+    // so a later provider/data improvement isn't masked by a persisted downgrade.
     await putGeocodeCache({
       queryKey,
       displayName: outcome.hit.displayName,
@@ -145,16 +242,22 @@ export async function resolveGeocodeQuery(
       provider: "nominatim",
       status: "hit",
     });
+    const adjusted = downgradeOnMismatch(
+      location,
+      cityCanon,
+      outcome.hit.displayName,
+      outcome.hit.precision,
+    );
     return {
       status: "ok",
       point: outcome.hit.point,
-      precision: outcome.hit.precision,
+      precision: adjusted.precision,
       provider: "nominatim",
       cached: false,
       fallbackApplied: false,
       displayName: outcome.hit.displayName,
       attribution: osmAttribution(),
-      warning: null,
+      warning: adjusted.warning,
     };
   }
 

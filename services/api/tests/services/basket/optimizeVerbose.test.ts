@@ -23,6 +23,11 @@ vi.mock("../../../src/services/search/ontology.js", () => ({
   getActiveOntology: vi.fn().mockResolvedValue(null),
 }));
 
+// commodityCoverage → loadProductClasses hits Postgres; unit tests have no DATABASE_URL in CI.
+vi.mock("../../../src/services/basket/productClasses.js", () => ({
+  loadProductClasses: vi.fn(async () => new Map()),
+}));
+
 import { optimizeBasket } from "../../../src/services/basket/optimize.js";
 
 const OPTIONS = { continuationSecret: "test-only-basket-continuation-secret-ok" };

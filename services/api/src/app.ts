@@ -80,7 +80,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "no-referrer");
-    reply.header("Cross-Origin-Resource-Policy", "same-site");
+    // cross-origin: this is a public API/MCP host consumed from other sites/clients.
+    reply.header("Cross-Origin-Resource-Policy", "cross-origin");
     return payload;
   });
 

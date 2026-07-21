@@ -10,6 +10,11 @@ vi.mock("../../../src/services/basket/resolve.js", () => ({
   resolveItems: (...args: unknown[]) => resolveItems(...args),
 }));
 
+// commodityCoverage → loadProductClasses hits Postgres; unit tests have no DATABASE_URL in CI.
+vi.mock("../../../src/services/basket/productClasses.js", () => ({
+  loadProductClasses: vi.fn(async () => new Map()),
+}));
+
 vi.mock("../../../src/services/stores/index.js", () => ({
   listStores: (...args: unknown[]) => listStores(...args),
 }));
