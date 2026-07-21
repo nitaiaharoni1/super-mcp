@@ -106,6 +106,12 @@ function sweepIdleWindows(now: number): void {
   }
 }
 
+/** Test-only: clear the in-memory rate-limit windows so suites don't cross-contaminate. */
+export function _resetRateLimitForTests(): void {
+  RATE_WINDOWS.clear();
+  lastSweep = 0;
+}
+
 export function checkRateLimit(apiKeyId: string, limitPerMinute: number): void {
   const now = Date.now();
   sweepIdleWindows(now);
