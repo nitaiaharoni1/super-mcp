@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { canonicalizeCity, cityMatchKeys, displayCity } from "../../src/utils/cities.js";
+import {
+  canonicalizeCity,
+  cityMatchKeys,
+  displayCity,
+  extractCityFromLocation,
+} from "../../src/utils/cities.js";
 
 describe("canonicalizeCity", () => {
   it("maps CBS locality codes to Hebrew", () => {
@@ -39,5 +44,15 @@ describe("cityMatchKeys", () => {
 describe("displayCity", () => {
   it("shows Hebrew for coded cities", () => {
     expect(displayCity("6400")).toBe("הרצליה");
+  });
+});
+
+describe("extractCityFromLocation", () => {
+  it("extracts canonical cities from free-text addresses via longest word-boundary match", () => {
+    expect(extractCityFromLocation("רחוב בן גוריון, תל אביב")).toBe("תל אביב-יפו");
+    expect(extractCityFromLocation("אני גר במרכז תל אביב ליד בן גוריון")).toBe("תל אביב-יפו");
+    expect(extractCityFromLocation("נווה עמל, הרצליה")).toBe("הרצליה");
+    expect(extractCityFromLocation("אזור תעשייה ליד הרצליה")).toBe("הרצליה");
+    expect(extractCityFromLocation("אזור תעשייה")).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { GeocodeStrategy } from "@super-mcp/db";
 import {
   resolveLocationInput,
   type ResolvedLocationInput,
@@ -49,16 +50,36 @@ export type ToolLocationArgs = {
   radius_km?: number;
 };
 
+function mapGeocodeStrategy(
+  strategy: GeocodeStrategy | undefined,
+): GeocodeStrategy {
+  const value = strategy ?? "precise";
+  switch (value) {
+    case "fast":
+      return "fast";
+    case "precise":
+      return "precise";
+    default: {
+      const exhaustive: never = value;
+      return exhaustive;
+    }
+  }
+}
+
 /** Resolve MCP/REST location args into city / near GeoPoint / radius + provenance. */
 export async function resolveToolLocation(
   args: ToolLocationArgs,
+  opts: { geocodeStrategy?: GeocodeStrategy } = {},
 ): Promise<ResolvedLocationInput> {
-  return resolveLocationInput({
-    city: args.city,
-    near: args.near,
-    location: args.location,
-    radiusKm: args.radius_km,
-  });
+  return resolveLocationInput(
+    {
+      city: args.city,
+      near: args.near,
+      location: args.location,
+      radiusKm: args.radius_km,
+    },
+    { geocodeStrategy: mapGeocodeStrategy(opts.geocodeStrategy) },
+  );
 }
 
 export type { GeoPoint, ResolvedLocationInput };

@@ -1,6 +1,7 @@
 import {
   canonicalizeCity,
   centroidForCity,
+  extractCityFromLocation,
   type StoreCoordinates,
 } from "@super-mcp/shared";
 import {
@@ -17,10 +18,17 @@ import {
 
 export type GeocodeResolveStatus = "ok" | "not_found" | "unavailable";
 
+export type GeocodeStrategy = "fast" | "precise";
+
 export interface ResolveGeocodeQueryInput {
   location: string;
   /** Optional city hint to disambiguate and to qualify Nominatim / centroid fallback. */
   city?: string | null;
+  /**
+   * `fast` prefers cache then immediate city-centroid (no Nominatim).
+   * `precise` may call Nominatim; defaults to precise for backward compatibility.
+   */
+  strategy?: GeocodeStrategy;
 }
 
 export interface GeocodeResolveResult {
@@ -35,6 +43,9 @@ export interface GeocodeResolveResult {
   attribution: string | null;
   warning: string | null;
 }
+
+const FAST_CITY_CENTROID_WARNING =
+  "Using city-level location for a faster estimate; distances are approximate.";
 
 function cityCentroidFallback(
   city: string | null | undefined,
@@ -152,10 +163,26 @@ function buildQueryText(location: string, city?: string | null): string {
   return `${loc}, ${cityCanon}`;
 }
 
+function resolveStrategy(strategy: GeocodeStrategy | undefined): GeocodeStrategy {
+  const value = strategy ?? "precise";
+  switch (value) {
+    case "fast":
+      return "fast";
+    case "precise":
+      return "precise";
+    default: {
+      const exhaustive: never = value;
+      return exhaustive;
+    }
+  }
+}
+
 /**
  * Resolve a free-text user location to Israel coordinates.
- * Pipeline: cache → Nominatim → optional city-centroid fallback.
+ * Pipeline (precise): cache → Nominatim → optional city-centroid fallback.
+ * Pipeline (fast): cache → immediate city-centroid when a city is known (no Nominatim).
  * Never persists or logs the raw address; cache keys are HMAC digests.
+ * Fast city-centroid fallback is not persisted as a positive geocode hit.
  */
 export async function resolveGeocodeQuery(
   input: ResolveGeocodeQueryInput,
@@ -175,7 +202,9 @@ export async function resolveGeocodeQuery(
     };
   }
 
-  const cityHint = input.city?.trim() || null;
+  const strategy = resolveStrategy(input.strategy);
+  const cityHint =
+    input.city?.trim() || extractCityFromLocation(location) || null;
   const cityCanon = cityHint ? canonicalizeCity(cityHint) ?? cityHint : null;
   const queryKey = geocodeCacheKey(location, cityCanon);
   const cached = await getGeocodeCache(queryKey);
@@ -212,7 +241,9 @@ export async function resolveGeocodeQuery(
         displayName: fallback.displayName,
         attribution: null,
         warning:
-          "Geocoder found no match; using city centroid. Distance ranking may be imprecise.",
+          strategy === "fast"
+            ? FAST_CITY_CENTROID_WARNING
+            : "Geocoder found no match; using city centroid. Distance ranking may be imprecise.",
       };
     }
     return {
@@ -221,6 +252,36 @@ export async function resolveGeocodeQuery(
       precision: null,
       provider: null,
       cached: true,
+      fallbackApplied: false,
+      displayName: null,
+      attribution: null,
+      warning: "location not found",
+    };
+  }
+
+  if (strategy === "fast") {
+    const fallback = cityCentroidFallback(cityHint);
+    if (fallback) {
+      // Do not persist fast city-centroid as a positive hit — precise must still
+      // be able to reach Nominatim later for the same query key.
+      return {
+        status: "ok",
+        point: fallback.point,
+        precision: "city",
+        provider: "city_centroid",
+        cached: false,
+        fallbackApplied: true,
+        displayName: fallback.displayName,
+        attribution: null,
+        warning: FAST_CITY_CENTROID_WARNING,
+      };
+    }
+    return {
+      status: "not_found",
+      point: null,
+      precision: null,
+      provider: null,
+      cached: false,
       fallbackApplied: false,
       displayName: null,
       attribution: null,

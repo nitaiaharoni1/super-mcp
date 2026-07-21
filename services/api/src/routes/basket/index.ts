@@ -32,6 +32,21 @@ function mapResolutionMode(value: "fast" | "strict"): BasketResolutionMode {
   }
 }
 
+function geocodeStrategyForResolutionMode(
+  mode: BasketResolutionMode,
+): "fast" | "precise" {
+  switch (mode) {
+    case "fast":
+      return "fast";
+    case "strict":
+      return "precise";
+    default: {
+      const exhaustive: never = mode;
+      return exhaustive;
+    }
+  }
+}
+
 function mapResponseDetail(value: "summary" | "standard" | "debug"): BasketResponseDetail {
   switch (value) {
     case "summary":
@@ -63,12 +78,16 @@ export async function registerBasketRoutes(app: FastifyInstance): Promise<void> 
         };
       } else {
         const initial = basketInitialBodySchema.parse(body);
-        const loc = await resolveLocationInput({
-          city: initial.city,
-          near: initial.near,
-          location: initial.location,
-          radiusKm: initial.radius_km,
-        });
+        const resolutionMode = mapResolutionMode(initial.resolution_mode);
+        const loc = await resolveLocationInput(
+          {
+            city: initial.city,
+            near: initial.near,
+            location: initial.location,
+            radiusKm: initial.radius_km,
+          },
+          { geocodeStrategy: geocodeStrategyForResolutionMode(resolutionMode) },
+        );
         request = {
           items: initial.items.map((item) => ({
             productId: item.product_id,
@@ -86,7 +105,7 @@ export async function registerBasketRoutes(app: FastifyInstance): Promise<void> 
           storesLimit: initial.stores_limit,
           distancePenaltyPerKm: initial.distance_penalty_per_km,
           verbose: initial.verbose,
-          resolutionMode: mapResolutionMode(initial.resolution_mode),
+          resolutionMode,
           responseDetail: mapResponseDetail(initial.response_detail),
         };
       }

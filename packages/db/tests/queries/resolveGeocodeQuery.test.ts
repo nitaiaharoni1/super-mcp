@@ -75,6 +75,31 @@ describe("resolveGeocodeQuery", () => {
     _resetNominatimStateForTests();
   });
 
+  it("fast strategy returns embedded-city centroid without calling Nominatim", async () => {
+    query.mockResolvedValueOnce({ rows: [] }); // cache miss
+
+    const result = await resolveGeocodeQuery({
+      location: "רחוב בן גוריון, תל אביב",
+      strategy: "fast",
+    });
+
+    expect(result).toMatchObject({
+      status: "ok",
+      precision: "city",
+      provider: "city_centroid",
+      fallbackApplied: true,
+    });
+    expect(result.cached).toBe(false);
+    expect(result.displayName).toBe("תל אביב-יפו");
+    expect(result.warning).toBe(
+      "Using city-level location for a faster estimate; distances are approximate.",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    // Fast city-centroid must not be persisted as a positive geocode hit.
+    expect(query.mock.calls.length).toBe(1);
+    expect(String(query.mock.calls[0]![0])).toMatch(/SELECT/i);
+  });
+
   it("returns a cache hit without calling Nominatim", async () => {
     const key = geocodeCacheKey("נווה עמל", "הרצליה");
     query

@@ -74,6 +74,21 @@ function mapResolutionMode(value: "fast" | "strict" | undefined): BasketResoluti
   }
 }
 
+function geocodeStrategyForResolutionMode(
+  mode: BasketResolutionMode,
+): "fast" | "precise" {
+  switch (mode) {
+    case "fast":
+      return "fast";
+    case "strict":
+      return "precise";
+    default: {
+      const exhaustive: never = mode;
+      return exhaustive;
+    }
+  }
+}
+
 function mapResponseDetail(
   responseDetail: "summary" | "standard" | "debug" | undefined,
   verbose: boolean | undefined,
@@ -193,7 +208,10 @@ export function registerBasketTools(server: McpServer): void {
           400,
         );
       }
-      const loc = await resolveToolLocation(args);
+      const resolutionMode = mapResolutionMode(args.resolution_mode);
+      const loc = await resolveToolLocation(args, {
+        geocodeStrategy: geocodeStrategyForResolutionMode(resolutionMode),
+      });
       return optimizeBasket(
         {
           items: mapBasketItems(args.items),
@@ -205,7 +223,7 @@ export function registerBasketTools(server: McpServer): void {
           storesLimit: args.stores_limit,
           distancePenaltyPerKm: args.distance_penalty_per_km,
           verbose: args.verbose,
-          resolutionMode: mapResolutionMode(args.resolution_mode),
+          resolutionMode,
           responseDetail: mapResponseDetail(args.response_detail, args.verbose),
         },
         continuationOptions(),

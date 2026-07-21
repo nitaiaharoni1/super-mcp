@@ -1,8 +1,9 @@
 import {
   resolveGeocodeQuery,
   type GeocodeResolveResult,
+  type GeocodeStrategy,
 } from "@super-mcp/db";
-import { AppError, type GeoPoint } from "@super-mcp/shared";
+import { AppError, extractCityFromLocation, type GeoPoint } from "@super-mcp/shared";
 import { resolveRadiusKm } from "./defaults.js";
 import { parseNear } from "./geo.js";
 import type { StoreLocationMetadata } from "./resolveStoreLocation.js";
@@ -49,6 +50,7 @@ export interface ResolvedLocationInput {
 export type GeocodeResolver = (input: {
   location: string;
   city?: string | null;
+  strategy?: GeocodeStrategy;
 }) => Promise<GeocodeResolveResult>;
 
 function asNearString(near: string | GeoPoint | undefined): string | undefined {
@@ -60,6 +62,22 @@ function asNearString(near: string | GeoPoint | undefined): string | undefined {
   return `${near.lat},${near.lng}`;
 }
 
+function resolveGeocodeStrategy(
+  strategy: GeocodeStrategy | undefined,
+): GeocodeStrategy {
+  const value = strategy ?? "precise";
+  switch (value) {
+    case "fast":
+      return "fast";
+    case "precise":
+      return "precise";
+    default: {
+      const exhaustive: never = value;
+      return exhaustive;
+    }
+  }
+}
+
 /**
  * Resolve boundary location fields into city / near / radius + provenance.
  * - `near` is parsed locally (no network).
@@ -69,11 +87,16 @@ function asNearString(near: string | GeoPoint | undefined): string | undefined {
  */
 export async function resolveLocationInput(
   input: LocationInputFields,
-  opts: { resolveGeocode?: GeocodeResolver } = {},
+  opts: {
+    resolveGeocode?: GeocodeResolver;
+    /** Defaults to precise so non-basket tools keep Nominatim behavior. */
+    geocodeStrategy?: GeocodeStrategy;
+  } = {},
 ): Promise<ResolvedLocationInput> {
-  const city = input.city?.trim() || undefined;
+  const explicitCity = input.city?.trim() || undefined;
   const location = input.location?.trim() || undefined;
   const nearRaw = asNearString(input.near);
+  const geocodeStrategy = resolveGeocodeStrategy(opts.geocodeStrategy);
 
   if (nearRaw && location) {
     throw new AppError(
@@ -89,7 +112,7 @@ export async function resolveLocationInput(
         ? input.near
         : parseNear(nearRaw);
     return {
-      city,
+      city: explicitCity,
       near,
       radiusKm: resolveRadiusKm(near, input.radiusKm),
       locationOrigin: {
@@ -112,8 +135,14 @@ export async function resolveLocationInput(
         400,
       );
     }
+    const derivedCity =
+      explicitCity ?? extractCityFromLocation(location) ?? undefined;
     const resolve = opts.resolveGeocode ?? resolveGeocodeQuery;
-    const result = await resolve({ location, city });
+    const result = await resolve({
+      location,
+      city: derivedCity,
+      strategy: geocodeStrategy,
+    });
     if (result.status === "unavailable") {
       throw new AppError(
         "geocoding_unavailable",
@@ -133,7 +162,7 @@ export async function resolveLocationInput(
     const provider: LocationOriginProvider =
       result.provider === "city_centroid" ? "city_centroid" : "nominatim";
     return {
-      city,
+      city: derivedCity,
       near: result.point,
       radiusKm: resolveRadiusKm(result.point, input.radiusKm),
       locationOrigin: {
@@ -149,7 +178,7 @@ export async function resolveLocationInput(
   }
 
   return {
-    city,
+    city: explicitCity,
     near: undefined,
     radiusKm: input.radiusKm,
     locationOrigin: undefined,
