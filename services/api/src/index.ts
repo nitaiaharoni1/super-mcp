@@ -16,6 +16,27 @@ async function main(): Promise<void> {
   void import("./services/search/queryEmbedding.js").then((m) =>
     m.getQueryEmbedding("warmup").catch(() => undefined),
   );
+
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    app.log.info({ signal }, "shutting down");
+    try {
+      // Triggers onClose → PostHog flush.
+      await app.close();
+    } catch (err) {
+      app.log.error({ err }, "error during shutdown");
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
 }
 
 main().catch((err: unknown) => {

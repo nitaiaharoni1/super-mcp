@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  bindAnalyticsContext,
+  runWithAnalyticsContext,
+  type AnalyticsRequestContext,
+} from "../analytics/context.js";
 import { authenticate, recordUsage } from "../auth.js";
 import { beginPrivilegedAudit, finalizePrivilegedAudit } from "../services/privilegedAudit.js";
 import { protocolIdentityLine, resolveBuildRevision } from "./protocolIdentity.js";
@@ -28,7 +33,7 @@ export function buildMcpServerInstructions(
 /** Snapshot at module load for tests; recreate via buildMcpServerInstructions in createMcpServer. */
 export const MCP_SERVER_INSTRUCTIONS = buildMcpServerInstructions();
 
-function createMcpServer(): McpServer {
+function createMcpServer(analyticsCtx: AnalyticsRequestContext): McpServer {
   const instructions = buildMcpServerInstructions();
   const server = new McpServer(
     { name: "super-mcp", version: resolveBuildRevision() },
@@ -36,6 +41,8 @@ function createMcpServer(): McpServer {
       instructions,
     },
   );
+  // Bind before registerTools so every tool closure can resolve auth for capture.
+  bindAnalyticsContext(server, analyticsCtx);
   registerTools(server);
   return server;
 }
@@ -67,7 +74,11 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
     // must step out of the way. One fresh server+transport per request keeps this stateless
     // and safe for multiple server instances/no sticky sessions.
     reply.hijack();
-    const server = createMcpServer();
+    const analyticsCtx: AnalyticsRequestContext = {
+      apiKeyId: auth.apiKeyId,
+      role: auth.role,
+    };
+    const server = createMcpServer(analyticsCtx);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     const finalizeAudit = async (statusCode: number, errorCode: string | null): Promise<void> => {
@@ -88,8 +99,11 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
     });
 
     try {
-      await server.connect(transport);
-      await transport.handleRequest(request.raw, reply.raw, request.body);
+      // ALS backup + WeakMap primary (bound in createMcpServer).
+      await runWithAnalyticsContext(analyticsCtx, async () => {
+        await server.connect(transport);
+        await transport.handleRequest(request.raw, reply.raw, request.body);
+      });
     } catch (err) {
       auditErrorCode = "internal_error";
       request.log.error({ err }, "mcp request failed");

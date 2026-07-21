@@ -1,5 +1,8 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import { captureRestOperation } from "./analytics/capture.js";
+import { shouldTrackRestPath } from "./analytics/metadata.js";
+import { shutdownPostHog } from "./analytics/posthog.js";
 import { authenticate, authorize, recordUsage, type Capability } from "./auth.js";
 import { sendError, toAppError } from "./lib/errors.js";
 import { getOpenApiSpec } from "./openapi.js";
@@ -110,6 +113,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.addHook("onResponse", async (request, reply) => {
     if (request.auth) {
       const latency = Date.now() - (request.startTime || Date.now());
+      const route = request.routeOptions.url ?? request.url.split("?")[0] ?? request.url;
       if (request.privilegedAuditId) {
         try {
           await finalizePrivilegedAudit(
@@ -122,8 +126,24 @@ export async function buildApp(): Promise<FastifyInstance> {
           request.log.error({ err }, "failed to finalize privileged audit");
         }
       }
-      recordUsage(request.auth.apiKeyId, request.routeOptions.url ?? request.url, reply.statusCode, latency);
+      recordUsage(request.auth.apiKeyId, route, reply.statusCode, latency);
+      if (shouldTrackRestPath(route)) {
+        captureRestOperation({
+          route,
+          statusCode: reply.statusCode,
+          startedAt: request.startTime || Date.now(),
+          apiKeyId: request.auth.apiKeyId,
+          apiKeyRole: request.auth.role,
+          errorCode: request.privilegedAuditErrorCode,
+          body: request.body,
+          query: request.query,
+        });
+      }
     }
+  });
+
+  app.addHook("onClose", async () => {
+    await shutdownPostHog();
   });
 
   app.setErrorHandler((err, request, reply) => {

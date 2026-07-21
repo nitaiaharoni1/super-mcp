@@ -10,3 +10,19 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  - variable: NEXT_PUBLIC_ACCESS_EMAIL
+    secret: NEXT_PUBLIC_ACCESS_EMAIL
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_POSTHOG_KEY
+    secret: NEXT_PUBLIC_POSTHOG_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+  # Public EU ingest host — not a secret.
+  - variable: NEXT_PUBLIC_POSTHOG_HOST
+    value: https://eu.i.posthog.com
+    availability:
+      - BUILD
+      - RUNTIME
