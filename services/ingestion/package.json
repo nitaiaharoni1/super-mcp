@@ -15,7 +15,7 @@
     "basic-ftp": "^5.0.5",
     "dotenv": "^16.5.0",
     "fast-xml-parser": "^5.2.3",
-    "iconv-lite": "^0.6.3"
+    "iconv-lite": "^0.7.3"
   },
   "license": "Apache-2.0"
 }
