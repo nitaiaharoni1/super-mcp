@@ -4,7 +4,7 @@ Canonical, queryable, agent-native layer over Israeli supermarket price transpar
 
 **Stack:** TypeScript monorepo · Postgres · Fastify REST · remote MCP (Streamable HTTP)
 
-License: [Apache-2.0](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [Data](./DATA.md)
+License: [Apache-2.0](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) · [Data](./DATA.md) · [Issues](https://github.com/nitaiaharoni1/super-mcp/issues)
 
 See [docs/SPEC.md](./docs/SPEC.md) for the full product/engineering plan.
 
