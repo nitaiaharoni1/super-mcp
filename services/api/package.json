@@ -13,6 +13,7 @@
     "canary:basket": "tsx src/scripts/canaryBasket.ts",
     "canary:geocode": "tsx src/scripts/canaryGeocode.ts",
     "canary:mcp-contract": "tsx src/scripts/canaryMcpContract.ts",
+    "benchmark:fast-basket": "tsx src/scripts/benchmarkFastBasket.ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

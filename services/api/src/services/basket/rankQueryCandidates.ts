@@ -9,6 +9,7 @@ import {
   resolvePurchaseQty,
   tokenizeNormalized,
   type OntologySnapshot,
+  type QueryProfile,
   type RetrievalEvidence,
   type SemanticProfile,
 } from "@super-mcp/shared";
@@ -26,14 +27,211 @@ import {
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  isStapleIncompatible,
   preferQueryHeadAnchored,
   queryHeadAnchored,
 } from "./equivalence.js";
 import { brandMatches, classifyLineRisk, type RiskCandidate } from "./lineRisk.js";
 import { decideResolution } from "./resolutionDecision.js";
+import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
 import type { BasketCandidate, BasketSubstitutionMeta } from "./types.js";
 import { isVectorOnly } from "./vectorOnly.js";
+
+export interface SafePrimaryInput {
+  query: string;
+  profile: QueryProfile;
+  candidates: BasketCandidate[];
+}
+
+/** True when candidate variant satisfies an explicit query variant (diet↔diet_zero). */
+function variantMatchesWanted(wanted: string, got: string): boolean {
+  const dietWanted = wanted === "diet" || wanted === "diet_zero";
+  const dietGot = got === "diet_zero" || got === "diet";
+  if (dietWanted) return dietGot;
+  return got === wanted;
+}
+
+/** Candidates compatible with hard query intent (form, pack, domain, brand). */
+export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[] {
+  const { query, profile, candidates } = input;
+  const pieceCountRaw = profile.attributes.piece_count;
+  const pieceCount =
+    pieceCountRaw != null && pieceCountRaw !== ""
+      ? Number(pieceCountRaw)
+      : null;
+  const requireFreshProduce = profile.attributes.form === "fresh";
+  const brandWanted = profile.attributes.brand ?? null;
+  const variantWanted = profile.attributes.variant ?? null;
+
+  return candidates.filter((c) => {
+    if (
+      isStapleIncompatible(query, c, {
+        requireFreshProduce,
+        pieceCount: pieceCount != null && Number.isFinite(pieceCount) ? pieceCount : null,
+        requestedAmount: profile.requestedAmount,
+      })
+    ) {
+      return false;
+    }
+    // Explicit variant intent: reject regular and unlabeled peers (organic≠regular).
+    if (variantWanted) {
+      const got = c.variant ?? null;
+      if (!got || got === "regular") return false;
+      if (!variantMatchesWanted(variantWanted, got)) return false;
+    }
+    // Explicit brand intent: reject labeled conflicts (catalog brand or brand_extracted).
+    if (brandWanted) {
+      const candidateBrand = c.brandExtracted ?? null;
+      if (candidateBrand && !brandMatches(candidateBrand, brandWanted)) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Pick the first candidate compatible with hard query intent (fresh produce,
+ * pack count/volume, food vs personal-care). Unsafe peers are excluded so the
+ * same primary drives name, productId, equivalence, and question options.
+ */
+export function selectSafePrimary(input: SafePrimaryInput): BasketCandidate | null {
+  return filterSafeCandidates(input)[0] ?? null;
+}
+
+const EMPTY_FAST_AVAILABILITY = {
+  pricedStoreCount: 0,
+  chainCount: 0,
+  minPrice: null as number | null,
+};
+
+/** Processed / prepared chicken — never a safe default for generic עוף. */
+const PROCESSED_CHICKEN_TOKENS: ReadonlySet<string> = new Set([
+  "קפוא",
+  "קפואה",
+  "מעובד",
+  "מעושן",
+  "נקניק",
+  "נקניקיות",
+  "שניצל",
+  "נאגטס",
+]);
+
+/**
+ * Organ / carcass bits that share productClass with fresh chicken and pass
+ * head-anchor on fat catalogs. Reject for generic עוף unless the query names them.
+ */
+const ORGAN_CHICKEN_TOKENS: ReadonlySet<string> = new Set([
+  "קורקבן",
+  "כבד",
+  "לבבות",
+  "צוואר",
+  "גב",
+]);
+
+/**
+ * True when a chicken candidate name is processed or an unrequested organ cut.
+ * Token-based (not substring) so names like עגבניות are unaffected by "גב".
+ */
+export function chickenNameIsUndesired(
+  name: string,
+  queryTokens: readonly string[],
+): boolean {
+  const tokens = tokenizeNormalized(normalizeEmbedInput(name));
+  const querySet = new Set(queryTokens);
+  for (const token of tokens) {
+    if (PROCESSED_CHICKEN_TOKENS.has(token)) return true;
+    if (ORGAN_CHICKEN_TOKENS.has(token) && !querySet.has(token)) return true;
+  }
+  return false;
+}
+
+/**
+ * Preference order for fast best-effort selection among already-safe candidates:
+ * local price → regular/default → pack match → score → store/chain coverage.
+ */
+export function rankSafeCandidatesForFast(
+  candidates: BasketCandidate[],
+  availability: Map<
+    string,
+    { pricedStoreCount: number; chainCount: number; minPrice: number | null }
+  >,
+  profile: QueryProfile,
+  opts?: { preferCanola?: boolean; preferPlainMilk?: boolean; preferFreshChicken?: boolean },
+): BasketCandidate[] {
+  const pieceWanted =
+    profile.attributes.piece_count != null ? Number(profile.attributes.piece_count) : null;
+  const amountWanted = profile.requestedAmount;
+  const chickenQueryTokens = tokenizeNormalized(profile.normalizedText);
+
+  const packScore = (c: BasketCandidate): number => {
+    if (pieceWanted != null && Number.isFinite(pieceWanted)) {
+      return c.pieceCount === pieceWanted ? 1 : 0;
+    }
+    if (!amountWanted || c.sizeQty == null || !c.sizeUnit) return 0;
+    const unit = amountWanted.unit.trim().toLowerCase();
+    const cUnit = c.sizeUnit.trim().toLowerCase();
+    if (unit !== cUnit && !(unit === "l" && (cUnit === "l" || cUnit === "ליטר"))) return 0;
+    return Math.abs(c.sizeQty - amountWanted.quantity) < 1e-6 ? 1 : 0;
+  };
+
+  const isLocal = (c: BasketCandidate): boolean => {
+    if (c.hasLocalPrice) return true;
+    return (availability.get(c.productId) ?? EMPTY_FAST_AVAILABILITY).pricedStoreCount > 0;
+  };
+
+  const isRegular = (c: BasketCandidate): boolean =>
+    c.variant == null || c.variant === "regular";
+
+  return [...candidates].sort((a, b) => {
+    const localDiff = Number(isLocal(b)) - Number(isLocal(a));
+    if (localDiff !== 0) return localDiff;
+
+    const regDiff = Number(isRegular(b)) - Number(isRegular(a));
+    if (regDiff !== 0) return regDiff;
+
+    const packDiff = packScore(b) - packScore(a);
+    if (packDiff !== 0) return packDiff;
+
+    if (opts?.preferCanola) {
+      const aCanola = Number(normalizeEmbedInput(a.name).includes("קנולה"));
+      const bCanola = Number(normalizeEmbedInput(b.name).includes("קנולה"));
+      if (bCanola !== aCanola) return bCanola - aCanola;
+    }
+    if (opts?.preferPlainMilk) {
+      const flavor = (n: string) => /בטעם|וניל|שוקולד|אגוזי|לוז/.test(normalizeEmbedInput(n));
+      const aPlain = Number(isRegular(a) && !flavor(a.name));
+      const bPlain = Number(isRegular(b) && !flavor(b.name));
+      if (bPlain !== aPlain) return bPlain - aPlain;
+    }
+    if (opts?.preferFreshChicken) {
+      const aFresh = Number(!chickenNameIsUndesired(a.name, chickenQueryTokens));
+      const bFresh = Number(!chickenNameIsUndesired(b.name, chickenQueryTokens));
+      if (bFresh !== aFresh) return bFresh - aFresh;
+    }
+
+    if (b.score !== a.score) return b.score - a.score;
+
+    const aCov = (availability.get(a.productId) ?? EMPTY_FAST_AVAILABILITY).pricedStoreCount;
+    const bCov = (availability.get(b.productId) ?? EMPTY_FAST_AVAILABILITY).pricedStoreCount;
+    if (bCov !== aCov) return bCov - aCov;
+
+    const aChains = (availability.get(a.productId) ?? EMPTY_FAST_AVAILABILITY).chainCount;
+    const bChains = (availability.get(b.productId) ?? EMPTY_FAST_AVAILABILITY).chainCount;
+    if (bChains !== aChains) return bChains - aChains;
+
+    return a.productId.localeCompare(b.productId);
+  });
+}
+
+function emptyQueryProfile(query: string): QueryProfile {
+  return {
+    normalizedText: normalizeEmbedInput(query),
+    coreTerms: [],
+    category: null,
+    attributes: {},
+    requestedAmount: null,
+  };
+}
 
 /**
  * Single-token spirits/beer generics that must not auto-resolve via commodity
@@ -221,10 +419,11 @@ export function rankQueryCandidates(
     { tier: 1 | 2 | 3 | 0; relaxed: string[]; penaltyScore: number }
   >();
   let rankMs = 0;
+  let queryProfile: QueryProfile = emptyQueryProfile(item.query ?? "");
 
   if (ontology) {
     const rankStarted = Date.now();
-    const queryProfile = buildQueryProfile(item.query!, ontology, {
+    queryProfile = buildQueryProfile(item.query!, ontology, {
       amount: item.amount ?? null,
       unit: item.unit ?? null,
     });
@@ -307,9 +506,25 @@ export function rankQueryCandidates(
   // and can outrank real bottles on lexical score + local stock. Keep them in
   // the shortlist for transparency, but never ahead of head-anchored products.
   const shortlist = preferQueryHeadAnchored(item.query ?? "", shortlistRaw);
+
+  // Hard intent first: exclude traps before decideResolution / display primary.
+  // When nothing is safe, keep the empty list (do NOT re-admit unsafe candidates).
+  const rankedCandidates: BasketCandidate[] = shortlist.map((hit) =>
+    hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
+  );
+  const candidates = filterSafeCandidates({
+    query: item.query ?? "",
+    profile: queryProfile,
+    candidates: rankedCandidates,
+  });
+  const safeHits = candidates.flatMap((c) => {
+    const hit = shortlist.find((h) => h.id === c.productId);
+    return hit ? [hit] : [];
+  });
+
   let decision = decideResolution(
     item.query ?? "",
-    shortlist.map((hit) => ({
+    safeHits.map((hit) => ({
       ...hit,
       lexicalScore: hit.lexicalScore ?? hit.evidence?.lexicalScore ?? null,
       evidence: { ...defaultEvidence(hit), ...hit.evidence },
@@ -346,9 +561,9 @@ export function rankQueryCandidates(
       ...(sharedProfileBatch ? { profileBatchShared: true } : {}),
     }),
   );
-  const chosen = decision.productId
-    ? (shortlist.find((hit) => hit.id === decision.productId) ?? shortlist[0])
-    : shortlist[0];
+  let chosen = decision.productId
+    ? (safeHits.find((hit) => hit.id === decision.productId) ?? safeHits[0])
+    : safeHits[0];
   // Modifier-trap guard at the DECISION level (covers the normal auto-resolve
   // path, not just the needs_confirmation overrides): a strong lexical/name match
   // can still resolve a line to a product where the query word is a trailing
@@ -371,6 +586,7 @@ export function rankQueryCandidates(
       autoPrice: false,
     };
   }
+
   if (!chosen) {
     return {
       qty: item.packQty ?? item.amount ?? 1,
@@ -396,6 +612,7 @@ export function rankQueryCandidates(
     productName: chosen.name,
     pieceCount: chosen.pieceCount,
   });
+  assertPurchaseQtyPreservesRequest(item, purchase);
 
   let substitution: BasketSubstitutionMeta | null = null;
   if (
@@ -420,11 +637,6 @@ export function rankQueryCandidates(
     };
   }
 
-  // Build the candidate list once so risk classification, equivalence, and the
-  // response all read the same product_class / intentTier the gate assigned.
-  const candidates: BasketCandidate[] = shortlist.map((hit) =>
-    hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
-  );
   // BasketCandidate drops brand; the risk classifier needs it, so keep the raw
   // hit brand keyed by product id. NOTE: we deliberately do NOT fall back to the
   // LLM brand_extracted here. The commodity+variant+query-token path already pins
@@ -450,7 +662,6 @@ export function rankQueryCandidates(
     substitution,
     resolutionStatus: decision.status,
   };
-
   // Risk-aware overrides. Same-class near-duplicate ambiguity (commodity) is
   // pricing detail, not a user decision; brand-pinning / cross-class ambiguity
   // genuinely changes WHAT the user gets and must still confirm.
@@ -491,8 +702,7 @@ export function rankQueryCandidates(
     risk.kind === "commodity" &&
     overrideSafe &&
     candidates[0] != null &&
-    shortlist[0] != null &&
-    !isVectorOnly(shortlist[0]) &&
+    !isVectorOnly(chosen) &&
     queryHeadAnchored(queryText, candidates[0].name)
   ) {
     const equivalents = buildCommodityEquivalents(
@@ -533,8 +743,7 @@ export function rankQueryCandidates(
     risk.kind !== "cross_class" &&
     overrideSafe &&
     candidates[0] != null &&
-    shortlist[0] != null &&
-    !isVectorOnly(shortlist[0])
+    !isVectorOnly(chosen)
   ) {
     const equivalents = buildAvailabilityEquivalents(candidates, queryText, {
       maxEquivalents: searchConfig?.maxEquivalents ?? 5,
@@ -570,8 +779,7 @@ export function rankQueryCandidates(
     decision.status === "resolved" &&
     risk.kind === "commodity" &&
     base.productId != null &&
-    shortlist[0] != null &&
-    !isVectorOnly(shortlist[0])
+    !isVectorOnly(chosen)
   ) {
     const primary = candidates.find((c) => c.productId === base.productId) ?? candidates[0]!;
     const equivalents = buildCommodityEquivalents(

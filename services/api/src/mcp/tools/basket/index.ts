@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AppError } from "@super-mcp/shared";
 import { optimizeBasket } from "../../../services/basket/index.js";
+import type {
+  BasketResolutionMode,
+  BasketResponseDetail,
+} from "../../../services/basket/types.js";
 import { DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
 import { locationShape, resolveToolLocation } from "../shared/location.js";
@@ -56,6 +60,57 @@ function mapBasketItems(items: z.infer<typeof basketItemsSchema>) {
   }));
 }
 
+function mapResolutionMode(value: "fast" | "strict" | undefined): BasketResolutionMode {
+  const mode = value ?? "fast";
+  switch (mode) {
+    case "fast":
+      return "fast";
+    case "strict":
+      return "strict";
+    default: {
+      const exhaustive: never = mode;
+      return exhaustive;
+    }
+  }
+}
+
+function geocodeStrategyForResolutionMode(
+  mode: BasketResolutionMode,
+): "fast" | "precise" {
+  switch (mode) {
+    case "fast":
+      return "fast";
+    case "strict":
+      return "precise";
+    default: {
+      const exhaustive: never = mode;
+      return exhaustive;
+    }
+  }
+}
+
+function mapResponseDetail(
+  responseDetail: "summary" | "standard" | "debug" | undefined,
+  verbose: boolean | undefined,
+): BasketResponseDetail {
+  if (responseDetail != null) {
+    switch (responseDetail) {
+      case "summary":
+        return "summary";
+      case "standard":
+        return "standard";
+      case "debug":
+        return "debug";
+      default: {
+        const exhaustive: never = responseDetail;
+        return exhaustive;
+      }
+    }
+  }
+  if (verbose === true) return "debug";
+  return "summary";
+}
+
 function continuationOptions() {
   return {
     continuationSecret: process.env.BASKET_CONTINUATION_SECRET ?? "",
@@ -67,12 +122,17 @@ export function registerBasketTools(server: McpServer): void {
     server,
     "optimize_basket",
     {
-      title: "Resolve and price a shopping basket (resumable)",
+      title: "Optimize a grocery shopping list in one call",
       description:
-        "Call once with the original shopping list. If status is needs_confirmation, ask every " +
-        "returned question and call the same tool once more with only continuation and answers. " +
+        "For a multi-item grocery shopping list, find the cheapest store or suitable nearby " +
+        "multi-store option in one call. Fast mode is the default and returns a compact " +
+        "best-effort result without product-by-product searches. " +
+        "If status is needs_confirmation (strict mode), ask every returned question and call " +
+        "the same tool once more with only continuation and answers. " +
         "selectionEffect: representative→commodity peers, brand_family→same-brand compatible packs " +
         "(larger packs may appear as alternative_available), pin→exact SKU. " +
+        "When status is complete, plan totals (bestSingleStore / cheapestCompleteStore / multiStore) " +
+        "sum priced lines only — read totalScope; priced_lines_only is not the full basket total. " +
         "Never reconstruct items and do not call search_products per line. " +
         `Initial calls require city, near, and/or location (default ${DEFAULT_RADIUS_KM}km when a point is set). ` +
         "Prefer location for neighborhoods/addresses (e.g. 'נווה עמל, הרצליה'); near remains lat,lng.",
@@ -93,6 +153,19 @@ export function registerBasketTools(server: McpServer): void {
         stores_limit: z.number().int().min(0).max(500).optional(),
         distance_penalty_per_km: z.number().min(0).max(100).optional(),
         verbose: z.boolean().optional(),
+        resolution_mode: z
+          .enum(["fast", "strict"])
+          .optional()
+          .default("fast")
+          .describe(
+            "fast returns a best-effort priced basket in one call; strict pauses for material ambiguity.",
+          ),
+        // No field default: omitted must stay undefined so mapResponseDetail can
+        // upgrade verbose:true → debug (same as REST transform on absent field).
+        response_detail: z
+          .enum(["summary", "standard", "debug"])
+          .optional()
+          .describe("Controls response size. Use debug only for diagnostics."),
       },
     },
     async (args) => {
@@ -140,7 +213,10 @@ export function registerBasketTools(server: McpServer): void {
           400,
         );
       }
-      const loc = await resolveToolLocation(args);
+      const resolutionMode = mapResolutionMode(args.resolution_mode);
+      const loc = await resolveToolLocation(args, {
+        geocodeStrategy: geocodeStrategyForResolutionMode(resolutionMode),
+      });
       return optimizeBasket(
         {
           items: mapBasketItems(args.items),
@@ -148,10 +224,13 @@ export function registerBasketTools(server: McpServer): void {
           near: loc.near,
           radiusKm: loc.radiusKm,
           locationOrigin: loc.locationOrigin,
+          geocodeMs: loc.geocodeMs,
           includeClub: args.include_club,
           storesLimit: args.stores_limit,
           distancePenaltyPerKm: args.distance_penalty_per_km,
           verbose: args.verbose,
+          resolutionMode,
+          responseDetail: mapResponseDetail(args.response_detail, args.verbose),
         },
         continuationOptions(),
       );

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { CITY_CENTROID } from "@super-mcp/shared";
 import { resolveLocationInput } from "../../../src/lib/locationInput.js";
 import {
   applyBasketAnswers,
@@ -73,5 +74,80 @@ describe("location field + continuation freeze", () => {
     expect(resumed.near).toEqual(loc.near);
     expect(resumed.locationOrigin).toEqual(loc.locationOrigin);
     expect(resolveGeocode).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps basket resolution_mode fast→geocode fast and freezes city-centroid origin", async () => {
+    const resolveGeocode = vi.fn().mockResolvedValue({
+      status: "ok",
+      point: CITY_CENTROID["תל אביב-יפו"],
+      precision: "city",
+      provider: "city_centroid",
+      cached: false,
+      fallbackApplied: true,
+      displayName: "תל אביב-יפו",
+      attribution: null,
+      warning:
+        "Using city-level location for a faster estimate; distances are approximate.",
+    });
+
+    const loc = await resolveLocationInput(
+      { location: "רחוב בן גוריון, תל אביב" },
+      { resolveGeocode, geocodeStrategy: "fast" },
+    );
+    expect(resolveGeocode).toHaveBeenCalledWith({
+      location: "רחוב בן גוריון, תל אביב",
+      city: "תל אביב-יפו",
+      strategy: "fast",
+    });
+    expect(loc.locationOrigin?.precision).toBe("city");
+    expect(loc.locationOrigin?.fallbackApplied).toBe(true);
+
+    const payload = createBasketContinuationPayload(
+      {
+        city: loc.city,
+        near: loc.near,
+        radiusKm: loc.radiusKm,
+        locationOrigin: loc.locationOrigin,
+        items: [{ query: "מלח", packQty: 1 }],
+      },
+      [
+        {
+          itemIndex: 0,
+          selectionEffect: "pin",
+          allowedProductIds: [UUID],
+        },
+      ],
+    );
+    const decoded = decodeBasketContinuation(
+      encodeBasketContinuation(payload, SECRET),
+      SECRET,
+    );
+    expect(decoded.input.city).toBe("תל אביב-יפו");
+    expect(decoded.input.locationOrigin?.provider).toBe("city_centroid");
+    expect(JSON.stringify(decoded)).not.toContain("רחוב בן גוריון");
+  });
+
+  it("defaults geocode strategy to precise when resolution_mode is not fast", async () => {
+    const resolveGeocode = vi.fn().mockResolvedValue({
+      status: "ok",
+      point: { lat: 32.17, lng: 34.84 },
+      precision: "neighborhood",
+      provider: "nominatim",
+      cached: false,
+      fallbackApplied: false,
+      displayName: "Neve Amal, Herzliya",
+      attribution: "© OpenStreetMap contributors",
+      warning: null,
+    });
+
+    await resolveLocationInput(
+      { location: "נווה עמל", city: "הרצליה" },
+      { resolveGeocode, geocodeStrategy: "precise" },
+    );
+    expect(resolveGeocode).toHaveBeenCalledWith({
+      location: "נווה עמל",
+      city: "הרצליה",
+      strategy: "precise",
+    });
   });
 });

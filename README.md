@@ -85,14 +85,58 @@ Ingest drains `semantic_index_dirty` before reporting success; failures mark the
 
 Free-text basket lines resolve with **deterministic evidence first** (exact name/phrase, form/class gates); embeddings run only when lexical recall is weak. The API warms the query embedder on boot (fire-and-forget) to cut cold latency on the first basket call.
 
-**Agent / MCP flow (required):** call `optimize_basket` once with the shopping list near `city`/`near`. If `status` is `needs_confirmation`, answer every required `question` and call again with only `{continuation, answers}` — do not reconstruct items. If `status` is `complete`, use `bestSingleStore` / `cheapestCompleteStore` / `multiStore`. Questions include real nearby availability and at most three compact options. Pricing runs only after confirmation clears.
+**Agent / MCP flow (required):** call `optimize_basket` once with the full shopping list and `location` (or `city` / `near`). Default `resolution_mode=fast` returns a compact best-effort `complete` result in one call — assumptions are intentional. For exact product control, set `resolution_mode=strict`; then if `status` is `needs_confirmation`, answer every required `question` and call again with only `{continuation, answers}` — do not reconstruct items. When `status` is `complete`, use `bestSingleStore` / `cheapestCompleteStore` / `multiStore`.
 
-REST is the same single endpoint: `POST /v1/basket/optimize` (initial items+location, or resume with continuation+answers). Use `pack_qty` for shelf packs and `amount` + `unit` for weighed/counted goods — for example, 20 pitas is `{"amount":20,"unit":"יח"}`, not 20 packs. Deprecated `qty` is rejected.
+#### Default one-call example
 
-Requires `BASKET_CONTINUATION_SECRET` (≥32 bytes) for signed continuations. Live canary:
+```json
+// Request (MCP optimize_basket or POST /v1/basket/optimize)
+{
+  "location": "רחוב בן גוריון, תל אביב",
+  "items": [
+    { "query": "חלב", "pack_qty": 3 },
+    { "query": "ביצים תבנית 12", "pack_qty": 1 },
+    { "query": "לחם", "pack_qty": 2 },
+    { "query": "עגבניות", "amount": 1, "unit": "kg" },
+    { "query": "שמן", "amount": 1, "unit": "L" }
+  ]
+}
+
+// Compact complete response (response_detail=summary default)
+{
+  "status": "complete",
+  "resolutionMode": "fast",
+  "assumptions": [
+    { "itemIndex": 0, "query": "חלב", "reason": "commodity_peer", "message": "…" }
+  ],
+  "coverage": { "requestedLines": 5, "pricedLines": 5, "omittedLines": 0 },
+  "bestSingleStore": {
+    "storeName": "…",
+    "total": 84.5,
+    "totalScope": "priced_lines_only",
+    "pricedLines": 5,
+    "requestedLines": 5
+  }
+}
+```
+
+Fast mode may pick representative commodity peers and fall back to a city centroid when precise geocoding is unavailable; assumptions and `coverage` make that explicit. Use `resolution_mode=strict` when the shopper needs exact SKUs instead of best-effort completion.
+
+#### Migration
+
+```text
+Old default: strict confirmation when material candidate ambiguity remains.
+New default: fast best-effort completion.
+Compatibility: set resolution_mode=strict for old behavior.
+Deprecated: verbose; use response_detail=debug.
+```
+
+REST is the same single endpoint: `POST /v1/basket/optimize` (initial items+location, or resume with continuation+answers). Use `pack_qty` for shelf packs and `amount` + `unit` for weighed/counted goods — for example, 20 pitas is `{"amount":20,"unit":"יח"}`, not 20 packs. Deprecated `qty` is rejected. Protocol: `basket-optimize-fast-v2`.
+
+Requires `BASKET_CONTINUATION_SECRET` (≥32 bytes) for signed continuations. Operator canaries and rollout checklist: [docs/operations.md](./docs/operations.md). Live canary:
 
 ```bash
-BASKET_CONTINUATION_SECRET=test-only-basket-continuation-secret-ok \
+CANARY_BASKET_LOCATION="רחוב בן גוריון, תל אביב" \
   pnpm --filter @super-mcp/api canary:basket
 ```
 
@@ -225,11 +269,11 @@ See [docs/folder-conventions.md](./docs/folder-conventions.md) for target folder
 - `GET /v1/products/:id/history`
 - `GET /v1/chains` · `GET /v1/stores` — returns `{ stores, location }` (not a bare array); `?near=` defaults to **10km** radius
 - `GET /v1/promotions`
-- `POST /v1/basket/optimize` — resumable: initial `{items, city|near}` or resume `{continuation, answers}`; returns `needs_confirmation` or `complete` with `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
+- `POST /v1/basket/optimize` — one-call fast default: initial `{items, city|near|location}` returns compact `complete`; opt in with `resolution_mode=strict` for resumable `{continuation, answers}`; plans are `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
 - `GET /v1/usage`
 
 ## MCP tools
 
-`search_products` · `resolve_products` · `get_product` · `compare_prices` · `suggest_substitutes` · `optimize_basket` · `list_stores` · `get_promotions`
+`optimize_basket` · `search_products` · `resolve_products` · `get_product` · `compare_prices` · `suggest_substitutes` · `list_stores` · `get_promotions`
 
-Shopping lists: call `optimize_basket` with `{query, pack_qty}` or `{query, amount, unit}`. If confirmation is required, resume with `{continuation, answers}` only. Do not search each line first.
+Shopping lists: call `optimize_basket` once with `{query, pack_qty}` or `{query, amount, unit}` plus `location` (preferred) / `city` / `near`. Fast mode completes in one call; for exact products set `resolution_mode=strict` and, if confirmation is required, resume with `{continuation, answers}` only. Do not search each line first.

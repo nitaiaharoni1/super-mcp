@@ -13,8 +13,10 @@ export function registerSearchProductsTool(server: McpServer): void {
       description:
         "Search the canonical product catalog by free text (Hebrew or English), brand, category, or exact GTIN. " +
         "Also matches chain listing names. Prefer optimize_basket with query items for shopping lists — use this " +
-        "only to disambiguate a low_confidence item or when browsing. Returns canonical products (not per-chain " +
-        "detail); call get_product for listings.",
+        "only to disambiguate a low_confidence item or when browsing. " +
+        "Do not use this for a shopping list or after optimize_basket has started. " +
+        "Use optimize_basket directly; strict confirmation options are sufficient to resume. " +
+        "Returns canonical products (not per-chain detail); call get_product for listings.",
       inputSchema: {
         query: z.string().optional().describe("Free text search, Hebrew or English, e.g. 'חלב תנובה' or 'olive oil'."),
         category: z.string().optional().describe("Filter by internal category slug (l1 or l2), e.g. 'dairy'."),

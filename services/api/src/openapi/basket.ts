@@ -76,7 +76,23 @@ export const basketInitialRequestSchema = {
       type: "boolean",
       default: false,
       description:
-        "When false, per-store lines are returned only for recommended stores; missingItems always kept.",
+        "Deprecated. Prefer response_detail. When response_detail is absent, verbose=true maps to debug; otherwise ignored.",
+    },
+    resolution_mode: {
+      type: "string",
+      enum: ["fast", "strict"],
+      default: "fast",
+      description:
+        "fast returns a best-effort priced basket in one call; strict pauses for material ambiguity.",
+    },
+    response_detail: {
+      type: "string",
+      enum: ["summary", "standard", "debug"],
+      default: "summary",
+      description:
+        "Controls response size. summary (default) returns compact recommendations + coverage; " +
+        "standard adds item statuses and store breakdowns; debug adds candidates, all store lines, and phase timings. " +
+        "Precedence: response_detail if supplied, else verbose=true → debug, else summary.",
     },
   },
 };
@@ -147,18 +163,41 @@ const basketLineSchema = {
   },
 };
 
+const basketTotalScopeSchema = {
+  type: "string",
+  enum: ["complete_basket", "priced_lines_only"],
+  description:
+    "complete_basket when every requested line is priced; priced_lines_only when total " +
+    "covers only the priced subset (not the full basket).",
+};
+
 const basketStorePlanSchema = {
   allOf: [
     basketCoverageSchema,
     {
       type: "object",
-      required: ["storeId", "storeName", "chainId", "chainName", "total", "currency", "lines", "missingItems"],
+      required: [
+        "storeId",
+        "storeName",
+        "chainId",
+        "chainName",
+        "total",
+        "totalScope",
+        "currency",
+        "lines",
+        "missingItems",
+      ],
       properties: {
         storeId: { type: "string", format: "uuid" },
         storeName: { type: "string" },
         chainId: { type: "string", format: "uuid" },
         chainName: { type: "string" },
-        total: { type: "number" },
+        total: {
+          type: "number",
+          description:
+            "Sum of priced lines only. When totalScope is priced_lines_only this is not the full basket total.",
+        },
+        totalScope: basketTotalScopeSchema,
         currency: { type: "string" },
         distanceKm: { type: "number", nullable: true },
         lines: { type: "array", items: basketLineSchema },
@@ -217,7 +256,7 @@ const basketQuestionSchema = {
 
 export const basketNeedsConfirmationResponseSchema = {
   type: "object",
-  required: ["status", "continuation", "questions", "preview", "items", "location"],
+  required: ["status", "continuation", "questions", "preview", "location"],
   properties: {
     status: { type: "string", enum: ["needs_confirmation"] },
     continuation: { type: "string" },
@@ -232,8 +271,59 @@ export const basketNeedsConfirmationResponseSchema = {
         candidateStores: { type: "integer" },
       },
     },
-    items: { type: "array", items: { type: "object" } },
+    items: {
+      type: "array",
+      items: { type: "object" },
+      description: "Present on standard/debug. Omitted from summary to avoid duplicating question options.",
+    },
+    nextStep: {
+      type: "object",
+      description: "Present on summary detail — resume with continuation + answers only.",
+      required: ["tool", "useOnly", "doNotCall"],
+      properties: {
+        tool: { type: "string", enum: ["optimize_basket"] },
+        useOnly: {
+          type: "array",
+          items: { type: "string", enum: ["continuation", "answers"] },
+        },
+        doNotCall: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: ["search_products", "resolve_products", "compare_prices"],
+          },
+        },
+      },
+    },
     location: storeLocationMetadataSchema,
+  },
+};
+
+const basketAssumptionSchema = {
+  type: "object",
+  required: [
+    "itemIndex",
+    "query",
+    "selectedProductId",
+    "selectedName",
+    "reason",
+    "message",
+  ],
+  properties: {
+    itemIndex: { type: "integer" },
+    query: { type: "string", nullable: true },
+    selectedProductId: { type: "string", format: "uuid", nullable: true },
+    selectedName: { type: "string", nullable: true },
+    reason: {
+      type: "string",
+      enum: [
+        "commodity_best_effort",
+        "generic_variant_default",
+        "location_city_fallback",
+        "unsafe_line_omitted",
+      ],
+    },
+    message: { type: "string" },
   },
 };
 
@@ -245,10 +335,8 @@ export const basketCompleteResponseSchema = {
     "cheapestCompleteStore",
     "multiStore",
     "items",
-    "stores",
-    "storesCompared",
-    "storesTruncated",
     "location",
+    "assumptions",
   ],
   properties: {
     status: { type: "string", enum: ["complete"] },
@@ -261,8 +349,14 @@ export const basketCompleteResponseSchema = {
             basketCoverageSchema,
             {
               type: "object",
+              required: ["total", "totalScope", "currency", "storeCount", "lines", "missingItemIndexes"],
               properties: {
-                total: { type: "number" },
+                total: {
+                  type: "number",
+                  description:
+                    "Sum of priced lines only. When totalScope is priced_lines_only this is not the full basket total.",
+                },
+                totalScope: basketTotalScopeSchema,
                 currency: { type: "string" },
                 storeCount: { type: "integer" },
                 lines: { type: "array", items: { type: "object" } },
@@ -274,11 +368,62 @@ export const basketCompleteResponseSchema = {
         { type: "null" },
       ],
     },
-    items: { type: "array", items: { type: "object" } },
-    stores: { type: "array", items: { type: "object" } },
+    items: {
+      type: "array",
+      items: { type: "object" },
+      description:
+        "summary omits candidates; standard keeps statuses with empty candidates; debug includes candidates.",
+    },
+    stores: {
+      type: "array",
+      items: { type: "object" },
+      description: "Omitted from summary. standard keeps recommended-store lines; debug keeps all.",
+    },
     storesCompared: { type: "integer" },
     storesTruncated: { type: "boolean" },
     location: storeLocationMetadataSchema,
+    assumptions: { type: "array", items: basketAssumptionSchema },
+    coverage: {
+      type: "object",
+      required: ["requestedLines", "pricedLines", "omittedLines"],
+      properties: {
+        requestedLines: { type: "integer" },
+        pricedLines: { type: "integer" },
+        omittedLines: { type: "integer" },
+      },
+    },
+    omittedItems: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["itemIndex", "query", "reason", "message"],
+        properties: {
+          itemIndex: { type: "integer" },
+          query: { type: "string", nullable: true },
+          reason: {
+            type: "string",
+            enum: [
+              "commodity_best_effort",
+              "generic_variant_default",
+              "location_city_fallback",
+              "unsafe_line_omitted",
+            ],
+          },
+          message: { type: "string" },
+        },
+      },
+    },
+    timings: {
+      type: "object",
+      description: "Debug-only phase timings (milliseconds).",
+      properties: {
+        searchMs: { type: "number" },
+        classificationMs: { type: "number" },
+        availabilityMs: { type: "number" },
+        equivalenceMs: { type: "number" },
+        pricingMs: { type: "number" },
+      },
+    },
   },
 };
 
@@ -304,8 +449,9 @@ export const basketPaths = {
         "Call once with the original shopping list (city, near, or location required). If status is " +
         "needs_confirmation, ask every returned question and call again with only continuation and " +
         "answers. If status is complete, use bestSingleStore, cheapestCompleteStore, and multiStore. " +
-        "Never reconstruct items and do not call search_products per line. Prefer location for " +
-        "neighborhoods/addresses; near remains lat,lng.",
+        "Plan totals are the sum of priced lines; check totalScope — priced_lines_only means the total " +
+        "is not the full basket. Never reconstruct items and do not call search_products per line. " +
+        "Prefer location for neighborhoods/addresses; near remains lat,lng.",
       requestBody: {
         required: true,
         content: { "application/json": { schema: basketOptimizeRequestSchema } },

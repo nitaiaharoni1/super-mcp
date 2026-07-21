@@ -11,7 +11,7 @@ import {
 } from "@super-mcp/shared";
 import type { SearchProductHit } from "../search/types.js";
 import { queryHeadAnchored } from "./equivalence.js";
-import type { ResolutionStatus } from "./types.js";
+import type { BasketCandidate, CandidateAvailability, ResolutionStatus } from "./types.js";
 import { isVectorOnly } from "./vectorOnly.js";
 
 export interface ResolutionDecision {
@@ -218,8 +218,31 @@ function unresolvedDecision(): ResolutionDecision {
 }
 
 /**
+ * Fast-policy gate for a BasketCandidate: not vector-only, and either locally
+ * priced or present in the nearby availability map. Strict `decideResolution`
+ * margins are unchanged — this is only consulted by `applyFastResolutionPolicy`.
+ */
+export function isEligibleForFastBestEffortCandidate(
+  candidate: BasketCandidate,
+  availability: Map<string, CandidateAvailability>,
+): boolean {
+  if (
+    isVectorOnly({
+      matchedVia: candidate.matchedVia,
+      lexicalScore: candidate.matchedVia === "vector" ? 0 : candidate.score,
+    })
+  ) {
+    return false;
+  }
+  if (candidate.hasLocalPrice) return true;
+  const avail = availability.get(candidate.productId);
+  return (avail?.pricedStoreCount ?? 0) > 0;
+}
+
+/**
  * Decide whether a ranked shortlist may auto-resolve for pricing.
  * Uses lexical evidence and compatibility tier — never fused RRF scores or vector alone.
+ * Fast mode does not relax these margins; best-effort selection lives in resolutionPolicy.
  */
 export function decideResolution(
   queryText: string,

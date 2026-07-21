@@ -6,11 +6,12 @@ export function assertTargetBranchCoverage(
   result: Extract<BasketOptimizeResult, { status: "complete" }>,
   storeId: string,
 ): Record<string, unknown> {
-  const store = result.stores.find((s) => s.storeId === storeId);
+  const stores = result.stores ?? [];
+  const store = stores.find((s) => s.storeId === storeId);
   if (!store) {
     throw new Error(
       `canary: target store ${storeId} absent from verbose store results ` +
-        `(compared ${result.storesCompared}; returned ${result.stores.length})`,
+        `(compared ${result.storesCompared}; returned ${stores.length})`,
     );
   }
   const tahini = lineCoverage(store, TAHINI_INDEX);

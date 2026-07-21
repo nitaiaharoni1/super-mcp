@@ -14,7 +14,9 @@ export function registerResolveProductsTool(server: McpServer): void {
       description:
         "Resolve many free-text product queries (or GTINs) in one call. Returns top candidates with scores " +
         "for each query. Prefer optimize_basket for shopping lists; use this when you need to disambiguate " +
-        "several ambiguous items before comparing prices.",
+        "several ambiguous items before comparing prices. " +
+        "Do not use this for a shopping list or after optimize_basket has started. " +
+        "Use optimize_basket directly; strict confirmation options are sufficient to resume.",
       inputSchema: {
         queries: z
           .array(

@@ -17,6 +17,8 @@ export function registerComparePricesTool(server: McpServer): void {
         "Compare one product's current price across chains and store branches within a city, near a point, " +
         `or free-text location (default ${DEFAULT_RADIUS_KM}km). Results are sorted cheapest-first. Use ` +
         "sort='unit_price' to rank by ₪ per 100g / 100ml / unit (\"cheaper per 100g\") instead of pack price. " +
+        "Do not use this for a shopping list or after optimize_basket has started. " +
+        "Use optimize_basket directly; strict confirmation options are sufficient to resume. " +
         "Every price carries freshness: source_ts and ingested_at — treat source_ts older than ~48h as " +
         "possibly stale. Active promotions are applied to effective_price; list_price is the unpromoted " +
         "shelf price. Each row includes a `link` to open that product on the chain's online store " +

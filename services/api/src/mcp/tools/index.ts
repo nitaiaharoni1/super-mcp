@@ -4,7 +4,7 @@ import { registerBasketTools } from "./basket/index.js";
 import { registerStoreTools } from "./stores/index.js";
 
 export function registerTools(server: McpServer): void {
-  registerProductTools(server);
   registerBasketTools(server);
+  registerProductTools(server);
   registerStoreTools(server);
 }

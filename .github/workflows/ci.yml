@@ -93,3 +93,20 @@ jobs:
         with:
           name: semantic-benchmark-report
           path: benchmark-report.json
+      - name: Run fast-basket benchmark (hard gates)
+        # Populated DB is available in this job. Fail the build on latency/quality
+        # threshold breaches — do not silently tolerate gate failure.
+        env:
+          BASKET_CONTINUATION_SECRET: ci-only-basket-continuation-secret-32b
+          GEOCODING_CACHE_SECRET: ci-only-geocoding-cache-secret-32bytes
+          FAST_BASKET_BENCH_REPORT: ${{ github.workspace }}/fast-basket-benchmark.json
+          SUPER_MCP_BASKET_TELEMETRY: "0"
+        run: |
+          pnpm --filter @super-mcp/api benchmark:fast-basket
+          test -s "$GITHUB_WORKSPACE/fast-basket-benchmark.json" \
+            || { echo "fast-basket benchmark produced no JSON — it crashed"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fast-basket-benchmark-report
+          path: fast-basket-benchmark.json

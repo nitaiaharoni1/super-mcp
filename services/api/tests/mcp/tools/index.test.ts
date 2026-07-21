@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const optimizeBasket = vi.fn();
+
+vi.mock("../../../src/services/basket/index.js", () => ({
+  optimizeBasket: (...args: unknown[]) => optimizeBasket(...args),
+}));
+
+import { registerTools } from "../../../src/mcp/tools/index.js";
 import { registerProductTools } from "../../../src/mcp/tools/products/index.js";
 import { registerBasketTools } from "../../../src/mcp/tools/basket/index.js";
 import { registerStoreTools } from "../../../src/mcp/tools/stores/index.js";
@@ -9,11 +17,52 @@ import {
 } from "../../../src/mcp/protocolIdentity.js";
 import type { z } from "zod";
 
+const PRODUCT_LIST_STEER =
+  "Do not use this for a shopping list or after optimize_basket has started. " +
+  "Use optimize_basket directly; strict confirmation options are sufficient to resume.";
+
 describe("MCP domain tool registrars", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("exports one registrar per domain", () => {
     expect(typeof registerProductTools).toBe("function");
     expect(typeof registerBasketTools).toBe("function");
     expect(typeof registerStoreTools).toBe("function");
+  });
+
+  it("registers optimize_basket first with a discovery-first description lead", () => {
+    const registered: { name: string; title: string; description: string }[] = [];
+    const server = {
+      registerTool: (name: string, def: { title: string; description: string }) => {
+        registered.push({ name, title: def.title, description: def.description });
+      },
+    } as unknown as Parameters<typeof registerTools>[0];
+
+    registerTools(server);
+
+    expect(registered[0]?.name).toBe("optimize_basket");
+    expect(registered[0]?.title).toBe("Optimize a grocery shopping list in one call");
+    const lead = registered[0]!.description.slice(0, 200);
+    expect(lead).toContain("shopping list");
+    expect(lead).toContain("cheapest store");
+    expect(lead).toContain("one call");
+  });
+
+  it("steers product tools away from multi-item shopping lists", () => {
+    const definitions = new Map<string, { description: string }>();
+    const server = {
+      registerTool: (name: string, def: { description: string }) => {
+        definitions.set(name, def);
+      },
+    } as unknown as Parameters<typeof registerProductTools>[0];
+
+    registerProductTools(server);
+
+    for (const name of ["search_products", "resolve_products", "compare_prices"] as const) {
+      expect(definitions.get(name)?.description, name).toContain(PRODUCT_LIST_STEER);
+    }
   });
 
   it("registers only optimize_basket for shopping lists", () => {
@@ -53,6 +102,83 @@ describe("MCP domain tool registrars", () => {
     ).toThrow();
   });
 
+  it("publishes resolution_mode and response_detail with fast/summary defaults", () => {
+    const definitions = new Map<string, { inputSchema: z.ZodObject<z.ZodRawShape> }>();
+    const server = {
+      registerTool: (name: string, def: { inputSchema: z.ZodObject<z.ZodRawShape> }) => {
+        definitions.set(name, def);
+      },
+    } as unknown as Parameters<typeof registerBasketTools>[0];
+
+    registerBasketTools(server);
+
+    const shape = definitions.get("optimize_basket")?.inputSchema.shape;
+    expect(shape?.resolution_mode).toBeDefined();
+    expect(shape?.response_detail).toBeDefined();
+    expect(shape?.resolution_mode?.parse(undefined)).toBe("fast");
+    // response_detail stays undefined when omitted so verbose→debug can run in the mapper.
+    expect(shape?.response_detail?.parse(undefined)).toBeUndefined();
+    expect(shape?.resolution_mode?.parse("strict")).toBe("strict");
+    expect(shape?.response_detail?.parse("debug")).toBe("debug");
+  });
+
+  it("maps verbose true to responseDetail debug only when response_detail is absent", async () => {
+    optimizeBasket.mockResolvedValue({ status: "complete", assumptions: [] });
+
+    const definitions = new Map<
+      string,
+      {
+        inputSchema: z.ZodObject<z.ZodRawShape>;
+        handler: (args: Record<string, unknown>) => Promise<unknown>;
+      }
+    >();
+    const server = {
+      registerTool: (
+        name: string,
+        def: { inputSchema: z.ZodObject<z.ZodRawShape> },
+        handler: (args: Record<string, unknown>) => Promise<unknown>,
+      ) => {
+        definitions.set(name, { inputSchema: def.inputSchema, handler });
+      },
+    } as unknown as Parameters<typeof registerBasketTools>[0];
+
+    registerBasketTools(server);
+    const tool = definitions.get("optimize_basket");
+    expect(tool).toBeDefined();
+
+    const base = {
+      items: [{ query: "חלב", pack_qty: 1 }],
+      city: "תל אביב",
+    };
+
+    const parsedVerbose = tool!.inputSchema.parse({ ...base, verbose: true });
+    expect(parsedVerbose).toMatchObject({ verbose: true });
+    expect(parsedVerbose).not.toHaveProperty("response_detail");
+
+    await tool!.handler(parsedVerbose as Record<string, unknown>);
+    expect(optimizeBasket).toHaveBeenCalledWith(
+      expect.objectContaining({ responseDetail: "debug", verbose: true }),
+      expect.anything(),
+    );
+
+    optimizeBasket.mockClear();
+    const parsedExplicit = tool!.inputSchema.parse({
+      ...base,
+      response_detail: "summary",
+      verbose: true,
+    });
+    expect(parsedExplicit).toMatchObject({
+      response_detail: "summary",
+      verbose: true,
+    });
+
+    await tool!.handler(parsedExplicit as Record<string, unknown>);
+    expect(optimizeBasket).toHaveBeenCalledWith(
+      expect.objectContaining({ responseDetail: "summary", verbose: true }),
+      expect.anything(),
+    );
+  });
+
   it("registers every store tool with a strict schema that rejects unknown args", () => {
     const definitions = new Map<string, { inputSchema: z.ZodObject<z.ZodRawShape> }>();
     const server = {
@@ -81,6 +207,15 @@ describe("MCP domain tool registrars", () => {
   });
 
   it("directs agents through resumable optimize_basket confirmation", () => {
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(
+      /^Shopping list → call optimize_basket exactly once with all items and location\./,
+    );
+    expect(MCP_SERVER_INSTRUCTIONS).toContain(
+      "Accept the default fast best-effort choices unless the user explicitly requests exact products; then set resolution_mode=strict.",
+    );
+    expect(MCP_SERVER_INSTRUCTIONS).toContain(
+      "Never search or compare each basket line separately.",
+    );
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/optimize_basket/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/needs_confirmation/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/continuation/i);

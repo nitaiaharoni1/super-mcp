@@ -53,7 +53,7 @@ async function seed(): Promise<void> {
     const products = [
       { gtin: "7290000173199", name: "חלב תנובה 3% 1 ליטר", brand: "תנובה", qty: 1000, unit: "ml", cat1: "dairy", cat2: "milk" },
       { gtin: "7290110114853", name: "קוטג' 5% תנובה 250 גרם", brand: "תנובה", qty: 250, unit: "g", cat1: "dairy", cat2: "cheese" },
-      { gtin: "7290003029776", name: "לחם אחיד פרוס 750 גרם", brand: "אנגל", qty: 750, unit: "g", cat1: "bakery", cat2: "bread" },
+      { gtin: "7290003029776", name: "לחם אחיד 750 גרם", brand: "אנגל", qty: 750, unit: "g", cat1: "bakery", cat2: "bread" },
       { gtin: "7290112490463", name: "שמן זית כתית מעולה יד מרדכי 750 מ\"ל", brand: "יד מרדכי", qty: 750, unit: "ml", cat1: "pantry", cat2: "oil" },
       { gtin: "7290000066323", name: "ביצים L ארוז 12 יח", brand: "תנובה", qty: 12, unit: "unit", cat1: "dairy", cat2: "eggs" },
       { gtin: "7290119381234", name: "אורז בסמטי סוגת 1 ק\"ג", brand: "סוגת", qty: 1000, unit: "g", cat1: "pantry", cat2: "rice" },

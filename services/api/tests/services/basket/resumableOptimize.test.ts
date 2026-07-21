@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedItem } from "../../../src/services/basket/types.js";
 
+// One-call fast staples regression (default path): see fastBasketGolden.test.ts
+// and fixtures/telAvivStaplesBasket.ts. This suite remains the strict/resume contract.
+
 const resolveItems = vi.fn();
 const listStores = vi.fn();
 const loadBasketPricingData = vi.fn();
@@ -21,6 +24,10 @@ vi.mock("../../../src/services/basket/commodityCoverage.js", () => ({
   enrichCommodityCoverage: (...args: unknown[]) => enrichCommodityCoverage(...args),
 }));
 
+vi.mock("../../../src/services/search/ontology.js", () => ({
+  getActiveOntology: vi.fn().mockResolvedValue(null),
+}));
+
 import { optimizeBasket } from "../../../src/services/basket/optimize.js";
 import { clearResolutionCache } from "../../../src/services/basket/resolutionCache.js";
 
@@ -31,6 +38,9 @@ const PRODUCT_SAFE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const PRODUCT_A = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const PRODUCT_B = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const LISTING_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+const STRICT = { resolutionMode: "strict" as const, responseDetail: "summary" as const };
+const FAST = { resolutionMode: "fast" as const, responseDetail: "summary" as const };
 
 function candidate(productId: string, name: string, score = 0.9) {
   return {
@@ -176,7 +186,7 @@ describe("resumable optimizeBasket", () => {
   it("returns complete in one call when no required questions remain", async () => {
     resolveItems.mockResolvedValue([resolvedSafe()]);
     const result = await optimizeBasket(
-      { city: "הרצליה", items: [{ query: "מלח גס", packQty: 1 }] },
+      { city: "הרצליה", items: [{ query: "מלח גס", packQty: 1 }], ...STRICT },
       OPTIONS,
     );
     expect(result.status).toBe("complete");
@@ -188,7 +198,7 @@ describe("resumable optimizeBasket", () => {
   it("returns continuation and no final recommendations when confirmation is required", async () => {
     resolveItems.mockResolvedValue([resolvedAmbiguous()]);
     const result = await optimizeBasket(
-      { city: "הרצליה", items: [{ query: "פיתות", amount: 20, unit: "יח" }] },
+      { city: "הרצליה", items: [{ query: "פיתות", amount: 20, unit: "יח" }], ...STRICT },
       OPTIONS,
     );
     expect(result.status).toBe("needs_confirmation");
@@ -198,6 +208,88 @@ describe("resumable optimizeBasket", () => {
     expect(result.questions[0]?.options[0]?.nearbyPricedStores).toBeGreaterThan(0);
     expect(loadBasketPricingData).not.toHaveBeenCalled();
     expect(enrichCommodityCoverage).not.toHaveBeenCalled();
+  });
+
+  it("keeps recommended-store lines for summary and standard projections", async () => {
+    resolveItems.mockResolvedValue([resolvedSafe()]);
+    const standard = await optimizeBasket(
+      {
+        city: "הרצליה",
+        items: [{ query: "מלח גס", packQty: 1 }],
+        resolutionMode: "fast",
+        responseDetail: "standard",
+      },
+      OPTIONS,
+    );
+    expect(standard.status).toBe("complete");
+    if (standard.status !== "complete") throw new Error("expected complete");
+    expect(standard.bestSingleStore?.lines.length).toBeGreaterThan(0);
+
+    const summary = await optimizeBasket(
+      {
+        city: "הרצליה",
+        items: [{ query: "מלח גס", packQty: 1 }],
+        ...FAST,
+      },
+      OPTIONS,
+    );
+    expect(summary.status).toBe("complete");
+    if (summary.status !== "complete") throw new Error("expected complete");
+    // Projection keeps storefront lines on included recommendation plans.
+    expect(summary.bestSingleStore?.lines.length).toBeGreaterThan(0);
+    if (standard.multiStore) {
+      expect(standard.multiStore.lines.length).toBeGreaterThan(0);
+    }
+    if (summary.multiStore) {
+      expect(summary.multiStore.lines.length).toBeGreaterThan(0);
+    }
+    expect(summary).not.toHaveProperty("stores");
+  });
+
+  it("separates fast completion from strict confirmation on the same ambiguous input", async () => {
+    const input = {
+      city: "הרצליה",
+      items: [{ query: "פיתות", amount: 20, unit: "יח" }],
+    };
+    resolveItems.mockResolvedValue([resolvedAmbiguous()]);
+
+    const fast = await optimizeBasket({ ...input, ...FAST }, OPTIONS);
+    expect(fast.status).toBe("complete");
+    if (fast.status !== "complete") throw new Error("expected complete");
+    expect(fast.assumptions.some((a) => a.itemIndex === 0)).toBe(true);
+    expect(fast).not.toHaveProperty("continuation");
+    expect(loadBasketPricingData).toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    clearResolutionCache();
+    listStores.mockResolvedValue([
+      {
+        id: STORE_ID,
+        chainId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        chainName: "Test",
+        storeCode: "1",
+        name: "Test Store",
+        address: "Addr",
+        city: "הרצליה",
+        zip: null,
+        lat: 32.16,
+        lng: 34.84,
+        geoSource: "address",
+        distanceKm: 1,
+      },
+    ]);
+    loadCandidateAvailability.mockResolvedValue(
+      new Map([
+        [PRODUCT_A, { pricedStoreCount: 4, chainCount: 2, minPrice: 10 }],
+        [PRODUCT_B, { pricedStoreCount: 2, chainCount: 1, minPrice: 9 }],
+      ]),
+    );
+    resolveItems.mockResolvedValue([resolvedAmbiguous()]);
+
+    const strict = await optimizeBasket({ ...input, ...STRICT }, OPTIONS);
+    expect(strict.status).toBe("needs_confirmation");
+    if (strict.status !== "needs_confirmation") throw new Error("expected confirmation");
+    expect(loadBasketPricingData).not.toHaveBeenCalled();
   });
 
   it("resumes using only continuation and answers", async () => {
@@ -213,7 +305,7 @@ describe("resumable optimizeBasket", () => {
       ]);
 
     const first = await optimizeBasket(
-      { city: "הרצליה", items: [{ query: "פיתות", amount: 20, unit: "יח" }] },
+      { city: "הרצליה", items: [{ query: "פיתות", amount: 20, unit: "יח" }], ...STRICT },
       OPTIONS,
     );
     if (first.status !== "needs_confirmation") throw new Error("expected confirmation");
@@ -244,6 +336,25 @@ describe("resumable optimizeBasket", () => {
     });
   });
 
+  it("rejects resume answers outside the allowed product IDs", async () => {
+    resolveItems.mockResolvedValue([resolvedAmbiguous()]);
+    const first = await optimizeBasket(
+      { city: "הרצליה", items: [{ query: "פיתות", amount: 20, unit: "יח" }], ...STRICT },
+      OPTIONS,
+    );
+    if (first.status !== "needs_confirmation") throw new Error("expected confirmation");
+
+    await expect(
+      optimizeBasket(
+        {
+          continuation: first.continuation,
+          answers: [{ itemIndex: 0, productId: PRODUCT_SAFE }],
+        },
+        OPTIONS,
+      ),
+    ).rejects.toThrow(/allowed|product/i);
+  });
+
   it("reuses the cached resolution for non-answered lines by original index", async () => {
     const ambiguousAt0 = { ...resolvedAmbiguous(), index: 0 };
     const safeAt1 = { ...resolvedSafe(), index: 1 };
@@ -267,6 +378,7 @@ describe("resumable optimizeBasket", () => {
           { query: "פיתות", amount: 20, unit: "יח" },
           { query: "מלח גס", packQty: 1 },
         ],
+        ...STRICT,
       },
       OPTIONS,
     );

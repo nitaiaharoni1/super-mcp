@@ -54,6 +54,27 @@ export interface BasketLocationInput {
    * Frozen into the signed continuation so resume never re-geocodes.
    */
   locationOrigin?: BasketLocationOrigin;
+  /**
+   * Milliseconds spent resolving location before optimize (boundary-measured).
+   * Kept separate from basket phase timings.
+   */
+  geocodeMs?: number;
+}
+
+export type BasketResolutionMode = "fast" | "strict";
+export type BasketResponseDetail = "summary" | "standard" | "debug";
+
+export interface BasketAssumption {
+  itemIndex: number;
+  query: string | null;
+  selectedProductId: string | null;
+  selectedName: string | null;
+  reason:
+    | "commodity_best_effort"
+    | "generic_variant_default"
+    | "location_city_fallback"
+    | "unsafe_line_omitted";
+  message: string;
 }
 
 export interface BasketInitialInput extends BasketLocationInput {
@@ -67,8 +88,13 @@ export interface BasketInitialInput extends BasketLocationInput {
    * When false (default), per-store `lines` are dropped from every store except
    * the recommended ones (bestSingleStore / cheapestCompleteStore) to keep the
    * response small; `missingItems` is always kept. Set true for full detail.
+   * @deprecated Prefer `responseDetail: "debug"`. Kept for migration compatibility.
    */
   verbose?: boolean;
+  /** fast (default) best-effort one-call; strict pauses for material ambiguity. */
+  resolutionMode: BasketResolutionMode;
+  /** summary (default) | standard | debug — controls response size. */
+  responseDetail: BasketResponseDetail;
 }
 
 export interface BasketAnswer {
@@ -257,12 +283,17 @@ export interface BasketCoverage {
   coverageRatio: number;
 }
 
+/** Whether `total` covers every requested line or only the priced subset. */
+export type BasketTotalScope = "complete_basket" | "priced_lines_only";
+
 export interface BasketStorePlan extends BasketCoverage {
   storeId: string;
   storeName: string;
   chainId: string;
   chainName: string;
   total: number;
+  /** complete_basket when coverageRatio === 1; otherwise priced_lines_only. */
+  totalScope: BasketTotalScope;
   currency: string;
   distanceKm: number | null;
   lines: BasketLine[];
@@ -280,12 +311,16 @@ export interface MultiStoreLine {
   address: string | null;
   lineTotal: number;
   unitPrice: number;
+  promoApplied: boolean;
+  promoDescription: string | null;
   /** Storefront link to open this product on the chain's site. Null if the chain has no online store. */
   link: string | null;
 }
 
 export interface BasketMultiStorePlan extends BasketCoverage {
   total: number;
+  /** complete_basket when coverageRatio === 1; otherwise priced_lines_only. */
+  totalScope: BasketTotalScope;
   currency: string;
   storeCount: number;
   lines: MultiStoreLine[];
@@ -329,12 +364,49 @@ export interface BasketPreview {
   candidateStores: number;
 }
 
+/** Resume guidance for strict needs_confirmation (summary detail). */
+export interface BasketNextStep {
+  tool: "optimize_basket";
+  useOnly: ["continuation", "answers"];
+  doNotCall: ["search_products", "resolve_products", "compare_prices"];
+}
+
+/** Compact coverage counters for summary/standard projections. */
+export interface BasketCoverageSummary {
+  requestedLines: number;
+  pricedLines: number;
+  omittedLines: number;
+}
+
+/** Lines omitted under fast-mode safety (from assumptions). */
+export interface BasketOmittedItem {
+  itemIndex: number;
+  query: string | null;
+  reason: BasketAssumption["reason"];
+  message: string;
+}
+
+/** Phase timings attached on debug detail. */
+export interface BasketPhaseTimings {
+  searchMs: number;
+  classificationMs: number;
+  availabilityMs: number;
+  equivalenceMs: number;
+  pricingMs: number;
+}
+
+/** Item status without candidate shortlist (summary detail). */
+export type BasketSummaryItem = Omit<BasketItemStatus, "candidates">;
+
 export interface BasketNeedsConfirmationResult {
   status: "needs_confirmation";
   continuation: string;
   questions: BasketQuestion[];
   preview: BasketPreview;
-  items: BasketItemStatus[];
+  /** Present on standard/debug; omitted from summary to avoid duplicating question options. */
+  items?: BasketItemStatus[];
+  /** Present on summary detail so agents resume with continuation + answers only. */
+  nextStep?: BasketNextStep;
   location: StoreLocationMetadata;
 }
 
@@ -343,11 +415,19 @@ export interface BasketCompleteResult {
   bestSingleStore: BasketStorePlan | null;
   cheapestCompleteStore: BasketStorePlan | null;
   multiStore: BasketMultiStorePlan | null;
-  items: BasketItemStatus[];
-  stores: BasketStoreResult[];
-  storesCompared: number;
-  storesTruncated: boolean;
+  items: Array<BasketItemStatus | BasketSummaryItem>;
+  /** Omitted from summary; present on standard/debug. */
+  stores?: BasketStoreResult[];
+  storesCompared?: number;
+  storesTruncated?: boolean;
   location: StoreLocationMetadata;
+  /** Best-effort choices and omissions surfaced in fast mode. */
+  assumptions: BasketAssumption[];
+  /** Compact coverage for summary/standard. */
+  coverage?: BasketCoverageSummary;
+  omittedItems?: BasketOmittedItem[];
+  /** Debug-only phase timings. */
+  timings?: BasketPhaseTimings;
 }
 
 export type BasketOptimizeResult =

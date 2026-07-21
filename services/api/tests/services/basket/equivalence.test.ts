@@ -246,6 +246,35 @@ describe("buildCommodityEquivalents", () => {
       top,
     ]);
   });
+
+  it("excludes crushed/canned tomato and potato flour/gnocchi traps from fresh produce sets", () => {
+    const top = c({ name: "עגבניות חממה" });
+    const tomatoSet = buildCommodityEquivalents(
+      top,
+      [top, c({ name: "עגבניות מרוסקות 850 גרם" }), c({ name: "עגבניות שרי" })],
+      "עגבניות",
+      5,
+    );
+    const names = tomatoSet.map((x) => x.name);
+    expect(names).not.toContain("עגבניות מרוסקות 850 גרם");
+    expect(names).toContain("עגבניות שרי");
+
+    const potatoTop = c({ name: "תפוחי אדמה ארוזים", productClass: "produce" });
+    const potatoSet = buildCommodityEquivalents(
+      potatoTop,
+      [
+        potatoTop,
+        c({ name: "קמח תפוחי אדמה 500 גרם" }),
+        c({ name: "ניוקי תפוחי אדמה" }),
+        c({ name: "תפוחי אדמה אדומים" }),
+      ],
+      "תפוחי אדמה",
+      5,
+    );
+    const potatoNames = potatoSet.map((x) => x.name);
+    expect(potatoNames).not.toContain("קמח תפוחי אדמה 500 גרם");
+    expect(potatoNames).not.toContain("ניוקי תפוחי אדמה");
+  });
 });
 
 describe("buildAvailabilityEquivalents", () => {

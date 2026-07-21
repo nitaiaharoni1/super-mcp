@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveStoreLocation } from "../../src/lib/resolveStoreLocation.js";
+import {
+  isEligibleForDistanceRecommendation,
+  resolveStoreLocation,
+  type StoreLocationMetadata,
+} from "../../src/lib/resolveStoreLocation.js";
 import type { StoreSummary } from "../../src/services/stores/listStores.js";
 
 function store(overrides: Partial<StoreSummary> = {}): StoreSummary {
@@ -187,5 +191,108 @@ describe("resolveStoreLocation", () => {
     expect(result.location.distanceReliable).toBe(true);
     expect(result.location.precision).toBe("radius");
     expect(result.location.warning).toBeNull();
+  });
+
+  it("rejects known out-of-radius branches from a reliable near scope", async () => {
+    const near = { lat: 32.0819, lng: 34.7712 };
+    const loadStores = vi.fn().mockResolvedValue([
+      store({
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        name: "Dizengoff",
+        city: "תל אביב",
+        lat: 32.08,
+        lng: 34.775,
+        geoSource: "address",
+        distanceKm: 0.8,
+      }),
+      store({
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        name: "תלפיות",
+        city: "ירושלים",
+        lat: 31.75,
+        lng: 35.21,
+        geoSource: "address",
+        distanceKm: 55,
+      }),
+      store({
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        name: "באר יעקב",
+        city: "באר יעקב",
+        lat: 31.94,
+        lng: 34.84,
+        geoSource: "address",
+        distanceKm: 18,
+      }),
+    ]);
+
+    const result = await resolveStoreLocation({ near, radiusKm: 3 }, loadStores);
+
+    expect(result.stores.map((s) => s.name)).toEqual(["Dizengoff"]);
+    expect(result.stores.every((s) => (s.distanceKm ?? Infinity) <= 3)).toBe(true);
+  });
+
+  it("isEligibleForDistanceRecommendation requires in-radius branch geo when reliable", () => {
+    const location: StoreLocationMetadata = {
+      scope: "near",
+      precision: "radius",
+      fallbackApplied: false,
+      warning: null,
+      distanceReliable: true,
+      requested: {
+        city: null,
+        near: { lat: 32.0819, lng: 34.7712 },
+        radiusKm: 3,
+      },
+    };
+    expect(
+      isEligibleForDistanceRecommendation(
+        store({
+          geoSource: "address",
+          distanceKm: 1.2,
+          lat: 32.08,
+          lng: 34.77,
+        }),
+        location,
+      ),
+    ).toBe(true);
+    expect(
+      isEligibleForDistanceRecommendation(
+        store({ geoSource: "address", distanceKm: 12, name: "תלפיות" }),
+        location,
+      ),
+    ).toBe(false);
+    expect(
+      isEligibleForDistanceRecommendation(
+        store({ geoSource: "city_centroid", distanceKm: 1, lat: 32.08, lng: 34.77 }),
+        location,
+      ),
+    ).toBe(false);
+    expect(
+      isEligibleForDistanceRecommendation(
+        store({ geoSource: "address", distanceKm: null, lat: 32.08, lng: 34.77 }),
+        location,
+      ),
+    ).toBe(false);
+  });
+
+  it("isEligibleForDistanceRecommendation uses city membership when distance is unreliable", () => {
+    const location: StoreLocationMetadata = {
+      scope: "city",
+      precision: "city",
+      fallbackApplied: true,
+      warning: "city-level",
+      distanceReliable: false,
+      requested: {
+        city: "הרצליה",
+        near: { lat: 32.16, lng: 34.84 },
+        radiusKm: 3,
+      },
+    };
+    expect(
+      isEligibleForDistanceRecommendation(store({ city: "הרצליה", distanceKm: 40 }), location),
+    ).toBe(true);
+    expect(
+      isEligibleForDistanceRecommendation(store({ city: "תל אביב", distanceKm: 1 }), location),
+    ).toBe(false);
   });
 });

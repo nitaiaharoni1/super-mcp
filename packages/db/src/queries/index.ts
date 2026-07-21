@@ -36,6 +36,7 @@ export {
   type ResolveGeocodeQueryInput,
   type GeocodeResolveResult,
   type GeocodeResolveStatus,
+  type GeocodeStrategy,
 } from "./resolveGeocodeQuery.js";
 export {
   geocodeCacheKey,

@@ -203,6 +203,55 @@ export function displayCity(city: string | null | undefined): string | null {
   return canonicalizeCity(city) ?? null;
 }
 
+type LocationCityCandidate = { alias: string; canonical: string };
+
+/**
+ * Longest-first alias/canonical phrases for embedded-city extraction from
+ * free-text addresses. Built once from LOCALITY_CODE_TO_CITY + CITY_ALIASES.
+ */
+const LOCATION_CITY_CANDIDATES: readonly LocationCityCandidate[] = (() => {
+  const seen = new Set<string>();
+  const out: LocationCityCandidate[] = [];
+  const add = (alias: string, canonical: string) => {
+    const normalizedAlias = normalizeCityKey(alias);
+    if (!normalizedAlias || seen.has(normalizedAlias)) return;
+    seen.add(normalizedAlias);
+    out.push({ alias: normalizedAlias, canonical });
+  };
+  for (const he of Object.values(LOCALITY_CODE_TO_CITY)) {
+    add(he, he);
+  }
+  for (const [alias, canonical] of Object.entries(CITY_ALIASES)) {
+    add(alias, canonical);
+  }
+  out.sort(
+    (a, b) => b.alias.length - a.alias.length || a.alias.localeCompare(b.alias, "he"),
+  );
+  return out;
+})();
+
+/** True when `phrase` appears in `haystack` as a whole-token sequence. */
+function containsCityPhrase(haystack: string, phrase: string): boolean {
+  if (!phrase) return false;
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?:$|[^\\p{L}\\p{N}])`, "u");
+  return re.test(haystack);
+}
+
+/**
+ * Extract a known Israeli city from free-text location (address/neighborhood).
+ * Uses longest word-boundary match over canonical names and aliases.
+ * Returns null when no known city is embedded.
+ */
+export function extractCityFromLocation(location: string): string | null {
+  const normalized = normalizeCityKey(location);
+  if (!normalized) return null;
+  for (const candidate of LOCATION_CITY_CANDIDATES) {
+    if (containsCityPhrase(normalized, candidate.alias)) return candidate.canonical;
+  }
+  return null;
+}
+
 /**
  * All stored-city values that should match a natural-language (or code) query.
  * Use with `st.city = ANY($n::text[])` so "הרצליה", "Herzliya", and "6400" hit

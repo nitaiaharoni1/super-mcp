@@ -185,6 +185,29 @@ export function priceStoreBasket(
       promoDescription = promo.candidate.description;
     }
 
+    // Line arithmetic invariant: never emit non-positive qty/total.
+    if (!(matched.qty > 0) || !(lineTotal > 0)) {
+      missingItems.push({
+        itemIndex: item.index,
+        productId: item.productId,
+        name: item.name,
+        reason: "no_price_data",
+      });
+      continue;
+    }
+
+    // When a promo changes the shelf arithmetic, metadata must be present.
+    const shelfTotal = Math.round(listPrice * matched.qty * 100) / 100;
+    if (lineTotal !== shelfTotal && !promoApplied) {
+      missingItems.push({
+        itemIndex: item.index,
+        productId: item.productId,
+        name: item.name,
+        reason: "no_price_data",
+      });
+      continue;
+    }
+
     const isChainEquivalent = isChainEquivalentSubstitution(item, matched.candidate.productId);
     const isBrandFamily =
       item.intentMode === "brand_family" &&

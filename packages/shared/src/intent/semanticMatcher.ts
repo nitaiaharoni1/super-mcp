@@ -12,6 +12,146 @@ import { normalizeEmbedInput } from "../embeddings/localEmbed.js";
 import { matchOntologyTerms, tokenizeNormalized } from "./tokenMatcher.js";
 
 /**
+ * Surface cues that mean preserved / prepared / flour — never interchangeable
+ * with a fresh weighted produce staple even when they share a produce token.
+ */
+const NON_FRESH_FORM_CUES: ReadonlyArray<{ form: string; tokens: readonly string[] }> = [
+  { form: "pickled", tokens: ["כבוש", "כבושה", "כבושי", "כבושים", "חמוץ", "חמוצה", "חמוצים"] },
+  {
+    form: "canned",
+    tokens: ["מרוסק", "מרוסקת", "מרוסקות", "מרוסקים", "משומר", "משומרת", "משומרים", "שימורים"],
+  },
+  { form: "flour", tokens: ["קמח"] },
+  {
+    form: "prepared",
+    tokens: ["ניוקי", "רביולי", "טורטליני", "קצוץ", "קצוצה", "פרוס", "פרוסה", "פרוסות", "מיובש", "מיובשים"],
+  },
+  { form: "frozen", tokens: ["קפוא", "קפואה", "מוקפא", "מוקפאת"] },
+];
+
+/** Personal-care / bath tokens that poison food oil / staple queries. */
+const PERSONAL_CARE_TOKENS: ReadonlySet<string> = new Set([
+  "אמבט",
+  "אמבטיה",
+  "רחצה",
+  "שמפו",
+  "סבון",
+  "קוסמטי",
+  "קוסמטיקה",
+]);
+
+/** Common fresh-produce stems / phrases for quantity-derived form=fresh. */
+const PRODUCE_QUERY_PHRASES: readonly string[] = [
+  "תפוחי אדמה",
+  "תפוח אדמה",
+  'תפו"א',
+  "עגבניות",
+  "עגבניה",
+  "מלפפונים",
+  "מלפפון",
+  "בצל",
+  "לימון",
+  "לימונים",
+  "גזר",
+  "בננה",
+  "בננות",
+  "חסה",
+  "פלפל",
+  "שום",
+  "חציל",
+  "קישוא",
+  "אבוקדו",
+  "בטטה",
+];
+
+/** Detect a non-fresh form cue in free text (query or product name). */
+export function detectNonFreshForm(text: string): string | null {
+  const tokens = new Set(tokenizeNormalized(normalizeEmbedInput(text)));
+  for (const cue of NON_FRESH_FORM_CUES) {
+    if (cue.tokens.some((t) => tokens.has(normalizeEmbedInput(t)) || tokens.has(t))) {
+      return cue.form;
+    }
+  }
+  return null;
+}
+
+/** True when the query explicitly asks for a preserved/prepared/flour form. */
+export function queryBlocksFreshProduce(text: string): boolean {
+  return detectNonFreshForm(text) != null;
+}
+
+export function queryLooksLikeProduce(text: string): boolean {
+  const normalized = normalizeEmbedInput(text);
+  if (!normalized) return false;
+  if (PRODUCE_QUERY_PHRASES.some((p) => normalized.includes(normalizeEmbedInput(p)))) {
+    return true;
+  }
+  const tokens = tokenizeNormalized(normalized);
+  return tokens.some((t) =>
+    PRODUCE_QUERY_PHRASES.some((p) => {
+      const pt = tokenizeNormalized(normalizeEmbedInput(p));
+      return pt.length === 1 && pt[0] === t;
+    }),
+  );
+}
+
+export function queryHasPersonalCareCue(text: string): boolean {
+  const tokens = tokenizeNormalized(normalizeEmbedInput(text));
+  return tokens.some((t) => PERSONAL_CARE_TOKENS.has(t));
+}
+
+/**
+ * Explicit pack / volume tokens embedded in the query (not amount+unit opts).
+ * piece_count is a hard attribute string; volume becomes requestedAmount with
+ * display unit "L" for liters.
+ */
+export function parseExplicitPackConstraints(query: string): {
+  pieceCount: string | null;
+  requestedAmount: { quantity: number; unit: string } | null;
+} {
+  const raw = query.replace(/\s+/g, " ").trim();
+  if (!raw) return { pieceCount: null, requestedAmount: null };
+
+  let pieceCount: string | null = null;
+  const tray =
+    raw.match(/תבנית\s*(\d+(?:\.\d+)?)/i) ||
+    raw.match(/(\d+(?:\.\d+)?)\s*(?:יחידות|יח['׳]?)(?=$|[\s,.\-_/])/i) ||
+    raw.match(/(?:^|[\s])(\d+(?:\.\d+)?)\s*ביצ/);
+  if (tray?.[1]) {
+    const n = Number(tray[1]);
+    if (Number.isFinite(n) && n > 0) pieceCount = String(Math.round(n));
+  }
+
+  let requestedAmount: { quantity: number; unit: string } | null = null;
+  const liter = raw.match(/(\d+(?:\.\d+)?)\s*(?:ליטר|ליטרים|ל\.?|l|L)(?=$|[\s,.\-_/])/i);
+  const ml = raw.match(/(\d+(?:\.\d+)?)\s*(?:מ["״]?ל|ml|מיליליטר)(?=$|[\s,.\-_/])/i);
+  if (liter?.[1] && !ml) {
+    const n = Number(liter[1]);
+    if (Number.isFinite(n) && n > 0) requestedAmount = { quantity: n, unit: "L" };
+  } else if (ml?.[1]) {
+    const n = Number(ml[1]);
+    if (Number.isFinite(n) && n > 0) requestedAmount = { quantity: n, unit: "ml" };
+  }
+
+  return { pieceCount, requestedAmount };
+}
+
+/**
+ * Non-fresh surface forms override a produce-concept form=fresh implication so
+ * crushed/flour/prepared names hard-conflict with a fresh produce query.
+ */
+export function applyNonFreshSurfaceForms(
+  text: string,
+  attributes: Record<string, string>,
+): void {
+  const form = detectNonFreshForm(text);
+  if (!form) return;
+  if (attributes.form == null || attributes.form === "fresh") {
+    attributes.form = form;
+  }
+}
+
+/**
  * Build a semantic profile from free text using a loaded ontology snapshot.
  * Longest/highest-priority term match wins per attribute; implications apply
  * only when the implied attribute is still unset.
@@ -51,6 +191,9 @@ export function profileFromText(text: string, ontology: OntologySnapshot): Seman
       attributes[term.impliesAttribute] = term.impliesValue;
     }
   }
+
+  // Crushed/flour/prepared cues beat produce-concept form=fresh.
+  applyNonFreshSurfaceForms(text, attributes);
 
   const stopwords = new Set(
     ontology.terms

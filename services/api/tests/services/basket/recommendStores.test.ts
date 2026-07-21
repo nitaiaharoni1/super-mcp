@@ -44,13 +44,25 @@ describe("pickBestSingleStore / pickCheapestCompleteStore", () => {
     ).toBe("fuller");
   });
 
-  it("uses effective cost only inside the one-line max-coverage band", () => {
+  it("uses effective cost only inside the one-line max-coverage band among incomplete stores", () => {
+    // Both incomplete relative to completeLineCount=20 — 1-line band still applies.
     expect(
       pickBestSingleStore(
         [store("sixteen", 16, 410, 3), store("fifteen", 15, 380, 1)],
         OPTIONS,
+        20,
       )?.storeName,
     ).toBe("fifteen");
+  });
+
+  it("complete N-item store always beats cheaper N-1 store", () => {
+    expect(
+      pickBestSingleStore(
+        [store("complete", 16, 410, 3), store("one-short", 15, 200, 1)],
+        OPTIONS,
+        16,
+      )?.storeName,
+    ).toBe("complete");
   });
 
   it("cheapestCompleteStore is null unless a store prices every resolvable line", () => {

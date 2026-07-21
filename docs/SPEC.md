@@ -133,18 +133,27 @@ A future global market (e.g., a scraped US chain) implements the same interface 
 - `GET /v1/products/{id}/history?store_id=&from=&to=`
 - `GET /v1/chains` · `GET /v1/stores?chain=&city=&near=&radius=` (default radius **10km** when `near` is set)
 - `GET /v1/promotions?store_id=&product_id=&active=true`
-- `POST /v1/basket/optimize` — resumable: initial `{items[{product_id|gtin|query, pack_qty|amount+unit}], city|near}` or resume `{continuation, answers}`; returns `needs_confirmation` or `complete` with `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
+- `POST /v1/basket/optimize` — **fast one-call default** (`resolution_mode=fast`, `response_detail=summary`): initial `{items[{product_id|gtin|query, pack_qty|amount+unit}], city|near|location}` returns compact `complete` with assumptions; `resolution_mode=strict` preserves resumable `{continuation, answers}` → `needs_confirmation`; plans are `bestSingleStore` / `cheapestCompleteStore` / `multiStore`. Protocol `basket-optimize-fast-v2`.
 - Auth: `Authorization: Bearer <api_key>` · per-key rate limits + metering · OpenAPI JSON served at `/openapi.json`
 
 ### MCP server (v1 tools, thin wrappers over the same services)
 
+- `optimize_basket` — **registered first**; **location required** on initial call (`location` preferred for neighborhoods/addresses). Default fast mode completes a shopping list in one call with intentional commodity assumptions; set `resolution_mode=strict` for exact-product confirmation (`needs_confirmation` → resume with `{continuation, answers}` only). Complete plans: `bestSingleStore` / `cheapestCompleteStore` / `multiStore`. Prefer `response_detail` over deprecated `verbose`.
 - `search_products(query, filters?)`
 - `get_product(id | gtin)`
 - `compare_prices(product, location?, sort?)` — default 10km; `sort=unit_price` for per-100g
 - `suggest_substitutes(product, location?)` — cheaper similar products (location optional; nationwide if omitted)
-- `optimize_basket` — **location required** on initial call; if `needs_confirmation`, resume with `{continuation, answers}` only; complete plans are `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
 - `list_stores(chain?, city?, near?, radius_km?)` — default 10km when `near` is set
 - `get_promotions(store?, product?)`
+
+**Basket migration**
+
+```text
+Old default: strict confirmation when material candidate ambiguity remains.
+New default: fast best-effort completion.
+Compatibility: set resolution_mode=strict for old behavior.
+Deprecated: verbose; use response_detail=debug.
+```
 
 Tool descriptions written for LLM consumption (when to use, what "location" accepts, freshness caveats). Remote MCP over Streamable HTTP on the same Cloud Run service, same API-key auth. This near-zero-marginal-cost dual surface is the core product bet: **one service layer, two protocols.**
 

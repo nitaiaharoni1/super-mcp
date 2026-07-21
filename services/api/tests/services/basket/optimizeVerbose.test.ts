@@ -59,7 +59,9 @@ function makeResolvedItem(index: number): ResolvedItem {
     lowConfidence: !resolved,
     candidates: [
       {
-        productId: resolved ? productId(index) : `00000000-0000-4000-9000-${String(index).padStart(12, "0")}`,
+        productId: resolved
+          ? productId(index)
+          : `00000000-0000-4000-9000-${String(index).padStart(12, "0")}`,
         name: `מוצר ${index}`,
         score: resolved ? 0.95 : 0.5,
         matchedVia: "product",
@@ -110,7 +112,7 @@ function pricingData() {
   };
 }
 
-describe("optimizeBasket verbose flag", () => {
+describe("optimizeBasket response_detail projection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     loadCandidateAvailability.mockResolvedValue(new Map());
@@ -136,79 +138,138 @@ describe("optimizeBasket verbose flag", () => {
     loadBasketPricingData.mockResolvedValue(pricingData());
   });
 
-  const optimizeInput = (verbose?: boolean, storesLimit?: number) => ({
-    items: Array.from({ length: LINE_COUNT }, (_, index) => ({ query: `item ${index}`, packQty: 1 })),
+  const baseInput = {
+    items: Array.from({ length: LINE_COUNT }, (_, index) => ({
+      query: `item ${index}`,
+      packQty: 1,
+    })),
     city: "הרצליה",
-    ...(storesLimit === undefined ? {} : { storesLimit }),
-    ...(verbose === undefined ? {} : { verbose }),
-  });
+    resolutionMode: "fast" as const,
+  };
 
-  it("non-verbose omits per-store line detail except recommended stores", async () => {
-    const result = await optimizeBasket(optimizeInput(false), OPTIONS);
-
-    if (result.status !== "complete") throw new Error("expected complete");
-    const recommendedIds = new Set(
-      [
-        result.bestSingleStore?.storeId,
-        result.cheapestCompleteStore?.storeId,
-      ].filter((id): id is string => Boolean(id)),
+  it("summary omits stores and item candidates under the 15KB budget", async () => {
+    const summary = await optimizeBasket(
+      { ...baseInput, responseDetail: "summary" },
+      OPTIONS,
     );
-    expect(recommendedIds.size).toBeGreaterThan(0);
 
-    for (const s of result.stores) {
-      if (recommendedIds.has(s.storeId)) {
-        expect(s.lines.length).toBeGreaterThan(0);
-      } else {
-        expect(s.lines).toHaveLength(0);
-      }
-      // missingItems is always retained for coverage reasoning.
-      expect(Array.isArray(s.missingItems)).toBe(true);
-    }
+    expect(summary.status).toBe("complete");
+    expect(summary).not.toHaveProperty("stores");
+    expect(summary.items.every((item) => !("candidates" in item))).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(summary), "utf8")).toBeLessThan(15_000);
+
+    if (summary.status !== "complete") throw new Error("expected complete");
+    expect(summary.coverage).toMatchObject({
+      requestedLines: LINE_COUNT,
+      pricedLines: expect.any(Number),
+      omittedLines: expect.any(Number),
+    });
+    expect(Array.isArray(summary.assumptions)).toBe(true);
+    expect(Array.isArray(summary.omittedItems)).toBe(true);
+    expect(summary.bestSingleStore?.lines.some((line) => "link" in line)).toBe(true);
   });
 
-  it("verbose keeps per-store line detail on every store", async () => {
-    const result = await optimizeBasket(optimizeInput(true), OPTIONS);
-    if (result.status !== "complete") throw new Error("expected complete");
-    for (const s of result.stores) {
-      expect(s.lines.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("defaults to non-verbose (lines stripped on non-recommended stores)", async () => {
-    const result = await optimizeBasket(optimizeInput(), OPTIONS);
-    if (result.status !== "complete") throw new Error("expected complete");
-    const recommendedIds = new Set(
-      [
-        result.bestSingleStore?.storeId,
-        result.cheapestCompleteStore?.storeId,
-      ].filter((id): id is string => Boolean(id)),
+  it("debug keeps stores, candidates, and phase timings", async () => {
+    const debug = await optimizeBasket({ ...baseInput, responseDetail: "debug" }, OPTIONS);
+    expect(debug.status).toBe("complete");
+    if (debug.status !== "complete") throw new Error("expected complete");
+    expect(debug.stores!.length).toBeGreaterThan(0);
+    expect(debug.items.some((item) => "candidates" in item && item.candidates.length > 0)).toBe(
+      true,
     );
-    const nonRecommended = result.stores.filter((s) => !recommendedIds.has(s.storeId));
-    expect(nonRecommended.length).toBeGreaterThan(0);
-    for (const s of nonRecommended) expect(s.lines).toHaveLength(0);
+    expect(debug.timings).toMatchObject({
+      searchMs: expect.any(Number),
+      pricingMs: expect.any(Number),
+    });
   });
 
-  it("non-verbose strips per-item candidates", async () => {
-    const result = await optimizeBasket(optimizeInput(false), OPTIONS);
-    if (result.status !== "complete") throw new Error("expected complete");
-    for (const item of result.items) {
-      expect(item.candidates).toHaveLength(0);
-    }
+  it("standard keeps item statuses and recommended-store lines without full debug stores", async () => {
+    const standard = await optimizeBasket(
+      { ...baseInput, responseDetail: "standard" },
+      OPTIONS,
+    );
+    expect(standard.status).toBe("complete");
+    if (standard.status !== "complete") throw new Error("expected complete");
+    expect(standard.bestSingleStore?.lines.length).toBeGreaterThan(0);
+    expect(standard.items.length).toBe(LINE_COUNT);
+    expect(standard.items.every((item) => Array.isArray(item.candidates))).toBe(true);
+    expect(standard.items.every((item) => item.candidates.length === 0)).toBe(true);
+    // Standard may include trimmed stores for recommended coverage, but not require timings.
+    expect(standard).not.toHaveProperty("timings");
   });
 
-  it("verbose keeps per-item candidates", async () => {
-    const result = await optimizeBasket(optimizeInput(true), OPTIONS);
+  it("verbose true maps to debug when responseDetail is absent", async () => {
+    const result = await optimizeBasket({ ...baseInput, verbose: true }, OPTIONS);
+    expect(result.status).toBe("complete");
     if (result.status !== "complete") throw new Error("expected complete");
+    expect(result.stores!.length).toBeGreaterThan(0);
     expect(result.items.some((item) => item.candidates.length > 0)).toBe(true);
   });
 
-  it("non-verbose multi-line, 12-store payload stays under the 15KB budget", async () => {
-    const verboseSize = JSON.stringify(await optimizeBasket(optimizeInput(true), OPTIONS)).length;
-    const result = await optimizeBasket(optimizeInput(false), OPTIONS);
-    const size = JSON.stringify(result).length;
-    // All 10 lines are priced in the complete path; keep a soft absolute ceiling
-    // and require a real reduction vs verbose.
-    expect(size).toBeLessThan(25_000);
-    expect(size).toBeLessThan(verboseSize * 0.7);
+  it("responseDetail summary wins over verbose true", async () => {
+    const summary = await optimizeBasket(
+      { ...baseInput, responseDetail: "summary", verbose: true },
+      OPTIONS,
+    );
+    expect(summary.status).toBe("complete");
+    expect(summary).not.toHaveProperty("stores");
+  });
+
+  it("strict needs_confirmation summary stays compact without item candidates", async () => {
+    resolveItems.mockResolvedValue(
+      Array.from({ length: LINE_COUNT }, (_, index) => ({
+        ...makeResolvedItem(index),
+        productId: null,
+        resolutionStatus: "needs_confirmation" as const,
+        lowConfidence: true,
+        confidence: null,
+      })),
+    );
+    loadCandidateAvailability.mockImplementation(async (productIds: string[]) => {
+      const map = new Map();
+      for (const id of productIds) {
+        map.set(id, { pricedStoreCount: 3, chainCount: 1, minPrice: 10 });
+      }
+      return map;
+    });
+
+    const result = await optimizeBasket(
+      { ...baseInput, resolutionMode: "strict", responseDetail: "summary" },
+      OPTIONS,
+    );
+    expect(result.status).toBe("needs_confirmation");
+    if (result.status !== "needs_confirmation") throw new Error("expected confirmation");
+    expect(result).not.toHaveProperty("items");
+    expect(result.nextStep).toEqual({
+      tool: "optimize_basket",
+      useOnly: ["continuation", "answers"],
+      doNotCall: ["search_products", "resolve_products", "compare_prices"],
+    });
+    expect(result.questions.length).toBeGreaterThan(0);
+    expect(result.preview.requestedLines).toBe(LINE_COUNT);
+  });
+
+  it("does not duplicate identical store plans and caps summary at two plans", async () => {
+    const summary = await optimizeBasket(
+      { ...baseInput, responseDetail: "summary" },
+      OPTIONS,
+    );
+    expect(summary.status).toBe("complete");
+    if (summary.status !== "complete") throw new Error("expected complete");
+
+    if (
+      summary.bestSingleStore &&
+      summary.cheapestCompleteStore &&
+      summary.bestSingleStore.storeId === summary.cheapestCompleteStore.storeId
+    ) {
+      throw new Error("identical store plans must not both be present");
+    }
+
+    const planCount = [
+      summary.bestSingleStore,
+      summary.cheapestCompleteStore,
+      summary.multiStore,
+    ].filter(Boolean).length;
+    expect(planCount).toBeLessThanOrEqual(2);
   });
 });

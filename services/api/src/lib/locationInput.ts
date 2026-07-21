@@ -1,8 +1,9 @@
 import {
   resolveGeocodeQuery,
   type GeocodeResolveResult,
+  type GeocodeStrategy,
 } from "@super-mcp/db";
-import { AppError, type GeoPoint } from "@super-mcp/shared";
+import { AppError, extractCityFromLocation, type GeoPoint } from "@super-mcp/shared";
 import { resolveRadiusKm } from "./defaults.js";
 import { parseNear } from "./geo.js";
 import type { StoreLocationMetadata } from "./resolveStoreLocation.js";
@@ -39,16 +40,45 @@ export interface LocationInputFields {
   radiusKm?: number;
 }
 
+/** How the origin point was obtained (telemetry / analytics; never raw text). */
+export type GeocodeTelemetryStrategy =
+  | "cache"
+  | "city_fallback"
+  | "nominatim"
+  | "coordinates"
+  | "none";
+
 export interface ResolvedLocationInput {
   city?: string;
   near?: GeoPoint;
   radiusKm?: number;
   locationOrigin?: LocationOriginMeta;
+  /** Wall time spent in this resolve call (geocode / parse); 0 when city-only. */
+  geocodeMs: number;
+}
+
+/** Map provenance to a telemetry strategy label (never includes raw location text). */
+export function deriveGeocodeTelemetryStrategy(
+  origin:
+    | {
+        provider: LocationOriginProvider;
+        cached: boolean;
+        fallbackApplied: boolean;
+      }
+    | undefined,
+): GeocodeTelemetryStrategy {
+  if (!origin) return "none";
+  if (origin.provider === "coordinates") return "coordinates";
+  if (origin.cached) return "cache";
+  if (origin.provider === "city_centroid" || origin.fallbackApplied) return "city_fallback";
+  if (origin.provider === "nominatim") return "nominatim";
+  return "none";
 }
 
 export type GeocodeResolver = (input: {
   location: string;
   city?: string | null;
+  strategy?: GeocodeStrategy;
 }) => Promise<GeocodeResolveResult>;
 
 function asNearString(near: string | GeoPoint | undefined): string | undefined {
@@ -60,6 +90,22 @@ function asNearString(near: string | GeoPoint | undefined): string | undefined {
   return `${near.lat},${near.lng}`;
 }
 
+function resolveGeocodeStrategy(
+  strategy: GeocodeStrategy | undefined,
+): GeocodeStrategy {
+  const value = strategy ?? "precise";
+  switch (value) {
+    case "fast":
+      return "fast";
+    case "precise":
+      return "precise";
+    default: {
+      const exhaustive: never = value;
+      return exhaustive;
+    }
+  }
+}
+
 /**
  * Resolve boundary location fields into city / near / radius + provenance.
  * - `near` is parsed locally (no network).
@@ -69,11 +115,18 @@ function asNearString(near: string | GeoPoint | undefined): string | undefined {
  */
 export async function resolveLocationInput(
   input: LocationInputFields,
-  opts: { resolveGeocode?: GeocodeResolver } = {},
+  opts: {
+    resolveGeocode?: GeocodeResolver;
+    /** Defaults to precise so non-basket tools keep Nominatim behavior. */
+    geocodeStrategy?: GeocodeStrategy;
+  } = {},
 ): Promise<ResolvedLocationInput> {
-  const city = input.city?.trim() || undefined;
+  const startedAt = Date.now();
+  const explicitCity = input.city?.trim() || undefined;
   const location = input.location?.trim() || undefined;
   const nearRaw = asNearString(input.near);
+  const geocodeStrategy = resolveGeocodeStrategy(opts.geocodeStrategy);
+  const elapsed = (): number => Date.now() - startedAt;
 
   if (nearRaw && location) {
     throw new AppError(
@@ -89,7 +142,7 @@ export async function resolveLocationInput(
         ? input.near
         : parseNear(nearRaw);
     return {
-      city,
+      city: explicitCity,
       near,
       radiusKm: resolveRadiusKm(near, input.radiusKm),
       locationOrigin: {
@@ -101,6 +154,7 @@ export async function resolveLocationInput(
         attribution: null,
         warning: null,
       },
+      geocodeMs: elapsed(),
     };
   }
 
@@ -112,8 +166,14 @@ export async function resolveLocationInput(
         400,
       );
     }
+    const derivedCity =
+      explicitCity ?? extractCityFromLocation(location) ?? undefined;
     const resolve = opts.resolveGeocode ?? resolveGeocodeQuery;
-    const result = await resolve({ location, city });
+    const result = await resolve({
+      location,
+      city: derivedCity,
+      strategy: geocodeStrategy,
+    });
     if (result.status === "unavailable") {
       throw new AppError(
         "geocoding_unavailable",
@@ -133,7 +193,7 @@ export async function resolveLocationInput(
     const provider: LocationOriginProvider =
       result.provider === "city_centroid" ? "city_centroid" : "nominatim";
     return {
-      city,
+      city: derivedCity,
       near: result.point,
       radiusKm: resolveRadiusKm(result.point, input.radiusKm),
       locationOrigin: {
@@ -145,14 +205,16 @@ export async function resolveLocationInput(
         attribution: result.attribution,
         warning: result.warning,
       },
+      geocodeMs: elapsed(),
     };
   }
 
   return {
-    city,
+    city: explicitCity,
     near: undefined,
     radiusKm: input.radiusKm,
     locationOrigin: undefined,
+    geocodeMs: elapsed(),
   };
 }
 

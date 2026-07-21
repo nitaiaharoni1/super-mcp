@@ -15,7 +15,7 @@
     <PriceUpdateDate>2026-07-16</PriceUpdateDate>
   </Item>
   <Item>
-    <ItemCode>7290003029776</ItemCode><ItemType>1</ItemType><ItemName>לחם אחיד פרוס 750 גרם</ItemName>
+    <ItemCode>7290003029776</ItemCode><ItemType>1</ItemType><ItemName>לחם אחיד 750 גרם</ItemName>
     <ManufacturerName>אנגל</ManufacturerName><Quantity>750</Quantity><UnitQty>גרם</UnitQty>
     <ItemPrice>8.40</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
     <PriceUpdateDate>2026-07-16</PriceUpdateDate>
@@ -60,6 +60,36 @@
     <ItemCode>7290112345678</ItemCode><ItemType>1</ItemType><ItemName>חומוס אחלה 750 גרם</ItemName>
     <ManufacturerName>אחלה</ManufacturerName><Quantity>750</Quantity><UnitQty>גרם</UnitQty>
     <ItemPrice>12.50</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290002211001</ItemCode><ItemType>1</ItemType><ItemName>עגבניות טריות</ItemName>
+    <ManufacturerName></ManufacturerName><Quantity>1</Quantity><UnitQty>קג</UnitQty>
+    <ItemPrice>8.90</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>1</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290002211002</ItemCode><ItemType>1</ItemType><ItemName>מלפפונים טריים</ItemName>
+    <ManufacturerName></ManufacturerName><Quantity>1</Quantity><UnitQty>קג</UnitQty>
+    <ItemPrice>7.90</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>1</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290002211003</ItemCode><ItemType>1</ItemType><ItemName>תפוחי אדמה טריים</ItemName>
+    <ManufacturerName></ManufacturerName><Quantity>1</Quantity><UnitQty>קג</UnitQty>
+    <ItemPrice>5.90</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>1</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290002211004</ItemCode><ItemType>1</ItemType><ItemName>חזה עוף טרי</ItemName>
+    <ManufacturerName></ManufacturerName><Quantity>1</Quantity><UnitQty>קג</UnitQty>
+    <ItemPrice>42.90</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>1</bIsWeighted>
+    <PriceUpdateDate>2026-07-16</PriceUpdateDate>
+  </Item>
+  <Item>
+    <ItemCode>7290002211005</ItemCode><ItemType>1</ItemType><ItemName>שמן קנולה 1 ליטר</ItemName>
+    <ManufacturerName>סוגת</ManufacturerName><Quantity>1</Quantity><UnitQty>ליטר</UnitQty>
+    <ItemPrice>12.90</ItemPrice><AllowDiscount>1</AllowDiscount><bIsWeighted>0</bIsWeighted>
     <PriceUpdateDate>2026-07-16</PriceUpdateDate>
   </Item>
 </Root>

@@ -61,14 +61,14 @@ const NON_COMMODITY_LEADERS: ReadonlySet<string> = new Set([
   // openers / corkscrews — "יין" must never auto-resolve to "חולץ יין" / "פותחן יין"
   "חולץ", "פותחן", "מחלץ",
   // "derived product OF X" (vinegar/juice/powder/concentrate of X ≠ X)
-  "חומץ", "מיץ", "אבקת", "תרכיז",
+  "חומץ", "מיץ", "אבקת", "תרכיז", "קמח",
   // prepared-food / dessert hosts — "לימונים" ≠ "עוגת לימונים"; "קולה" ≠ "לקריץ קולה"
   // Include common plurals; queryHeadAnchored also checks stemmed leaders.
   "עוגת", "עוגה", "עוגות", "מאפה", "מאפי", "מאפים", "לקריץ", "סוכריות", "סוכריה",
   "גלידת", "גלידה", "גלידות", "ליקר",
   // stuffed-dough hosts — the DISH is dumplings/ravioli/burekas, not the filling:
   // "בשר" ≠ "כיסונים בשר בקר"; "גבינה" ≠ "בורקס גבינה". Plurals stemmed automatically.
-  "כיסונים", "כיסון", "בורקס", "בורקסים", "רביולי", "טורטליני",
+  "כיסונים", "כיסון", "בורקס", "בורקסים", "רביולי", "טורטליני", "ניוקי",
 ]);
 
 /** Stemmed forms of NON_COMMODITY_LEADERS so plurals (עוגות→עוג) still match. */
@@ -215,6 +215,11 @@ const PRESERVED_FORM_TOKENS: ReadonlySet<string> = new Set([
   "משומר",
   "משומרת",
   "משומרים",
+  "מרוסק",
+  "מרוסקת",
+  "מרוסקות",
+  "מרוסקים",
+  "שימורים",
   "פרוס",
   "פרוסה",
   "פרוסות",
@@ -230,12 +235,160 @@ const PRESERVED_FORM_TOKENS: ReadonlySet<string> = new Set([
   "ליים",
 ]);
 
+/** Personal-care tokens that must not join a food-oil / grocery staple set. */
+const PERSONAL_CARE_TRAP_TOKENS: ReadonlySet<string> = new Set([
+  "אמבט",
+  "אמבטיה",
+  "רחצה",
+  "שמפו",
+  "קוסמטיקה",
+]);
+
+/** L1 classes that are never a food staple primary. */
+const NON_FOOD_CLASS_L1: ReadonlySet<string> = new Set([
+  "personal_care",
+  "household",
+  "non_food_other",
+]);
+
+/** L1/L2 that poison an inferred fresh-produce line. */
+const FRESH_PRODUCE_INCOMPATIBLE_L1: ReadonlySet<string> = new Set([
+  "canned_preserved",
+  "frozen",
+  "pantry_dry",
+  "snacks_sweets",
+  "personal_care",
+  "household",
+  "non_food_other",
+]);
+
 /** A candidate whose name carries a preserved-form token the query did not ask for. */
 export function hasUnrequestedPreservedForm(queryTokens: Set<string>, candidateName: string): boolean {
   for (const t of tokenizeNormalized(normalizeEmbedInput(candidateName))) {
     if (PRESERVED_FORM_TOKENS.has(t) && !queryTokens.has(t)) return true;
   }
   return false;
+}
+
+/** Bath/personal-care tokens the query did not ask for (food-oil ≠ bath oil). */
+export function hasUnrequestedPersonalCare(queryTokens: Set<string>, candidateName: string): boolean {
+  for (const t of tokenizeNormalized(normalizeEmbedInput(candidateName))) {
+    if (PERSONAL_CARE_TRAP_TOKENS.has(t) && !queryTokens.has(t)) return true;
+  }
+  return false;
+}
+
+/**
+ * Hard incompatibility between a staple query intent and a candidate — used by
+ * equivalence builders and selectSafePrimary before display/pricing primary choice.
+ */
+export function isStapleIncompatible(
+  queryText: string,
+  candidate: BasketCandidate,
+  opts?: {
+    requireFreshProduce?: boolean;
+    pieceCount?: number | null;
+    requestedAmount?: { quantity: number; unit: string } | null;
+  },
+): boolean {
+  const queryTokens = new Set(tokenizeNormalized(normalizeEmbedInput(queryText)));
+  if (hasUnrequestedPreservedForm(queryTokens, candidate.name)) return true;
+  if (hasUnrequestedPersonalCare(queryTokens, candidate.name)) return true;
+  // Head-anchoring stays a soft preference (preferQueryHeadAnchored / override
+  // guards). Hard-rejecting every non-anchored name empties shortlists for
+  // opaque queries like "מוצר" and incorrectly re-labels them unresolved.
+
+  const l1 = candidate.classL1 ?? "";
+  if (l1 && NON_FOOD_CLASS_L1.has(l1) && !queryTokensHasPersonalCare(queryTokens)) {
+    return true;
+  }
+
+  if (opts?.requireFreshProduce) {
+    if (l1 && FRESH_PRODUCE_INCOMPATIBLE_L1.has(l1)) {
+      // flour_baking / tomato paste sit under pantry_dry or canned_preserved
+      return true;
+    }
+    if (candidate.classL2 === "flour_baking" || candidate.classL2 === "frozen_prepared") {
+      return true;
+    }
+    if (candidate.variant === "sliced_prepared") return true;
+  }
+
+  if (opts?.pieceCount != null && Number.isFinite(opts.pieceCount)) {
+    const got =
+      candidate.pieceCount != null && Number.isFinite(candidate.pieceCount)
+        ? candidate.pieceCount
+        : inferPieceCountFromName(candidate.name);
+    if (got != null && got !== opts.pieceCount) return true;
+  }
+
+  if (opts?.requestedAmount) {
+    // Weight requests (kg/g) are purchase quantities for weighed produce/meat,
+    // not pack sizes. Pack-tolerance against the catalog's 1kg weighted stub
+    // would reject every 1.5–2kg line. Volume (L/ml) still enforces pack match
+    // so "שמן 1 ל" does not accept a 750ml bottle.
+    if (
+      !isWeightRequestUnit(opts.requestedAmount.unit) &&
+      !amountCompatible(opts.requestedAmount, candidate)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isWeightRequestUnit(unit: string): boolean {
+  const u = unit
+    .trim()
+    .toLowerCase()
+    .replace(/[׳′]/g, "'")
+    .replace(/[״″]/g, '"')
+    .replace(/\s+/g, "");
+  return (
+    u === "kg" ||
+    u === "g" ||
+    u === "גרם" ||
+    u === "גרמים" ||
+    u === "קג" ||
+    u === 'ק"ג' ||
+    u === "ק'ג" ||
+    u === "קילו" ||
+    u === "קילוגרם"
+  );
+}
+
+function queryTokensHasPersonalCare(queryTokens: Set<string>): boolean {
+  for (const t of queryTokens) {
+    if (PERSONAL_CARE_TRAP_TOKENS.has(t)) return true;
+  }
+  return false;
+}
+
+function inferPieceCountFromName(name: string): number | null {
+  const n = name.replace(/\s+/g, " ").trim();
+  const tray = n.match(/תבנית\s*(\d+)/i) || n.match(/^(\d+)\s*ביצ/) || n.match(/(\d+)\s*יח/);
+  if (!tray?.[1]) return null;
+  const q = Number(tray[1]);
+  return Number.isFinite(q) && q > 0 ? Math.round(q) : null;
+}
+
+function amountCompatible(
+  requested: { quantity: number; unit: string },
+  candidate: BasketCandidate,
+): boolean {
+  // Unsized SKUs are not rejected here — piece_count / class filters cover eggs;
+  // volume mismatches apply only when the candidate carries a usable size.
+  if (candidate.sizeQty == null && candidate.sizeUnit == null) return true;
+  return packSizesCompatible(
+    { sizeQty: requested.quantity, sizeUnit: requested.unit, name: null },
+    {
+      sizeQty: candidate.sizeQty,
+      sizeUnit: candidate.sizeUnit,
+      name: candidate.name,
+    },
+    { packTolerance: 0.1, allowCountToWeight: false },
+  ).compatible;
 }
 
 /**
@@ -261,7 +414,6 @@ export function buildCommodityEquivalents(
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
   if (queryTokens.length === 0) return [top];
   const queryTokenSet = new Set(queryTokens);
-  const bothLabeled = (c: BasketCandidate) => Boolean(top.classL1 && c.classL1);
   const out: BasketCandidate[] = [top];
   for (const c of shortlist) {
     if (out.length > maxEquivalents) break;
@@ -272,11 +424,12 @@ export function buildCommodityEquivalents(
     if (!packsCompatible(top, c, queryText, packTolerance)) continue;
     // Prepared-food hosts share a produce token ("עוגת לימונים") but must not join.
     if (!queryHeadAnchored(queryText, c.name)) continue;
-    // Query specificity (morphology-tolerant). The preserved-form word list is only
-    // a fallback for UNLABELED pairs — class+variant already separate pickled/sliced
-    // when both are classified.
+    // Query specificity (morphology-tolerant). Preserved/personal-care traps are
+    // always excluded when the query did not ask for them — class labels alone
+    // miss crushed tomatoes / bath oil mis-tagged as the staple class.
     if (!queryTokensSatisfied(queryTokens, c.name)) continue;
-    if (!bothLabeled(c) && hasUnrequestedPreservedForm(queryTokenSet, c.name)) continue;
+    if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) continue;
+    if (hasUnrequestedPersonalCare(queryTokenSet, c.name)) continue;
     out.push(c);
   }
   return out;
@@ -331,7 +484,8 @@ export function buildAvailabilityEquivalents(
     if (opts.penaltyOf(c.productId) >= opts.penaltyBlock) return false;
     if (c.intentTier === 0) return false;
     if (!queryHeadAnchored(queryText, c.name)) return false;
-    if (!c.classL1 && hasUnrequestedPreservedForm(queryTokenSet, c.name)) return false;
+    if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) return false;
+    if (hasUnrequestedPersonalCare(queryTokenSet, c.name)) return false;
     return queryTokensSatisfied(queryTokens, c.name);
   });
   if (pool.length < 2) return [];

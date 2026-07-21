@@ -1,13 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { AppError } from "@super-mcp/shared";
 import { resolveRadiusKm } from "../../lib/defaults.js";
-import { applyLocationOriginHonesty } from "../../lib/locationInput.js";
+import {
+  applyLocationOriginHonesty,
+  deriveGeocodeTelemetryStrategy,
+  type GeocodeTelemetryStrategy,
+} from "../../lib/locationInput.js";
 import {
   resolveStoreLocation,
   type StoreLocationMetadata,
 } from "../../lib/resolveStoreLocation.js";
 import { toSearchLocationParams } from "../search/locationScope.js";
+import { getActiveOntology } from "../search/ontology.js";
 import type { StoreSummary } from "../stores/index.js";
+import { projectBasketResult, resolveResponseDetail } from "./compactResult.js";
 import { enrichCommodityCoverage } from "./commodityCoverage.js";
 import {
   applyBasketAnswers,
@@ -17,8 +23,9 @@ import {
 } from "./continuation.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
 import { loadBasketPricingData, loadCandidateAvailability } from "./loadPricingData.js";
-import { getResolution, putResolution } from "./resolutionCache.js";
 import { priceStoreBasket } from "./priceStoreBasket.js";
+import { getResolution, putResolution } from "./resolutionCache.js";
+import { applyFastResolutionPolicy } from "./resolutionPolicy.js";
 import {
   DEFAULT_QUESTION_OPTIONS_LIMIT,
   buildBasketQuestions,
@@ -30,13 +37,18 @@ import { DEFAULT_DISTANCE_PENALTY_PER_KM } from "./recommendStores.js";
 import { resolveItems } from "./resolve.js";
 import { applyStorePlanSubstitutions } from "./substitutions.js";
 import type {
+  BasketAssumption,
   BasketContinuationV1,
   BasketInitialInput,
   BasketItemStatus,
   BasketLocationInput,
+  BasketNeedsConfirmationResult,
   BasketOptimizeOptions,
   BasketOptimizeRequest,
   BasketOptimizeResult,
+  BasketPhaseTimings,
+  BasketResolutionMode,
+  BasketResponseDetail,
   BasketResumeInput,
   BasketStoreResult,
   CandidateAvailability,
@@ -147,29 +159,14 @@ function serializeQuestionStatuses(
   }));
 }
 
-function trimStoreResults(
+function limitStoreResults(
   storeResults: BasketStoreResult[],
   storesLimit: number | undefined,
-  verbose: boolean | undefined,
-  recommendedIds: Array<string | undefined>,
 ): { stores: BasketStoreResult[]; storesTruncated: boolean } {
   const limit =
     storesLimit === 0 ? storeResults.length : Math.max(1, storesLimit ?? DEFAULT_STORES_LIMIT);
-  const trimmed = storeResults.slice(0, limit);
-  const keep = new Set(recommendedIds.filter((id): id is string => Boolean(id)));
-  const stores =
-    verbose ?? false
-      ? trimmed
-      : trimmed.map((s) => (keep.has(s.storeId) ? s : { ...s, lines: [] }));
-  return { stores, storesTruncated: storeResults.length > trimmed.length };
-}
-
-interface BasketPhaseTimings {
-  searchMs: number;
-  classificationMs: number;
-  availabilityMs: number;
-  equivalenceMs: number;
-  pricingMs: number;
+  const stores = storeResults.slice(0, limit);
+  return { stores, storesTruncated: storeResults.length > stores.length };
 }
 
 function emitBasketOptimizeTelemetry(fields: {
@@ -185,7 +182,14 @@ function emitBasketOptimizeTelemetry(fields: {
   totalMs: number;
   bestSingleStoreCoverage: number | null;
   continuationBytes: number;
+  geocodeMs: number;
+  geocodeStrategy: GeocodeTelemetryStrategy;
+  resolutionMode: BasketResolutionMode;
+  responseDetail: BasketResponseDetail;
+  responseBytes: number;
 }): void {
+  // Benchmarks/canaries may set SUPER_MCP_BASKET_TELEMETRY=0 for clean stdout JSON.
+  if (process.env.SUPER_MCP_BASKET_TELEMETRY === "0") return;
   console.log(
     JSON.stringify({
       event: "basket_optimize",
@@ -202,12 +206,61 @@ function emitBasketOptimizeTelemetry(fields: {
       availabilityMs: fields.timings.availabilityMs,
       equivalenceMs: fields.timings.equivalenceMs,
       pricingMs: fields.timings.pricingMs,
+      // Geocode is boundary-measured and excluded from basket phase sums.
+      geocodeMs: fields.geocodeMs,
+      geocodeStrategy: fields.geocodeStrategy,
+      resolutionMode: fields.resolutionMode,
+      responseDetail: fields.responseDetail,
+      responseBytes: fields.responseBytes,
       dbQueryCount: null,
       totalMs: fields.totalMs,
       bestSingleStoreCoverage: fields.bestSingleStoreCoverage,
       continuationBytes: fields.continuationBytes,
     }),
   );
+}
+
+function finalizeBasketResult(args: {
+  result: BasketOptimizeResult;
+  responseDetail: BasketResponseDetail;
+  protocolState: "initial" | "resume";
+  requestedLines: number;
+  resolvedLines: number;
+  confirmedLines: number;
+  unresolvedLines: number;
+  pricedLines: number;
+  questionCount: number;
+  candidateStoreCount: number;
+  timings: BasketPhaseTimings;
+  startedAt: number;
+  bestSingleStoreCoverage: number | null;
+  continuationBytes: number;
+  geocodeMs: number;
+  geocodeStrategy: GeocodeTelemetryStrategy;
+  resolutionMode: BasketResolutionMode;
+}): BasketOptimizeResult {
+  const projected = projectBasketResult(args.result, args.responseDetail);
+  const responseBytes = Buffer.byteLength(JSON.stringify(projected), "utf8");
+  emitBasketOptimizeTelemetry({
+    protocolState: args.protocolState,
+    requestedLines: args.requestedLines,
+    resolvedLines: args.resolvedLines,
+    confirmedLines: args.confirmedLines,
+    unresolvedLines: args.unresolvedLines,
+    pricedLines: args.pricedLines,
+    questionCount: args.questionCount,
+    candidateStoreCount: args.candidateStoreCount,
+    timings: args.timings,
+    totalMs: Date.now() - args.startedAt,
+    bestSingleStoreCoverage: args.bestSingleStoreCoverage,
+    continuationBytes: args.continuationBytes,
+    geocodeMs: args.geocodeMs,
+    geocodeStrategy: args.geocodeStrategy,
+    resolutionMode: args.resolutionMode,
+    responseDetail: args.responseDetail,
+    responseBytes,
+  });
+  return projected;
 }
 
 /**
@@ -281,31 +334,36 @@ async function optimizeInitialOrResumedBasket(
     DEFAULT_QUESTION_OPTIONS_LIMIT,
   );
 
-  const resolvedLines = itemStatuses.filter((item) => item.resolutionStatus === "resolved").length;
-  const confirmedLines = itemStatuses.filter(
-    (item) => item.resolutionStatus === "needs_confirmation",
-  ).length;
-  const unresolvedLines = itemStatuses.filter((item) => item.resolutionStatus === "unresolved")
-    .length;
+  // Public default is fast; treat missing mode as fast so one-call callers complete.
+  const resolutionMode = input.resolutionMode ?? "fast";
 
-  if (questions.length > 0) {
-    // Snapshot this call's resolved lines so the resume can reuse the lines that
-    // weren't questioned instead of re-searching them. Pure performance: the key
-    // is frozen into the signed continuation and a miss falls back to re-resolve.
-    const resolutionKey = randomUUID();
-    putResolution(resolutionKey, resolvedItems, options.now);
-    const payload = createBasketContinuationPayload(
+  const responseDetail = resolveResponseDetail(input.responseDetail, input.verbose);
+  const geocodeMs = input.geocodeMs ?? 0;
+  const geocodeStrategy = deriveGeocodeTelemetryStrategy(input.locationOrigin);
+
+  if (resolutionMode === "strict" && questions.length > 0) {
+    const pending = buildNeedsConfirmationResult({
       input,
-      questions.map((question) => ({
-        itemIndex: question.itemIndex,
-        selectionEffect: question.selectionEffect,
-        allowedProductIds: question.options.map((option) => option.productId),
-      })),
-      options.now,
-      resolutionKey,
-    );
-    const continuation = encodeBasketContinuation(payload, options.continuationSecret);
-    emitBasketOptimizeTelemetry({
+      options,
+      protocolState,
+      questions,
+      resolvedItems,
+      itemStatuses,
+      availability,
+      candidateStores,
+      location,
+      timings,
+    });
+    const resolvedLines = itemStatuses.filter((item) => item.resolutionStatus === "resolved")
+      .length;
+    const confirmedLines = itemStatuses.filter(
+      (item) => item.resolutionStatus === "needs_confirmation",
+    ).length;
+    const unresolvedLines = itemStatuses.filter((item) => item.resolutionStatus === "unresolved")
+      .length;
+    return finalizeBasketResult({
+      result: pending,
+      responseDetail,
       protocolState,
       requestedLines: input.items.length,
       resolvedLines,
@@ -315,32 +373,54 @@ async function optimizeInitialOrResumedBasket(
       questionCount: questions.length,
       candidateStoreCount: candidateStores.length,
       timings,
-      totalMs: Date.now() - startedAt,
+      startedAt,
       bestSingleStoreCoverage: null,
-      continuationBytes: Buffer.byteLength(continuation, "utf8"),
+      continuationBytes: Buffer.byteLength(pending.continuation, "utf8"),
+      geocodeMs,
+      geocodeStrategy,
+      resolutionMode,
     });
-    return {
-      status: "needs_confirmation",
-      continuation,
-      questions,
-      preview: {
-        priceScope: "resolved_subset",
-        resolvedLines,
-        requestedLines: input.items.length,
-        candidateStores: candidateStores.length,
-      },
-      items: serializeQuestionStatuses(itemStatuses, input, availability),
-      location,
-    };
   }
 
+  // Fast mode (or strict with nothing to ask): never return needs_confirmation.
+  // Ontology feeds hard query attrs (brand/variant/…) into filterSafeCandidates.
+  const ontology = await getActiveOntology();
+  const fastPolicy = applyFastResolutionPolicy(
+    input.items,
+    resolvedItems,
+    availability,
+    ontology,
+  );
+  const pricingItems = fastPolicy.items;
+  const assumptions: BasketAssumption[] = fastPolicy.assumptions;
+  const pricedStatuses = buildItemStatuses(pricingItems);
+
+  const resolvedLines = pricedStatuses.filter((item) => item.resolutionStatus === "resolved").length;
+  const confirmedLines = 0;
+  const unresolvedLines = pricedStatuses.filter((item) => item.resolutionStatus === "unresolved")
+    .length;
+
   const equivalenceStarted = Date.now();
-  await enrichCommodityCoverage(input.items, resolvedItems, storeIds);
+  await enrichCommodityCoverage(input.items, pricingItems, storeIds);
   timings.equivalenceMs = Date.now() - equivalenceStarted;
 
-  const productIds = collectProductIdsForPricing(resolvedItems);
+  const productIds = collectProductIdsForPricing(pricingItems);
   if (productIds.length === 0 || candidateStores.length === 0) {
-    emitBasketOptimizeTelemetry({
+    return finalizeBasketResult({
+      result: {
+        status: "complete",
+        bestSingleStore: null,
+        cheapestCompleteStore: null,
+        multiStore: null,
+        items: pricedStatuses,
+        stores: [],
+        storesCompared: 0,
+        storesTruncated: false,
+        location,
+        assumptions,
+        timings,
+      },
+      responseDetail,
       protocolState,
       requestedLines: input.items.length,
       resolvedLines,
@@ -350,21 +430,13 @@ async function optimizeInitialOrResumedBasket(
       questionCount: 0,
       candidateStoreCount: candidateStores.length,
       timings,
-      totalMs: Date.now() - startedAt,
+      startedAt,
       bestSingleStoreCoverage: null,
       continuationBytes: 0,
+      geocodeMs,
+      geocodeStrategy,
+      resolutionMode,
     });
-    return {
-      status: "complete",
-      bestSingleStore: null,
-      cheapestCompleteStore: null,
-      multiStore: null,
-      items: itemStatuses.map((s) => ({ ...s, candidates: [] })),
-      stores: [],
-      storesCompared: 0,
-      storesTruncated: false,
-      location,
-    };
   }
 
   const pricingStarted = Date.now();
@@ -379,7 +451,7 @@ async function optimizeInitialOrResumedBasket(
   for (const store of candidateStores) {
     const result = priceStoreBasket(
       store,
-      resolvedItems,
+      pricingItems,
       listingByChainAndProduct,
       priceByListingAndStore,
       promoMap,
@@ -395,41 +467,40 @@ async function optimizeInitialOrResumedBasket(
 
   const plans = buildRecommendationPlans(
     storeResults,
-    resolvedItems,
+    pricingItems,
     {
       distancePenaltyPerKm: input.distancePenaltyPerKm ?? DEFAULT_DISTANCE_PENALTY_PER_KM,
       distanceReliable: location.distanceReliable,
     },
     input.items.length,
+    {
+      location,
+      storesById: new Map(candidateStores.map((store) => [store.id, store])),
+    },
   );
   timings.pricingMs = Date.now() - pricingStarted;
 
   if (plans.bestSingleStoreResult) {
-    applyStorePlanSubstitutions(itemStatuses, plans.bestSingleStoreResult);
+    applyStorePlanSubstitutions(pricedStatuses, plans.bestSingleStoreResult);
   }
 
-  const { stores, storesTruncated } = trimStoreResults(
-    storeResults,
-    input.storesLimit,
-    input.verbose,
-    [plans.bestSingleStore?.storeId, plans.cheapestCompleteStore?.storeId],
-  );
+  const { stores, storesTruncated } = limitStoreResults(storeResults, input.storesLimit);
 
-  const verbose = input.verbose ?? false;
-  const items = verbose ? itemStatuses : itemStatuses.map((s) => ({ ...s, candidates: [] }));
-
-  // Avoid duplicating the same store's line payload when coverage is already complete.
-  let cheapestCompleteStore = plans.cheapestCompleteStore;
-  if (
-    !verbose &&
-    cheapestCompleteStore &&
-    plans.bestSingleStore &&
-    cheapestCompleteStore.storeId === plans.bestSingleStore.storeId
-  ) {
-    cheapestCompleteStore = { ...cheapestCompleteStore, lines: [] };
-  }
-
-  emitBasketOptimizeTelemetry({
+  return finalizeBasketResult({
+    result: {
+      status: "complete",
+      bestSingleStore: plans.bestSingleStore,
+      cheapestCompleteStore: plans.cheapestCompleteStore,
+      multiStore: plans.multiStore,
+      items: pricedStatuses,
+      stores,
+      storesCompared: storeResults.length,
+      storesTruncated,
+      location,
+      assumptions,
+      timings,
+    },
+    responseDetail,
     protocolState,
     requestedLines: input.items.length,
     resolvedLines,
@@ -439,20 +510,65 @@ async function optimizeInitialOrResumedBasket(
     questionCount: 0,
     candidateStoreCount: candidateStores.length,
     timings,
-    totalMs: Date.now() - startedAt,
+    startedAt,
     bestSingleStoreCoverage: plans.bestSingleStore?.coverageRatio ?? null,
     continuationBytes: 0,
+    geocodeMs,
+    geocodeStrategy,
+    resolutionMode,
   });
+}
 
+function buildNeedsConfirmationResult(args: {
+  input: BasketInitialInput;
+  options: BasketOptimizeOptions;
+  protocolState: "initial" | "resume";
+  questions: ReturnType<typeof buildBasketQuestions>;
+  resolvedItems: ResolvedItem[];
+  itemStatuses: BasketItemStatus[];
+  availability: Map<string, CandidateAvailability>;
+  candidateStores: { length: number };
+  location: StoreLocationMetadata;
+  timings: BasketPhaseTimings;
+}): BasketNeedsConfirmationResult {
+  const {
+    input,
+    options,
+    questions,
+    resolvedItems,
+    itemStatuses,
+    availability,
+    candidateStores,
+    location,
+  } = args;
+
+  const resolvedLines = itemStatuses.filter((item) => item.resolutionStatus === "resolved").length;
+
+  // Strict-only: snapshot resolved lines + signed continuation for resume.
+  const resolutionKey = randomUUID();
+  putResolution(resolutionKey, resolvedItems, options.now);
+  const payload = createBasketContinuationPayload(
+    input,
+    questions.map((question) => ({
+      itemIndex: question.itemIndex,
+      selectionEffect: question.selectionEffect,
+      allowedProductIds: question.options.map((option) => option.productId),
+    })),
+    options.now,
+    resolutionKey,
+  );
+  const continuation = encodeBasketContinuation(payload, options.continuationSecret);
   return {
-    status: "complete",
-    bestSingleStore: plans.bestSingleStore,
-    cheapestCompleteStore,
-    multiStore: plans.multiStore,
-    items,
-    stores,
-    storesCompared: storeResults.length,
-    storesTruncated,
+    status: "needs_confirmation",
+    continuation,
+    questions,
+    preview: {
+      priceScope: "resolved_subset",
+      resolvedLines,
+      requestedLines: input.items.length,
+      candidateStores: candidateStores.length,
+    },
+    items: serializeQuestionStatuses(itemStatuses, input, availability),
     location,
   };
 }

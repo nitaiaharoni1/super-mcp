@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyLocationOriginHonesty,
+  deriveGeocodeTelemetryStrategy,
   resolveLocationInput,
 } from "../../src/lib/locationInput.js";
 import type { StoreLocationMetadata } from "../../src/lib/resolveStoreLocation.js";
-import { AppError } from "@super-mcp/shared";
+import { AppError, CITY_CENTROID } from "@super-mcp/shared";
 
 function baseLocation(overrides: Partial<StoreLocationMetadata> = {}): StoreLocationMetadata {
   return {
@@ -33,6 +34,8 @@ describe("resolveLocationInput", () => {
     expect(result.near).toEqual({ lat: 32.1656, lng: 34.8469 });
     expect(result.radiusKm).toBe(5);
     expect(result.locationOrigin?.precision).toBe("coordinates");
+    expect(result.geocodeMs).toBeGreaterThanOrEqual(0);
+    expect(deriveGeocodeTelemetryStrategy(result.locationOrigin)).toBe("coordinates");
   });
 
   it("rejects near + location", async () => {
@@ -60,6 +63,7 @@ describe("resolveLocationInput", () => {
     expect(resolveGeocode).toHaveBeenCalledWith({
       location: "נווה עמל",
       city: "הרצליה",
+      strategy: "precise",
     });
     expect(result.city).toBe("הרצליה");
     expect(result.near).toEqual({ lat: 32.17, lng: 34.84 });
@@ -69,6 +73,46 @@ describe("resolveLocationInput", () => {
       provider: "nominatim",
       attribution: "© OpenStreetMap contributors",
     });
+  });
+
+  it("fast strategy propagates embedded-city centroid provenance when city is omitted", async () => {
+    const resolveGeocode = vi.fn().mockResolvedValue({
+      status: "ok",
+      point: CITY_CENTROID["תל אביב-יפו"],
+      precision: "city",
+      provider: "city_centroid",
+      cached: false,
+      fallbackApplied: true,
+      displayName: "תל אביב-יפו",
+      attribution: null,
+      warning:
+        "Using city-level location for a faster estimate; distances are approximate.",
+    });
+    const result = await resolveLocationInput(
+      { location: "רחוב בן גוריון, תל אביב" },
+      { resolveGeocode, geocodeStrategy: "fast" },
+    );
+    expect(resolveGeocode).toHaveBeenCalledWith({
+      location: "רחוב בן גוריון, תל אביב",
+      city: "תל אביב-יפו",
+      strategy: "fast",
+    });
+    expect(result).toMatchObject({
+      city: "תל אביב-יפו",
+      near: CITY_CENTROID["תל אביב-יפו"],
+      locationOrigin: {
+        precision: "city",
+        provider: "city_centroid",
+        cached: false,
+        fallbackApplied: true,
+        displayName: "תל אביב-יפו",
+        attribution: null,
+        warning:
+          "Using city-level location for a faster estimate; distances are approximate.",
+      },
+    });
+    expect(result.geocodeMs).toBeGreaterThanOrEqual(0);
+    expect(deriveGeocodeTelemetryStrategy(result.locationOrigin)).toBe("city_fallback");
   });
 
   it("maps not_found → 400 and unavailable → 503", async () => {
@@ -121,7 +165,9 @@ describe("resolveLocationInput", () => {
       near: undefined,
       radiusKm: undefined,
       locationOrigin: undefined,
+      geocodeMs: 0,
     });
+    expect(deriveGeocodeTelemetryStrategy(result.locationOrigin)).toBe("none");
   });
 });
 
