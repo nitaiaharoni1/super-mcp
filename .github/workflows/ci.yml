@@ -88,7 +88,7 @@ jobs:
         # Hard gate: prevents backsliding once a baseline is committed. No-ops
         # with a warning until packages/db/benchmarks/baseline.json exists.
         run: pnpm --filter @super-mcp/db compare-benchmark "$GITHUB_WORKSPACE/packages/db/benchmarks/baseline.json" "$GITHUB_WORKSPACE/benchmark-report.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: semantic-benchmark-report
@@ -105,7 +105,7 @@ jobs:
           pnpm --filter @super-mcp/api benchmark:fast-basket
           test -s "$GITHUB_WORKSPACE/fast-basket-benchmark.json" \
             || { echo "fast-basket benchmark produced no JSON — it crashed"; exit 1; }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: fast-basket-benchmark-report
