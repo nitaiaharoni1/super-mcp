@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: oklch(0.97 0.015 95);
+  --color-ink: oklch(0.28 0.03 130);
+  --color-accent: oklch(0.52 0.16 30);
+  --color-olive: oklch(0.45 0.06 130);
+  --color-olive-soft: oklch(0.92 0.03 130);
+  --color-muted: oklch(0.45 0.02 130);
+  --radius-lg: 12px;
+  --font-sans: var(--font-rubik), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
