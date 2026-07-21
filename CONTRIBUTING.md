@@ -29,6 +29,12 @@ pnpm dev              # API + MCP on http://localhost:8787
 
 See [DATA.md](./DATA.md) for feed provenance and what is (not) redistributed in this repo.
 
+## Reporting issues
+
+Use the GitHub issue forms ([Bug](https://github.com/nitaiaharoni1/super-mcp/issues/new?template=bug.yml) / [Feature](https://github.com/nitaiaharoni1/super-mcp/issues/new?template=feature.yml)).
+
+Security vulnerabilities → [SECURITY.md](./SECURITY.md) / private GitHub Security Advisories — not a public issue.
+
 ## Development norms
 
 - Keep packages `"private": true` unless there is an intentional publish decision.
@@ -39,9 +45,12 @@ See [DATA.md](./DATA.md) for feed provenance and what is (not) redistributed in 
 
 ## Pull requests
 
-1. Fork or branch from the default branch.
+`main` is protected: changes land only via pull request. Required checks: `test`, `gitleaks`, `benchmark`. Approving reviews are not required (solo-maintainer friendly); CI must be green.
+
+1. Fork or branch from `main` (do not push commits directly to `main`).
 2. Keep PRs focused; mention any security or data-license impact.
 3. Link related issues when applicable.
+4. Wait for CI, then merge (squash is fine).
 
 ## Deploy / cloud access
 
