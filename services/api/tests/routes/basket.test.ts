@@ -49,6 +49,29 @@ describe("basket REST contract", () => {
     });
   });
 
+  it("maps verbose true to response_detail debug only when response_detail is absent", () => {
+    expect(
+      basketInitialBodySchema.parse({
+        items: [{ query: "חלב", pack_qty: 1 }],
+        city: "תל אביב",
+        verbose: true,
+      }),
+    ).toMatchObject({
+      response_detail: "debug",
+    });
+
+    expect(
+      basketInitialBodySchema.parse({
+        items: [{ query: "חלב", pack_qty: 1 }],
+        city: "תל אביב",
+        response_detail: "summary",
+        verbose: true,
+      }),
+    ).toMatchObject({
+      response_detail: "summary",
+    });
+  });
+
   it("accepts exactly one identifier and one quantity source", () => {
     expect(basketItemSchema.parse({ query: "פיתות", amount: 20, unit: "יח" })).toBeDefined();
     expect(() =>

@@ -140,10 +140,11 @@ export function registerBasketTools(server: McpServer): void {
           .describe(
             "fast returns a best-effort priced basket in one call; strict pauses for material ambiguity.",
           ),
+        // No field default: omitted must stay undefined so mapResponseDetail can
+        // upgrade verbose:true → debug (same as REST transform on absent field).
         response_detail: z
           .enum(["summary", "standard", "debug"])
           .optional()
-          .default("summary")
           .describe("Controls response size. Use debug only for diagnostics."),
       },
     },

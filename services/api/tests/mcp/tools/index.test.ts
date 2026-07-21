@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const optimizeBasket = vi.fn();
+
+vi.mock("../../../src/services/basket/index.js", () => ({
+  optimizeBasket: (...args: unknown[]) => optimizeBasket(...args),
+}));
+
 import { registerProductTools } from "../../../src/mcp/tools/products/index.js";
 import { registerBasketTools } from "../../../src/mcp/tools/basket/index.js";
 import { registerStoreTools } from "../../../src/mcp/tools/stores/index.js";
@@ -10,6 +17,10 @@ import {
 import type { z } from "zod";
 
 describe("MCP domain tool registrars", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("exports one registrar per domain", () => {
     expect(typeof registerProductTools).toBe("function");
     expect(typeof registerBasketTools).toBe("function");
@@ -67,9 +78,67 @@ describe("MCP domain tool registrars", () => {
     expect(shape?.resolution_mode).toBeDefined();
     expect(shape?.response_detail).toBeDefined();
     expect(shape?.resolution_mode?.parse(undefined)).toBe("fast");
-    expect(shape?.response_detail?.parse(undefined)).toBe("summary");
+    // response_detail stays undefined when omitted so verbose→debug can run in the mapper.
+    expect(shape?.response_detail?.parse(undefined)).toBeUndefined();
     expect(shape?.resolution_mode?.parse("strict")).toBe("strict");
     expect(shape?.response_detail?.parse("debug")).toBe("debug");
+  });
+
+  it("maps verbose true to responseDetail debug only when response_detail is absent", async () => {
+    optimizeBasket.mockResolvedValue({ status: "complete", assumptions: [] });
+
+    const definitions = new Map<
+      string,
+      {
+        inputSchema: z.ZodObject<z.ZodRawShape>;
+        handler: (args: Record<string, unknown>) => Promise<unknown>;
+      }
+    >();
+    const server = {
+      registerTool: (
+        name: string,
+        def: { inputSchema: z.ZodObject<z.ZodRawShape> },
+        handler: (args: Record<string, unknown>) => Promise<unknown>,
+      ) => {
+        definitions.set(name, { inputSchema: def.inputSchema, handler });
+      },
+    } as unknown as Parameters<typeof registerBasketTools>[0];
+
+    registerBasketTools(server);
+    const tool = definitions.get("optimize_basket");
+    expect(tool).toBeDefined();
+
+    const base = {
+      items: [{ query: "חלב", pack_qty: 1 }],
+      city: "תל אביב",
+    };
+
+    const parsedVerbose = tool!.inputSchema.parse({ ...base, verbose: true });
+    expect(parsedVerbose).toMatchObject({ verbose: true });
+    expect(parsedVerbose).not.toHaveProperty("response_detail");
+
+    await tool!.handler(parsedVerbose as Record<string, unknown>);
+    expect(optimizeBasket).toHaveBeenCalledWith(
+      expect.objectContaining({ responseDetail: "debug", verbose: true }),
+      expect.anything(),
+    );
+
+    optimizeBasket.mockClear();
+    const parsedExplicit = tool!.inputSchema.parse({
+      ...base,
+      response_detail: "summary",
+      verbose: true,
+    });
+    expect(parsedExplicit).toMatchObject({
+      response_detail: "summary",
+      verbose: true,
+    });
+
+    await tool!.handler(parsedExplicit as Record<string, unknown>);
+    expect(optimizeBasket).toHaveBeenCalledWith(
+      expect.objectContaining({ responseDetail: "summary", verbose: true }),
+      expect.anything(),
+    );
   });
 
   it("registers every store tool with a strict schema that rejects unknown args", () => {
