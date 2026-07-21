@@ -21,3 +21,7 @@ firebase.json
 data/raw/
 *.log
 *.tsbuildinfo
+
+# Local git worktrees and SDD scratch
+.worktrees/
+.superpowers/
