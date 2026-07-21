@@ -28,8 +28,11 @@ export function buildMcpServerInstructions(
     "with only {continuation, answers}. If status is complete, use bestSingleStore / cheapestCompleteStore " +
     "/ multiStore. Plan totals sum priced lines only — check totalScope; priced_lines_only is not the " +
     "full basket total. Use search_products / resolve_products only for unresolved or missing lines. " +
+    "Use pack_qty alone for pack counts (3 milk cartons: pack_qty=3). " +
     "Use amount+unit for natural counts and weighed goods " +
-    "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). Location filters default to 10km when a " +
+    "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). " +
+    "If pack_qty is paired with a count unit (unit/יח), the unit is ignored. " +
+    "Location filters default to 10km when a " +
     "point is resolved. Use get_promotions to explain discounts. " +
     protocolIdentityLine(env)
   );

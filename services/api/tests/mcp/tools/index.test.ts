@@ -93,9 +93,15 @@ describe("MCP domain tool registrars", () => {
     expect(itemsSchema?.parse([{ query: "pitas", pack_qty: 2 }])).toEqual([
       { query: "pitas", pack_qty: 2 },
     ]);
+    expect(itemsSchema?.parse([{ query: "pitas", pack_qty: 2, unit: "unit" }])).toEqual([
+      { query: "pitas", pack_qty: 2 },
+    ]);
     expect(itemsSchema?.parse([{ query: "pitas", amount: 20, unit: "יח" }])).toEqual([
       { query: "pitas", amount: 20, unit: "יח" },
     ]);
+    expect(() =>
+      itemsSchema?.parse([{ query: "pitas", pack_qty: 2, unit: "kg" }]),
+    ).toThrow(/unit requires amount/i);
     expect(() => itemsSchema?.parse([{ query: "pitas", qty: 2 }])).toThrow();
     expect(() =>
       itemsSchema?.parse([{ query: "pitas", pack_qty: 2, qty: 2 }]),
@@ -221,7 +227,9 @@ describe("MCP domain tool registrars", () => {
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/continuation/i);
     expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/prepare_basket/i);
     expect(MCP_SERVER_INSTRUCTIONS).toContain("pack_qty");
+    expect(MCP_SERVER_INSTRUCTIONS).toContain("pack_qty=3");
     expect(MCP_SERVER_INSTRUCTIONS).toContain("amount=20, unit=יח");
+    expect(MCP_SERVER_INSTRUCTIONS).toMatch(/count unit/i);
     expect(MCP_SERVER_INSTRUCTIONS).toMatch(/location/i);
     expect(MCP_SERVER_INSTRUCTIONS).toContain("נווה עמל");
     const identity = parseProtocolIdentityLine(MCP_SERVER_INSTRUCTIONS);

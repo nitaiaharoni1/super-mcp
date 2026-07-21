@@ -1,12 +1,13 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AppError } from "@super-mcp/shared";
+import { stripRedundantPackCountUnit } from "../../../lib/basketItemQuantity.js";
+import { DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { optimizeBasket } from "../../../services/basket/index.js";
 import type {
   BasketResolutionMode,
   BasketResponseDetail,
 } from "../../../services/basket/types.js";
-import { DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
 import { locationShape, resolveToolLocation } from "../shared/location.js";
 
@@ -15,19 +16,31 @@ const basketItemSchema = z
     product_id: z.string().uuid().optional().describe("Canonical product UUID, if known."),
     gtin: z.string().min(1).optional().describe("GTIN/barcode, if known."),
     query: z.string().min(1).optional().describe("Free-text product name."),
-    pack_qty: z.number().positive().optional().describe("Number of product packs to buy."),
+    pack_qty: z
+      .number()
+      .positive()
+      .optional()
+      .describe(
+        "Number of product packs to buy. Prefer pack_qty alone (no unit). " +
+          "Count units unit/units/יח sent with pack_qty are ignored.",
+      ),
     amount: z
       .number()
       .positive()
       .optional()
-      .describe("Physical amount, e.g. 1.5 with unit=kg."),
+      .describe("Physical amount, e.g. 1.5 with unit=kg. Mutually exclusive with pack_qty."),
     unit: z
       .string()
       .min(1)
       .optional()
-      .describe("Unit for amount: kg, g, L, ml, unit, יח, etc."),
+      .describe(
+        "Required with amount: kg, g, L, ml, unit, יח, etc. " +
+          "Do not pair mass/volume units with pack_qty.",
+      ),
   })
   .strict()
+  // Agents often send pack_qty with unit="unit"/"יח"; strip before mutual-exclusion checks.
+  .transform(stripRedundantPackCountUnit)
   .refine(
     (item) =>
       [item.product_id, item.gtin, item.query].filter((value) => value != null).length === 1,
@@ -134,6 +147,8 @@ export function registerBasketTools(server: McpServer): void {
         "When status is complete, plan totals (bestSingleStore / cheapestCompleteStore / multiStore) " +
         "sum priced lines only — read totalScope; priced_lines_only is not the full basket total. " +
         "Never reconstruct items and do not call search_products per line. " +
+        "Quantity: pack_qty alone for packs (e.g. pack_qty=3); amount+unit for weighed/natural counts " +
+        "(amount=1.5, unit=kg). pack_qty with unit=unit/יח is accepted (unit ignored). " +
         `Initial calls require city, near, and/or location (default ${DEFAULT_RADIUS_KM}km when a point is set). ` +
         "Prefer location for neighborhoods/addresses (e.g. 'נווה עמל, הרצליה'); near remains lat,lng.",
       inputSchema: {

@@ -11,21 +11,26 @@ export const basketItemInputSchema = {
     pack_qty: {
       type: "number",
       exclusiveMinimum: 0,
-      description: "Number of product packs to buy. Mutually exclusive with amount.",
+      description:
+        "Number of product packs to buy. Prefer alone (no unit). Mutually exclusive with amount. " +
+        "Count units (unit/units/יח) sent with pack_qty are ignored.",
     },
     amount: {
       type: "number",
       exclusiveMinimum: 0,
-      description: "Physical amount (requires unit), e.g. 1.5 with unit=kg.",
+      description: "Physical amount (requires unit), e.g. 1.5 with unit=kg. Mutually exclusive with pack_qty.",
     },
     unit: {
       type: "string",
       minLength: 1,
-      description: "Required with amount: kg, g, L, ml, unit, יח, etc.",
+      description:
+        "Required with amount: kg, g, L, ml, unit, יח, etc. " +
+        "Do not pair mass/volume units with pack_qty.",
     },
   },
   description:
-    "Exactly one of product_id, gtin, or query; and exactly one of pack_qty or amount+unit.",
+    "Exactly one of product_id, gtin, or query; and exactly one of pack_qty or amount+unit. " +
+    "pack_qty + count unit (unit/יח) is accepted and treated as pack_qty alone.",
 };
 
 const basketLocationRequestProperties = {

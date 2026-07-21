@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stripRedundantPackCountUnit } from "../../lib/basketItemQuantity.js";
 import { geoQueryFields, refineGeoFields } from "../shared/schemas.js";
 
 export const basketItemSchema = z
@@ -11,6 +12,8 @@ export const basketItemSchema = z
     unit: z.string().trim().min(1).optional(),
   })
   .strict()
+  // Agents often send pack_qty with unit="unit"/"יח"; strip before mutual-exclusion checks.
+  .transform(stripRedundantPackCountUnit)
   .refine(
     (item) =>
       [item.product_id, item.gtin, item.query].filter((value) => value != null).length === 1,

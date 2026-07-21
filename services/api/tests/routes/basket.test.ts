@@ -80,6 +80,27 @@ describe("basket REST contract", () => {
     expect(() => basketItemSchema.parse({ query: "פיתות", qty: 2 })).toThrow();
   });
 
+  it("strips redundant count units on pack_qty and rejects mass units with pack_qty", () => {
+    expect(basketItemSchema.parse({ query: "חלב", pack_qty: 3 })).toEqual({
+      query: "חלב",
+      pack_qty: 3,
+    });
+    expect(basketItemSchema.parse({ query: "חלב", pack_qty: 3, unit: "unit" })).toEqual({
+      query: "חלב",
+      pack_qty: 3,
+    });
+    expect(basketItemSchema.parse({ query: "חלב", pack_qty: 3, unit: "יח" })).toEqual({
+      query: "חלב",
+      pack_qty: 3,
+    });
+    expect(() =>
+      basketItemSchema.parse({ query: "חלב", pack_qty: 3, unit: "kg" }),
+    ).toThrow(/unit requires amount/i);
+    expect(() =>
+      basketItemSchema.parse({ query: "חלב", pack_qty: 3, amount: 1, unit: "kg" }),
+    ).toThrow(/exactly one quantity source/i);
+  });
+
   it("accepts a resume request without items or location", () => {
     expect(
       optimizeBasketBodySchema.parse({

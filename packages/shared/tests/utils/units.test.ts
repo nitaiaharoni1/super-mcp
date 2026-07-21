@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { canonicalItemCode, computeUnitPrice, inferPackSizeFromName,
+  isCountUnit,
   isGtinItem,
   normalizeGtin,
   normalizeMeasure,
@@ -7,6 +8,23 @@ import { canonicalItemCode, computeUnitPrice, inferPackSizeFromName,
   reconcileMeasureFamilyWithName,
   resolvePurchaseQty,
 } from "../../src/utils/units.js";
+
+describe("isCountUnit", () => {
+  it("recognizes discrete count aliases", () => {
+    expect(isCountUnit("unit")).toBe(true);
+    expect(isCountUnit("units")).toBe(true);
+    expect(isCountUnit("יח")).toBe(true);
+    expect(isCountUnit("יחידות")).toBe(true);
+    expect(isCountUnit("pcs")).toBe(true);
+  });
+
+  it("rejects mass and volume units", () => {
+    expect(isCountUnit("kg")).toBe(false);
+    expect(isCountUnit("L")).toBe(false);
+    expect(isCountUnit("גרם")).toBe(false);
+    expect(isCountUnit(null)).toBe(false);
+  });
+});
 
 describe("normalizeMeasure", () => {
   it("converts kg to g", () => {

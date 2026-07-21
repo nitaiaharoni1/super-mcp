@@ -66,6 +66,13 @@ function cleanUnit(raw?: string): string {
     .replace(/(?<!\d)\.|\.(?!\d)/g, "");
 }
 
+/** True when unit means a discrete count (unit / יח / pcs), not mass or volume. */
+export function isCountUnit(unit?: string | null): boolean {
+  if (unit == null) return false;
+  const cleaned = cleanUnit(unit);
+  return UNIT_ALIASES[cleaned]?.unit === "unit";
+}
+
 export function normalizeMeasure(
   qty?: number,
   unit?: string,
