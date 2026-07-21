@@ -23,7 +23,9 @@ describe("mcp helpers", () => {
 
   it("builds Cursor install deeplink with base64 config", () => {
     const link = buildCursorInstallLink("super-mcp", url);
-    const expectedConfig = Buffer.from(JSON.stringify({ url }), "utf8").toString("base64");
+    const expectedConfig = encodeURIComponent(
+      Buffer.from(JSON.stringify({ url }), "utf8").toString("base64"),
+    );
     expect(link).toBe(
       `cursor://anysphere.cursor-deeplink/mcp/install?name=super-mcp&config=${expectedConfig}`,
     );

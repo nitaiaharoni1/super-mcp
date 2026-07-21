@@ -27,8 +27,12 @@ export function CopyButton({
   }, [copied]);
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+    } catch {
+      // Clipboard denied or unavailable — keep default label
+    }
   }
 
   return (

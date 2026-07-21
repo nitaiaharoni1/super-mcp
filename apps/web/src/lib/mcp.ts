@@ -32,5 +32,5 @@ function toBase64Json(value: unknown): string {
 /** Cursor MCP install deeplink: https://cursor.com/docs/mcp/install-links */
 export function buildCursorInstallLink(name: string, url: string): string {
   const config = toBase64Json(buildMcpServerConfig(url));
-  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(name)}&config=${config}`;
+  return `cursor://anysphere.cursor-deeplink/mcp/install?name=${encodeURIComponent(name)}&config=${encodeURIComponent(config)}`;
 }
