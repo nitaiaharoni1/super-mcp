@@ -25,5 +25,11 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY` | server (must stay unset/`0`) |
 | `NOMINATIM_USER_AGENT` | server (identifying contact for OSM policy) |
 | `NEXT_PUBLIC_MCP_URL` | web hosting only |
+| `NEXT_PUBLIC_POSTHOG_KEY` | web hosting only (Baliprop + Reflex project token) |
+| `NEXT_PUBLIC_POSTHOG_HOST` | web hosting only (`https://eu.i.posthog.com`) |
+| `POSTHOG_KEY` | API/MCP server (same project token) |
+| `POSTHOG_HOST` | API/MCP server (`https://eu.i.posthog.com`) |
+
+Filter PostHog insights with `product = super_mcp`. Design: [docs/superpowers/specs/2026-07-21-posthog-analytics-design.md](./superpowers/specs/2026-07-21-posthog-analytics-design.md).
 
 Self-hosters clone this repo and supply **their own** values; they receive no access to the operator’s cloud.

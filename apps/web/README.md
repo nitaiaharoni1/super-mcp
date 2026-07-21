@@ -2,6 +2,10 @@
 
 Hebrew RTL marketing landing for Super MCP (`apps/web` in the monorepo).
 
+Primary CTA is a hosted-access email request. Manual MCP config includes
+`Authorization: Bearer <YOUR_API_KEY>` — there is no public one-click Cursor
+install without an issued key.
+
 ## Local development
 
 From the repo root:
@@ -14,9 +18,15 @@ Create `apps/web/.env.local`:
 
 ```bash
 NEXT_PUBLIC_MCP_URL=http://localhost:8787/mcp
+NEXT_PUBLIC_ACCESS_EMAIL=you@example.com
 ```
 
-`NEXT_PUBLIC_MCP_URL` is baked into the client bundle at build time. The Connect panel reads it for the MCP URL, JSON snippet, and Cursor deeplink.
+Both values are baked into the client/server bundle at build time.
+
+- `NEXT_PUBLIC_MCP_URL` — Streamable HTTP MCP endpoint shown in the manual setup template
+- `NEXT_PUBLIC_ACCESS_EMAIL` — destination for the “בקשו גישת MCP” mailto CTA
+
+If `NEXT_PUBLIC_ACCESS_EMAIL` is missing in development, the Access panel shows a visible configuration alert instead of a fake address.
 
 ## TypeScript note
 
@@ -26,7 +36,7 @@ This app uses the TypeScript 6 npm alias for Next.js 15 compatibility:
 "typescript": "npm:@typescript/typescript6@^6.0.2"
 ```
 
-That is an intentional deviation from the rest of the monorepo (Task 1). Do not bump to TypeScript 7 here without verifying Next 15 support.
+That is an intentional deviation from the rest of the monorepo. Do not bump to TypeScript 7 here without verifying Next 15 support.
 
 ## Firebase App Hosting
 
@@ -37,21 +47,12 @@ Setup:
 1. Blaze billing plan required.
 2. Connect the GitHub repo in the Firebase console.
 3. Set the **app root directory** to `apps/web`.
-4. Provide `NEXT_PUBLIC_MCP_URL` for build and runtime.
+4. Provide `NEXT_PUBLIC_MCP_URL` and `NEXT_PUBLIC_ACCESS_EMAIL` for build and runtime.
+5. Provide PostHog (optional but recommended): Firebase secret `NEXT_PUBLIC_POSTHOG_KEY`. Host is set in `apphosting.yaml` to `https://eu.i.posthog.com`. Uses the shared Baliprop + Reflex project; every event is tagged `product=super_mcp`.
 
-### Environment variable
-
-`apphosting.yaml` binds `NEXT_PUBLIC_MCP_URL` from a Firebase secret named `NEXT_PUBLIC_MCP_URL` (available at BUILD and RUNTIME).
-
-If secret binding is not set up yet, configure the variable in the Firebase console instead:
-
-- **Name:** `NEXT_PUBLIC_MCP_URL`
-- **Example value:** `https://api.example.com/mcp` (your public MCP endpoint)
-- **Availability:** BUILD and RUNTIME
+`apphosting.yaml` binds the key from a Firebase secret (BUILD and RUNTIME).
 
 Do not commit production URLs or secrets to the repo.
-
-Classic `next export` / static Firebase Hosting is out of scope for this app.
 
 ## Scripts
 
@@ -65,5 +66,9 @@ Classic `next export` / static Firebase Hosting is out of scope for this app.
 Production build example:
 
 ```bash
-NEXT_PUBLIC_MCP_URL=https://api.example.com/mcp pnpm --filter @super-mcp/web build
+NEXT_PUBLIC_MCP_URL=https://api.example.com/mcp \
+NEXT_PUBLIC_ACCESS_EMAIL=access@example.com \
+NEXT_PUBLIC_POSTHOG_KEY=phc_... \
+NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com \
+pnpm --filter @super-mcp/web build
 ```

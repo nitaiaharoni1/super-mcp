@@ -11,9 +11,12 @@
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.3",
+    "@super-mcp/shared": "workspace:^",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "motion": "^12.42.2",
     "next": "^15.5.2",
+    "posthog-js": "^1.405.3",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "tailwind-merge": "^3.3.1"

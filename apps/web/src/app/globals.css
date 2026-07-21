@@ -1,24 +1,48 @@
 @import "tailwindcss";
 
 @theme {
-  --color-paper: oklch(0.97 0.015 95);
-  --color-ink: oklch(0.28 0.03 130);
-  --color-accent: oklch(0.52 0.16 30);
-  --color-olive: oklch(0.45 0.06 130);
-  --color-olive-soft: oklch(0.92 0.03 130);
-  --color-muted: oklch(0.45 0.02 130);
-  --radius-lg: 12px;
-  --font-sans: var(--font-rubik), ui-sans-serif, system-ui, sans-serif;
+  --color-paper: oklch(1 0 0);
+  --color-ink: oklch(0.28 0.02 250);
+  --color-ink-muted: oklch(0.48 0.02 250);
+  /* Darker cyan for AA white-on-accent CTAs */
+  --color-accent: oklch(0.5 0.14 230);
+  --color-accent-deep: oklch(0.42 0.13 230);
+  --color-olive: oklch(0.45 0.08 230);
+  --color-olive-soft: oklch(0.96 0.025 230);
+  /* Bright band for hero visual (not used as text contrast surface) */
+  --color-brand-band: oklch(0.72 0.12 230);
+  --color-brand-band-deep: oklch(0.58 0.14 230);
+  --color-data: oklch(0.22 0.025 250);
+  --color-data-fg: oklch(0.98 0.005 230);
+  --color-data-muted: oklch(0.72 0.03 230);
+  --color-line: color-mix(in oklch, var(--color-accent) 16%, transparent);
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+  --font-sans: var(--font-heebo), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-secular), var(--font-heebo), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 html {
   background: var(--color-paper);
   color: var(--color-ink);
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
 
 body {
   background: var(--color-paper);
   color: var(--color-ink);
   font-family: var(--font-sans);
+}
+
+::selection {
+  background: color-mix(in oklch, var(--color-accent) 28%, white);
+  color: var(--color-ink);
 }

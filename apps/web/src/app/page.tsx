@@ -1,11 +1,13 @@
-import { AgentJobs } from "@/components/marketing/AgentJobs";
-import { BasketStory } from "@/components/marketing/BasketStory";
-import { ConnectPanel } from "@/components/marketing/ConnectPanel";
+import { AccessPanel } from "@/components/marketing/AccessPanel";
+import { BenefitTrio } from "@/components/marketing/BenefitTrio";
+import { DeveloperSurface } from "@/components/marketing/DeveloperSurface";
 import { Hero } from "@/components/marketing/Hero";
-import { ProofStrip } from "@/components/marketing/ProofStrip";
+import { HowItWorks } from "@/components/marketing/HowItWorks";
+import { SafetyStatement } from "@/components/marketing/SafetyStatement";
+import { SimpleProof } from "@/components/marketing/SimpleProof";
 import { SiteFooter } from "@/components/marketing/SiteFooter";
 import { SiteHeader } from "@/components/marketing/SiteHeader";
-import { ToolsGlance } from "@/components/marketing/ToolsGlance";
+import { TrustFooter } from "@/components/marketing/TrustFooter";
 
 export default function HomePage() {
   return (
@@ -13,11 +15,13 @@ export default function HomePage() {
       <SiteHeader />
       <main>
         <Hero />
-        <ProofStrip />
-        <AgentJobs />
-        <BasketStory />
-        <ConnectPanel />
-        <ToolsGlance />
+        <BenefitTrio />
+        <HowItWorks />
+        <SimpleProof />
+        <SafetyStatement />
+        <AccessPanel />
+        <DeveloperSurface />
+        <TrustFooter />
       </main>
       <SiteFooter />
     </>

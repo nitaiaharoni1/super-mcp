@@ -1,5 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { captureMcpToolOperation } from "../../analytics/capture.js";
+import { resolveAnalyticsContext } from "../../analytics/context.js";
 import { errorResult, textResult } from "./shared/result.js";
 
 type ToolMeta<T extends z.ZodRawShape> = {
@@ -19,9 +21,28 @@ export function registerTool<T extends z.ZodRawShape>(
   handler: (args: z.infer<z.ZodObject<T>>) => Promise<unknown>,
 ): void {
   const toolHandler = async (args: z.infer<z.ZodObject<T>>) => {
+    const startedAt = Date.now();
+    const ctx = resolveAnalyticsContext(server);
     try {
-      return textResult(await handler(args));
+      const payload = await handler(args);
+      captureMcpToolOperation({
+        toolName: name,
+        startedAt,
+        status: "ok",
+        toolArgs: args,
+        result: payload,
+        ctx,
+      });
+      return textResult(payload);
     } catch (err) {
+      captureMcpToolOperation({
+        toolName: name,
+        startedAt,
+        status: "error",
+        error: err,
+        toolArgs: args,
+        ctx,
+      });
       return errorResult(err);
     }
   };

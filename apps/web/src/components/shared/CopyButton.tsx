@@ -3,41 +3,51 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { capture } from "@/lib/analytics";
 
-const COPIED_STATE_DURATION_MS = 1_500;
+const STATE_DURATION_MS = 1_800;
+
+type CopyState = "idle" | "copied" | "failed";
 
 export function CopyButton({
   value,
   label,
   copiedLabel = "הועתק",
+  failedLabel = "ההעתקה נכשלה",
+  analyticsEvent,
 }: {
   value: string;
   label: string;
   copiedLabel?: string;
+  failedLabel?: string;
+  analyticsEvent?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<CopyState>("idle");
 
   useEffect(() => {
-    if (!copied) {
+    if (state === "idle") {
       return;
     }
 
-    const timeout = window.setTimeout(() => setCopied(false), COPIED_STATE_DURATION_MS);
+    const timeout = window.setTimeout(() => setState("idle"), STATE_DURATION_MS);
     return () => window.clearTimeout(timeout);
-  }, [copied]);
+  }, [state]);
 
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(value);
-      setCopied(true);
+      setState("copied");
+      if (analyticsEvent) capture(analyticsEvent);
     } catch {
-      // Clipboard denied or unavailable — keep default label
+      setState("failed");
     }
   }
 
+  const text = state === "copied" ? copiedLabel : state === "failed" ? failedLabel : label;
+
   return (
-    <Button type="button" variant="secondary" onClick={handleCopy}>
-      {copied ? copiedLabel : label}
+    <Button type="button" variant="secondary" onClick={handleCopy} aria-live="polite">
+      {text}
     </Button>
   );
 }
