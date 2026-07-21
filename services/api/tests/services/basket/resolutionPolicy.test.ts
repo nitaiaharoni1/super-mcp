@@ -100,6 +100,251 @@ describe("applyFastResolutionPolicy hard attributes", () => {
     expect(result.items[0]?.productId).toBeNull();
     expect(result.assumptions[0]?.reason).toBe("unsafe_line_omitted");
   });
+
+  it("keeps the dominant class instead of omitting on mixed-class search noise", () => {
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: null,
+      name: "חלב",
+      resolvedBy: "unresolved",
+      resolutionStatus: "needs_confirmation",
+      confidence: null,
+      lowConfidence: true,
+      candidates: [
+        cand({
+          productId: "body",
+          name: "חלב גוף שקדים אורגני",
+          classL1: "personal_care",
+          productClass: "personal_care",
+          score: 0.99,
+        }),
+        cand({
+          productId: "milk",
+          name: "חלב טרי 3%",
+          classL1: "dairy_eggs",
+          productClass: "dairy",
+          score: 0.9,
+        }),
+        cand({
+          productId: "milk2",
+          name: "חלב תנובה 3%",
+          classL1: "dairy_eggs",
+          productClass: "dairy",
+          score: 0.88,
+        }),
+      ],
+      primaryProductId: null,
+      primaryName: null,
+      substitution: null,
+    };
+    const availability = new Map<string, CandidateAvailability>([
+      ["body", { pricedStoreCount: 3, chainCount: 1, minPrice: 20 }],
+      ["milk", { pricedStoreCount: 8, chainCount: 3, minPrice: 7 }],
+      ["milk2", { pricedStoreCount: 8, chainCount: 3, minPrice: 8 }],
+    ]);
+    const result = applyFastResolutionPolicy([{ query: "חלב", packQty: 1 }], [item], availability);
+    expect(result.items[0]?.resolutionStatus).toBe("resolved");
+    expect(["milk", "milk2"]).toContain(result.items[0]?.productId);
+    expect(result.items[0]?.name ?? "").not.toContain("גוף");
+  });
+});
+
+describe("applyFastResolutionPolicy generic milk", () => {
+  it("never selects condensed/sweetened milk for bare חלב", () => {
+    const fresh = cand({
+      productId: "fresh",
+      name: "חלב טרי 3%",
+      score: 0.85,
+    });
+    const traps = [
+      cand({
+        productId: "condensed",
+        name: "חלב מרוכז וממותק וילי פוד 397 גרם",
+        score: 0.99,
+      }),
+      cand({
+        productId: "powder",
+        name: "אבקת חלב דל שומן",
+        score: 0.95,
+      }),
+      cand({
+        productId: "flavored",
+        name: "חלב בטעם שוקולד",
+        score: 0.94,
+      }),
+    ];
+    const availability = new Map<string, CandidateAvailability>(
+      [fresh, ...traps].map((c) => [
+        c.productId,
+        { pricedStoreCount: 8, chainCount: 3, minPrice: 7 },
+      ]),
+    );
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 3,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: null,
+      name: "חלב",
+      resolvedBy: "unresolved",
+      resolutionStatus: "needs_confirmation",
+      confidence: null,
+      lowConfidence: true,
+      candidates: [fresh, ...traps],
+      primaryProductId: null,
+      primaryName: null,
+      substitution: null,
+    };
+    const result = applyFastResolutionPolicy(
+      [{ query: "חלב", packQty: 3 }],
+      [item],
+      availability,
+    );
+    expect(result.items[0]?.productId).toBe("fresh");
+    expect(result.items[0]?.name).toBe("חלב טרי 3%");
+  });
+
+  it("re-selects when commodity auto-resolve already locked condensed milk", () => {
+    const condensed = cand({
+      productId: "condensed",
+      name: "חלב מרוכז וממותק וילי פוד 397 גרם",
+      score: 0.99,
+    });
+    const fresh = cand({
+      productId: "fresh",
+      name: "חלב תנובה 3%",
+      score: 0.8,
+      brandExtracted: "תנובה",
+    });
+    const availability = new Map<string, CandidateAvailability>([
+      ["condensed", { pricedStoreCount: 8, chainCount: 3, minPrice: 12 }],
+      ["fresh", { pricedStoreCount: 8, chainCount: 3, minPrice: 7 }],
+    ]);
+    const alreadyResolved: ResolvedItem = {
+      index: 0,
+      qty: 3,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: "condensed",
+      name: condensed.name,
+      resolvedBy: "query",
+      resolutionStatus: "resolved",
+      confidence: 0.99,
+      lowConfidence: false,
+      candidates: [condensed, fresh],
+      primaryProductId: "condensed",
+      primaryName: condensed.name,
+      substitution: null,
+    };
+    const result = applyFastResolutionPolicy(
+      [{ query: "חלב", packQty: 3 }],
+      [alreadyResolved],
+      availability,
+    );
+    expect(result.items[0]?.productId).toBe("fresh");
+    expect(result.items[0]?.name ?? "").not.toContain("מרוכז");
+  });
+
+  it("re-selects when auto-resolve locked halvah or body lotion for bare חלב", () => {
+    const halvah = cand({
+      productId: "halvah",
+      name: "חלבה במשקל",
+      score: 0.99,
+      classL1: "snacks_sweets",
+      productClass: "confectionery",
+    });
+    const lotion = cand({
+      productId: "lotion",
+      name: "חלב גוף שקדים אורגני",
+      score: 0.98,
+      classL1: "personal_care",
+      productClass: "personal_care",
+    });
+    const fresh = cand({
+      productId: "fresh",
+      name: "חלב טרי 3%",
+      score: 0.8,
+    });
+    const availability = new Map<string, CandidateAvailability>(
+      [halvah, lotion, fresh].map((c) => [
+        c.productId,
+        { pricedStoreCount: 8, chainCount: 3, minPrice: 8 },
+      ]),
+    );
+
+    for (const trap of [halvah, lotion]) {
+      const alreadyResolved: ResolvedItem = {
+        index: 0,
+        qty: 3,
+        qtyMode: "packs",
+        amount: null,
+        unit: null,
+        productId: trap.productId,
+        name: trap.name,
+        resolvedBy: "query",
+        resolutionStatus: "resolved",
+        confidence: 0.99,
+        lowConfidence: false,
+        candidates: [trap, fresh],
+        primaryProductId: trap.productId,
+        primaryName: trap.name,
+        substitution: null,
+      };
+      const result = applyFastResolutionPolicy(
+        [{ query: "חלב", packQty: 3 }],
+        [alreadyResolved],
+        availability,
+      );
+      expect(result.items[0]?.productId, trap.name).toBe("fresh");
+    }
+  });
+
+  it("keeps condensed milk when the query explicitly asks for חלב מרוכז", () => {
+    const condensed = cand({
+      productId: "condensed",
+      name: "חלב מרוכז וממותק",
+      score: 0.95,
+    });
+    const fresh = cand({
+      productId: "fresh",
+      name: "חלב טרי 3%",
+      score: 0.9,
+    });
+    const availability = new Map<string, CandidateAvailability>([
+      ["condensed", { pricedStoreCount: 8, chainCount: 2, minPrice: 12 }],
+      ["fresh", { pricedStoreCount: 8, chainCount: 2, minPrice: 7 }],
+    ]);
+    const result = applyFastResolutionPolicy(
+      [{ query: "חלב מרוכז", packQty: 1 }],
+      [
+        {
+          index: 0,
+          qty: 1,
+          qtyMode: "packs",
+          amount: null,
+          unit: null,
+          productId: null,
+          name: "חלב מרוכז",
+          resolvedBy: "unresolved",
+          resolutionStatus: "needs_confirmation",
+          confidence: null,
+          lowConfidence: true,
+          candidates: [condensed, fresh],
+          primaryProductId: null,
+          primaryName: null,
+          substitution: null,
+        },
+      ],
+      availability,
+    );
+    expect(result.items[0]?.productId).toBe("condensed");
+  });
 });
 
 describe("applyFastResolutionPolicy generic chicken", () => {
@@ -148,6 +393,7 @@ describe("applyFastResolutionPolicy generic chicken", () => {
       meatCand({ productId: "liver", name: "כבד עוף טרי", score: 0.95 }),
       meatCand({ productId: "hearts", name: "לבבות עוף טרי", score: 0.94 }),
       meatCand({ productId: "neck", name: "צוואר עוף טרי", score: 0.93 }),
+      meatCand({ productId: "throat", name: "גרון עוף לולו", score: 0.925 }),
       meatCand({ productId: "back", name: "גב עוף טרי", score: 0.92 }),
     ];
     const availability = new Map<string, CandidateAvailability>(
@@ -166,7 +412,7 @@ describe("applyFastResolutionPolicy generic chicken", () => {
     expect(result.items[0]?.productId).toBe("breast");
     expect(result.items[0]?.name).toBe("חזה עוף טרי");
     expect(result.items[0]?.resolutionStatus).toBe("resolved");
-    for (const bad of ["קורקבן", "כבד", "לבבות", "צוואר", "גב"]) {
+    for (const bad of ["קורקבן", "כבד", "לבבות", "צוואר", "גרון", "גב"]) {
       expect(result.items[0]?.name ?? "").not.toContain(bad);
     }
   });
@@ -211,5 +457,69 @@ describe("applyFastResolutionPolicy generic chicken", () => {
     );
 
     expect(result.items[0]?.productId).toBe("liver");
+  });
+
+  it("allows explicitly requested processed chicken (שניצל עוף)", () => {
+    const schnitzel = meatCand({
+      productId: "schnitzel",
+      name: "שניצל עוף טרי",
+      score: 0.95,
+    });
+    const breast = meatCand({ productId: "breast", name: "חזה עוף טרי", score: 0.9 });
+    const availability = new Map<string, CandidateAvailability>([
+      ["schnitzel", { pricedStoreCount: 6, chainCount: 2, minPrice: 35 }],
+      ["breast", { pricedStoreCount: 6, chainCount: 2, minPrice: 30 }],
+    ]);
+
+    const result = applyFastResolutionPolicy(
+      [{ query: "שניצל עוף", amount: 0.5, unit: "kg" }],
+      [
+        {
+          ...unresolvedChicken([schnitzel, breast]),
+          name: "שניצל עוף",
+        },
+      ],
+      availability,
+    );
+
+    expect(result.items[0]?.productId).toBe("schnitzel");
+  });
+
+  it("re-selects when commodity auto-resolve already locked an organ/processed cut", () => {
+    const liver = meatCand({ productId: "liver", name: "כבד עוף טרי - כשר", score: 0.95 });
+    const schnitzel = meatCand({
+      productId: "schnitzel",
+      name: "עוף טוב אצבעות שניצל",
+      score: 0.93,
+    });
+    const breast = meatCand({ productId: "breast", name: "חזה עוף טרי", score: 0.82 });
+    const availability = new Map<string, CandidateAvailability>(
+      [liver, schnitzel, breast].map((c) => [
+        c.productId,
+        { pricedStoreCount: 8, chainCount: 2, minPrice: 20 },
+      ]),
+    );
+
+    const alreadyResolved: ResolvedItem = {
+      ...unresolvedChicken([liver, schnitzel, breast]),
+      productId: "liver",
+      name: "כבד עוף טרי - כשר",
+      resolvedBy: "query",
+      resolutionStatus: "resolved",
+      confidence: 0.95,
+      lowConfidence: false,
+    };
+
+    const result = applyFastResolutionPolicy(
+      [{ query: "עוף", amount: 1.5, unit: "kg" }],
+      [alreadyResolved],
+      availability,
+    );
+
+    expect(result.items[0]?.productId).toBe("breast");
+    expect(result.items[0]?.name).toBe("חזה עוף טרי");
+    for (const bad of ["קורקבן", "כבד", "שניצל", "אצבעות"]) {
+      expect(result.items[0]?.name ?? "").not.toContain(bad);
+    }
   });
 });

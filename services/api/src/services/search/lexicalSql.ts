@@ -175,8 +175,9 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
     : "";
 
   // Score similarity among the bounded candidate set (cheap); fuzzy *retrieval*
-  // via `p.name % $1` remains gated by includeFuzzy.
-  const nameSimilarityScore = `CASE WHEN $1 = '' THEN 0 ELSE similarity(p.name, $1) END`;
+  // via `p.name % $1` remains gated by includeFuzzy. Cap below leading whole-word
+  // (0.95) so mid-word hosts (חלבה≈חלב, קרחון≈קרח) cannot outrank true staples.
+  const nameSimilarityScore = `CASE WHEN $1 = '' THEN 0 ELSE LEAST(similarity(p.name, $1), 0.86) END`;
 
   return `
     ${evidencePrefix}candidates AS (
@@ -189,15 +190,16 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
                CASE
                  WHEN $4::text IS NOT NULL AND p.gtin = $4 THEN 1.0
                  WHEN $1 <> '' AND lower(p.name) = lower($1) THEN 1.0
-                 -- A whole-word prefix (query is a full leading token) scores 0.9
-                 -- via the boundary arm below. A boundary-less prefix
-                 -- (mid-word continuation, e.g. "קרח" in "קרחון") must NOT score
-                 -- 0.95 — it drops to the 0.78 contains arm and cannot auto-resolve.
+                 -- Leading whole-word: query is the first token ("חלב תנובה").
+                 -- Higher than mid/trailing whole-word so frothers/hosts
+                 -- ("מקציף חלב") cannot flood top-K ahead of the commodity.
+                 WHEN $1 <> '' AND p.name ILIKE $6 || ' %' ESCAPE '\\' THEN 0.95
+                 -- Mid/trailing whole-word token (boundary-aware).
                  WHEN $1 <> '' AND (
-                   p.name ILIKE $6 || ' %' ESCAPE '\\'
-                   OR p.name ILIKE '% ' || $6 ESCAPE '\\'
+                   p.name ILIKE '% ' || $6 ESCAPE '\\'
                    OR p.name ILIKE '% ' || $6 || ' %' ESCAPE '\\'
-                 ) THEN 0.9
+                 ) THEN 0.88
+                 -- Boundary-less substring (קרח→קרחון, חלב→חלבה) stays weaker.
                  WHEN $1 <> '' AND p.name ILIKE '%' || $6 || '%' ESCAPE '\\' THEN 0.78
                  ELSE 0
                END,

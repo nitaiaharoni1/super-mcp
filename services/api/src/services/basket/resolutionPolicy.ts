@@ -7,13 +7,11 @@ import {
   type OntologySnapshot,
   type QueryProfile,
 } from "@super-mcp/shared";
+import { rejectUnsafeChickenName } from "./chickenSafety.js";
 import { queryHeadAnchored } from "./equivalence.js";
+import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
-import {
-  chickenNameIsUndesired,
-  filterSafeCandidates,
-  rankSafeCandidatesForFast,
-} from "./rankQueryCandidates.js";
+import { filterSafeCandidates, rankSafeCandidatesForFast } from "./rankQueryCandidates.js";
 import { isEligibleForFastBestEffortCandidate } from "./resolutionDecision.js";
 import { isVectorOnly } from "./vectorOnly.js";
 import type {
@@ -106,6 +104,25 @@ function shareCompatibleClass(candidates: BasketCandidate[]): boolean {
     ),
   ];
   return flat.length <= 1;
+}
+
+/**
+ * When the safe pool still spans multiple L1/productClass labels (search noise),
+ * keep the class of the top-ranked candidate instead of omitting the whole line.
+ */
+function restrictToDominantClass(candidates: BasketCandidate[]): BasketCandidate[] {
+  if (candidates.length === 0 || shareCompatibleClass(candidates)) return candidates;
+  const seed = candidates.find((c) => c.classL1) ?? candidates.find((c) => c.productClass);
+  if (!seed) return candidates;
+  if (seed.classL1) {
+    const same = candidates.filter((c) => !c.classL1 || c.classL1 === seed.classL1);
+    return same.length > 0 ? same : candidates;
+  }
+  if (seed.productClass) {
+    const same = candidates.filter((c) => !c.productClass || c.productClass === seed.productClass);
+    return same.length > 0 ? same : candidates;
+  }
+  return candidates;
 }
 
 function assumptionReasonFor(query: string): BasketAssumption["reason"] {
@@ -217,15 +234,52 @@ function filterPool(
     candidates: item.candidates,
   }).filter((c) => !candidateLooksVectorOnly(c));
 
-  const queryTokens = tokenizeNormalized(normalizeEmbedInput(query));
-  const withoutProcessedChicken = base.filter(
-    (c) => !(queryTokens.includes("עוף") && chickenNameIsUndesired(c.name, queryTokens)),
+  // Belt-and-suspenders: same staple rejectors used on commodity/equivalence paths.
+  // Use rejectUnsafe* (not raw token checks) so explicit asks like "שניצל עוף"
+  // and "חלב מרוכז" still keep their specialty forms.
+  const withoutUnsafeStaples = base.filter(
+    (c) =>
+      !rejectUnsafeChickenName(query, c.name) && !rejectUnsafePlainMilkName(query, c.name),
   );
 
-  const anchored = withoutProcessedChicken.filter(
+  const anchored = withoutUnsafeStaples.filter(
     (c) => !query || queryHeadAnchored(query, c.name),
   );
-  return anchored.length > 0 ? anchored : withoutProcessedChicken;
+  return anchored.length > 0 ? anchored : withoutUnsafeStaples;
+}
+
+/** True when an already-resolved primary fails hard staple/safety filters. */
+function lockedPrimaryIsUnsafe(
+  item: ResolvedItem,
+  query: string,
+  profile: QueryProfile,
+): boolean {
+  if (!item.productId || !item.name) return false;
+  const locked =
+    item.candidates.find((c) => c.productId === item.productId) ??
+    ({
+      productId: item.productId,
+      name: item.name,
+      score: item.confidence ?? 0,
+      matchedVia: "product" as const,
+      sizeQty: null,
+      sizeUnit: null,
+      pieceCount: null,
+      hasPrice: true,
+      hasLocalPrice: true,
+      productClass: null,
+      classL1: null,
+      classL2: null,
+      classL3: null,
+      variant: "regular",
+      brandExtracted: null,
+      intentTier: 1,
+    } satisfies BasketCandidate);
+  return (
+    filterSafeCandidates({ query, profile, candidates: [locked] }).length === 0 ||
+    rejectUnsafeChickenName(query, item.name) ||
+    rejectUnsafePlainMilkName(query, item.name)
+  );
 }
 
 function resolveFastOutcome(
@@ -234,13 +288,16 @@ function resolveFastOutcome(
   availability: Map<string, CandidateAvailability>,
   ontology: OntologySnapshot | null,
 ): FastResolutionOutcome {
-  if (isSafelyPricable(item)) {
+  const query = input.query?.trim() ?? "";
+  const profile = buildProfileForFast(input, ontology);
+
+  // Even a "resolved" primary can be an organ/specialty/personal-care trap that
+  // slipped through commodity auto-resolve. Re-run the safe pool instead.
+  if (isSafelyPricable(item) && !lockedPrimaryIsUnsafe(item, query, profile)) {
     return { kind: "selected", item, assumption: null };
   }
 
-  const query = input.query?.trim() ?? "";
-  const profile = buildProfileForFast(input, ontology);
-  const pool = filterPool(item, query, profile);
+  const pool = restrictToDominantClass(filterPool(item, query, profile));
 
   if (pool.length === 0) {
     return omitOutcome(item, input);

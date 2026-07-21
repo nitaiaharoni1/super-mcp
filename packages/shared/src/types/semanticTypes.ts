@@ -82,6 +82,8 @@ export interface QueryProfile {
 export interface RetrievalEvidence {
   exactName: boolean;
   exactPhrase: boolean;
+  /** Query tokens match the leading name tokens (staple head-anchor). */
+  headAnchored?: boolean;
   matchedTokenCount: number;
   queryTokenCount: number;
   trigramSimilarity: number | null;

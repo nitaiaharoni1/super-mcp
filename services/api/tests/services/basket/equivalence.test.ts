@@ -64,6 +64,10 @@ describe("queryHeadAnchored", () => {
     expect(queryHeadAnchored("בורקס", "בורקס גבינה")).toBe(true);
     expect(queryHeadAnchored("בשר בקר", "בשר בקר טחון טרי")).toBe(true);
   });
+  it("blocks rice-shaped pasta hosts for bare אורז", () => {
+    expect(queryHeadAnchored("אורז", "פתיתים אורז רמי לוי 500 גרם")).toBe(false);
+    expect(queryHeadAnchored("אורז", "אורז בסמטי סוגת 1 קג")).toBe(true);
+  });
 });
 
 describe("queryTokensSatisfied (morphology-tolerant)", () => {
@@ -128,6 +132,31 @@ describe("buildCommodityEquivalents", () => {
     const top = c({});
     const set = buildCommodityEquivalents(top, [top, c({}), c({})], "עגבניות", 5);
     expect(set).toHaveLength(3);
+  });
+
+  it("excludes organ/processed chicken peers for bare עוף", () => {
+    const meat = (name: string): BasketCandidate =>
+      c({
+        name,
+        productClass: "meat_chicken",
+        classL1: "meat",
+        classL2: "chicken",
+        sizeQty: null,
+        sizeUnit: null,
+      });
+    const top = meat("חזה עוף טרי");
+    const set = buildCommodityEquivalents(
+      top,
+      [
+        top,
+        meat("כבד עוף טרי - כשר"),
+        meat("עוף טוב אצבעות שניצל"),
+        meat("שוק עוף טרי"),
+      ],
+      "עוף",
+      5,
+    );
+    expect(set.map((x) => x.name).sort()).toEqual(["חזה עוף טרי", "שוק עוף טרי"]);
   });
 
   it("groups every red wine for a generic query so the cheapest can win", () => {

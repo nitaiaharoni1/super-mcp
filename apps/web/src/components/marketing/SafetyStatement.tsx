@@ -11,8 +11,7 @@ export function SafetyStatement() {
       <Container>
         <div className="grid items-center gap-8 lg:grid-cols-2 lg:gap-14">
           <MotionReveal>
-            <p className="text-sm font-semibold text-[var(--color-accent)]">{he.safety.eyebrow}</p>
-            <h2 className="mt-3 max-w-[16ch] font-[family-name:var(--font-secular)] text-[clamp(1.85rem,3.6vw,2.85rem)] leading-[1.12] tracking-[-0.02em]">
+            <h2 className="max-w-[16ch] font-[family-name:var(--font-secular)] text-[clamp(1.85rem,3.6vw,2.85rem)] leading-[1.12] tracking-[-0.02em]">
               {he.safety.statement}
             </h2>
             <p className="mt-4 max-w-[36ch] text-base leading-7 text-[var(--color-ink-muted)]">

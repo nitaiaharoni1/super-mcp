@@ -7,6 +7,8 @@ import {
   tokenizeNormalized,
 } from "@super-mcp/shared";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
+import { rejectUnsafeChickenName } from "./chickenSafety.js";
+import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { resolveCoverageClassScope, scopedClassesConflict } from "./coverageScope.js";
 import type { BasketCandidate } from "./types.js";
 
@@ -69,6 +71,8 @@ const NON_COMMODITY_LEADERS: ReadonlySet<string> = new Set([
   // stuffed-dough hosts — the DISH is dumplings/ravioli/burekas, not the filling:
   // "בשר" ≠ "כיסונים בשר בקר"; "גבינה" ≠ "בורקס גבינה". Plurals stemmed automatically.
   "כיסונים", "כיסון", "בורקס", "בורקסים", "רביולי", "טורטליני", "ניוקי",
+  // rice-shaped pasta — "אורז" ≠ "פתיתים אורז" (ptitim / couscous-rice)
+  "פתיתים", "פתיתי",
 ]);
 
 /** Stemmed forms of NON_COMMODITY_LEADERS so plurals (עוגות→עוג) still match. */
@@ -242,6 +246,12 @@ const PERSONAL_CARE_TRAP_TOKENS: ReadonlySet<string> = new Set([
   "רחצה",
   "שמפו",
   "קוסמטיקה",
+  // "חלב גוף" / "חלב פנים" — body/face lotion, never food milk
+  "גוף",
+  "פנים",
+  "קרם",
+  "סבון",
+  "אלסבון",
 ]);
 
 /** L1 classes that are never a food staple primary. */
@@ -294,6 +304,8 @@ export function isStapleIncompatible(
   const queryTokens = new Set(tokenizeNormalized(normalizeEmbedInput(queryText)));
   if (hasUnrequestedPreservedForm(queryTokens, candidate.name)) return true;
   if (hasUnrequestedPersonalCare(queryTokens, candidate.name)) return true;
+  if (rejectUnsafePlainMilkName(queryText, candidate.name)) return true;
+  if (rejectUnsafeChickenName(queryText, candidate.name)) return true;
   // Head-anchoring stays a soft preference (preferQueryHeadAnchored / override
   // guards). Hard-rejecting every non-anchored name empties shortlists for
   // opaque queries like "מוצר" and incorrectly re-labels them unresolved.
@@ -430,6 +442,8 @@ export function buildCommodityEquivalents(
     if (!queryTokensSatisfied(queryTokens, c.name)) continue;
     if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) continue;
     if (hasUnrequestedPersonalCare(queryTokenSet, c.name)) continue;
+    if (rejectUnsafeChickenName(queryText, c.name)) continue;
+    if (rejectUnsafePlainMilkName(queryText, c.name)) continue;
     out.push(c);
   }
   return out;
@@ -486,6 +500,8 @@ export function buildAvailabilityEquivalents(
     if (!queryHeadAnchored(queryText, c.name)) return false;
     if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) return false;
     if (hasUnrequestedPersonalCare(queryTokenSet, c.name)) return false;
+    if (rejectUnsafeChickenName(queryText, c.name)) return false;
+    if (rejectUnsafePlainMilkName(queryText, c.name)) return false;
     return queryTokensSatisfied(queryTokens, c.name);
   });
   if (pool.length < 2) return [];

@@ -18,6 +18,16 @@ describe("listPromotions SQL", () => {
     expect(sql).toContain(String.raw`'\D'`);
   });
 
+  it("materializes product item codes before joining promotions", async () => {
+    const { listPromotions } = await import(
+      "../../../src/services/promotions/listPromotions.js"
+    );
+    await listPromotions({ productId: "11111111-1111-1111-1111-111111111111" });
+    const sql = query.mock.calls[0]![0] as string;
+    expect(sql).toMatch(/WITH product_codes AS/);
+    expect(sql).toMatch(/l\.product_id = \$2/);
+  });
+
   it("store filter includes chain-wide promotions (store_id IS NULL)", async () => {
     const { listPromotions } = await import(
       "../../../src/services/promotions/listPromotions.js"

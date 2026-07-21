@@ -6,6 +6,7 @@ import {
 } from "@super-mcp/shared/test-utils";
 import {
   buildOntologySnapshot,
+  expandQueryAliases,
   extractConstraints,
   gateAgainstConstraints,
   profileFromText,
@@ -139,6 +140,28 @@ describe("data-driven policy (temperature/material)", () => {
 
 describe("Hebrew retail ontology fixture", () => {
   const ontology = heRetailOntologyFixture();
+
+  it("does not discard qualifiers when an alias matches only part of the query", () => {
+    const withProductionSelfAlias = buildOntologySnapshot({
+      terms: [
+        ...ontology.terms,
+        {
+          kind: "alias",
+          attribute: "query",
+          value: "חלב",
+          term: "חלב",
+          matchMode: "alias",
+        },
+      ],
+      relaxations: ontology.relaxations,
+      attributes: ontology.attributes,
+      searchConfig: ontology.searchConfig,
+    });
+
+    expect(expandQueryAliases("חלב תנובה 3%", withProductionSelfAlias)).toEqual([
+      "חלב תנובה 3%",
+    ]);
+  });
 
   it("detects fresh chicken thighs", () => {
     const p = profileFromText(HE_RETAIL.query.freshChickenThighs, ontology);

@@ -577,6 +577,11 @@ export function classifyResolutionLine(item: ResolvedItem): ResolutionStatus {
   if (item.resolutionStatus === "resolved" || (item.productId != null && !item.lowConfidence)) {
     return "resolved";
   }
+  // Honor explicit omit/unresolved from fast policy — do not re-promote to
+  // needs_confirmation just because candidates remain on the line object.
+  if (item.resolutionStatus === "unresolved") {
+    return "unresolved";
+  }
   if (
     item.resolutionStatus === "needs_confirmation" ||
     (item.lowConfidence && item.candidates.length > 0)

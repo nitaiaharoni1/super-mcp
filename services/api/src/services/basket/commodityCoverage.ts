@@ -6,6 +6,8 @@ import {
   queryTokensSatisfied,
   tokenizeNormalized,
 } from "@super-mcp/shared";
+import { rejectUnsafeChickenName } from "./chickenSafety.js";
+import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { resolveCoverageClassScope, type CoverageClassScope } from "./coverageScope.js";
 import { diversifyByChain } from "./diversifyByChain.js";
@@ -253,6 +255,8 @@ export function filterClassPeers(
     if (requireQueryTokens && !queryTokensSatisfied(queryTokens, row.name)) continue;
     // Drop prepared-food hosts that share a produce token (עוגת לימונים).
     if (requireQueryTokens && !queryHeadAnchored(queryText, row.name)) continue;
+    if (rejectUnsafeChickenName(queryText, row.name)) continue;
+    if (rejectUnsafePlainMilkName(queryText, row.name)) continue;
     if (
       !packSizesCompatible(
         { sizeQty: primary.sizeQty, sizeUnit: primary.sizeUnit, name: primary.name },

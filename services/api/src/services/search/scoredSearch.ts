@@ -57,9 +57,14 @@ function evidenceForQuery(name: string, queryText: string) {
   const nameTokens = tokenizeNormalized(nameNormalized);
   const exactName = queryNormalized !== "" && queryNormalized === nameNormalized;
   const exactPhrase = exactName || phraseMatchesTokens(queryTokens, nameTokens);
+  const headAnchored =
+    queryTokens.length > 0 &&
+    nameTokens.length >= queryTokens.length &&
+    queryTokens.every((token, index) => nameTokens[index] === token);
   return {
     exactName,
     exactPhrase,
+    headAnchored,
     matchedTokenCount: queryTokens.filter((token) => nameTokens.includes(token)).length,
     queryTokenCount: queryTokens.length,
     nameTokenCount: nameTokens.length,
@@ -97,6 +102,7 @@ function mapSearchHitRow(
     evidence: {
       exactName: againstOriginal.exactName,
       exactPhrase: againstOriginal.exactPhrase,
+      headAnchored: againstOriginal.headAnchored,
       matchedTokenCount: againstOriginal.matchedTokenCount,
       queryTokenCount: againstOriginal.queryTokenCount,
       trigramSimilarity: null,
@@ -207,17 +213,26 @@ export function orderByLocationStock(
 }
 
 function isLexicalStrong(hit: SearchProductHit | undefined): boolean {
+  if (!hit) return false;
+  if (hit.evidence?.exactName) return true;
+  const lex = hit.lexicalScore ?? hit.score;
+  // Head-anchored staple ("חלב תנובה 3%…") — long cartons are strong even when
+  // isDominantPhraseMatch rejects them for token-length. Trailing hosts
+  // ("מקציף חלב") stay on the dominant-short path below.
+  if (hit.evidence?.exactPhrase && hit.evidence.headAnchored && lex >= 0.9) {
+    return true;
+  }
+  if (hit.evidence?.exactPhrase && isDominantPhraseMatch(hit.name, hit.evidence)) {
+    return true;
+  }
   return Boolean(
-    hit &&
-      (hit.evidence?.exactName ||
-        (hit.evidence?.exactPhrase && isDominantPhraseMatch(hit.name, hit.evidence)) ||
-        (hit.evidence?.aliasMatched &&
-          (hit.lexicalScore ?? hit.score) >= 0.9 &&
-          isDominantPhraseMatch(hit.name, {
-            exactName: false,
-            exactPhrase: true,
-            queryTokenCount: Math.max(1, hit.evidence.queryTokenCount || 1),
-          }))),
+    hit.evidence?.aliasMatched &&
+      lex >= 0.9 &&
+      isDominantPhraseMatch(hit.name, {
+        exactName: false,
+        exactPhrase: true,
+        queryTokenCount: Math.max(1, hit.evidence.queryTokenCount || 1),
+      }),
   );
 }
 

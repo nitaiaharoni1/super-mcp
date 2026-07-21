@@ -93,9 +93,24 @@ jobs:
         with:
           name: semantic-benchmark-report
           path: benchmark-report.json
-      - name: Run fast-basket benchmark (hard gates)
-        # Populated DB is available in this job. Fail the build on latency/quality
-        # threshold breaches — do not silently tolerate gate failure.
+      - name: Run live MCP real-world flow tests
+        # Same populated DB as canaries/benchmarks. No mocks — full MCP tool path.
+        env:
+          BASKET_CONTINUATION_SECRET: ci-only-basket-continuation-secret-32b
+          GEOCODING_CACHE_SECRET: ci-only-geocoding-cache-secret-32bytes
+          SUPER_MCP_BASKET_TELEMETRY: "0"
+        run: pnpm --filter @super-mcp/api test:live
+      - name: Run live MCP performance gates
+        env:
+          BASKET_CONTINUATION_SECRET: ci-only-basket-continuation-secret-32b
+          GEOCODING_CACHE_SECRET: ci-only-geocoding-cache-secret-32bytes
+          SUPER_MCP_BASKET_TELEMETRY: "0"
+          SUPER_MCP_PERF_ITERS: "3"
+        run: pnpm --filter @super-mcp/api test:perf
+      - name: Run fast-basket benchmark (hard quality + regression latency/size)
+        # Quality (complete/safe/coverage) always hard-fails. Latency/bytes use
+        # full-dump regression defaults (~12s p95 / 22KB); set FAST_BASKET_CANARY=1
+        # locally for aspirational 3s/15KB targets.
         env:
           BASKET_CONTINUATION_SECRET: ci-only-basket-continuation-secret-32b
           GEOCODING_CACHE_SECRET: ci-only-geocoding-cache-secret-32bytes

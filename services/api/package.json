@@ -14,7 +14,9 @@
     "canary:geocode": "tsx src/scripts/canaryGeocode.ts",
     "canary:mcp-contract": "tsx src/scripts/canaryMcpContract.ts",
     "benchmark:fast-basket": "tsx src/scripts/benchmarkFastBasket.ts",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "test:live": "vitest run tests/integration",
+    "test:perf": "vitest run tests/performance"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

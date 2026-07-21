@@ -52,6 +52,10 @@ describe("buildLexicalRankedCte", () => {
     // Scoring GREATEST retained (exact name still scored 1.0).
     expect(cte).toMatch(/GREATEST\s*\(/i);
     expect(cte).toContain("WHEN $1 <> '' AND lower(p.name) = lower($1) THEN 1.0");
+    // Leading whole-word outranks mid/trailing hosts; trigram capped below it.
+    expect(cte).toContain("THEN 0.95");
+    expect(cte).toContain("THEN 0.88");
+    expect(cte).toContain("LEAST(similarity(p.name, $1), 0.86)");
   });
 
   it("omits listing_hit CTE and listing score arms when includeListing=false", () => {

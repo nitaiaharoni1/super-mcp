@@ -267,10 +267,15 @@ export function expandQueryAliases(query: string, ontology: OntologySnapshot, li
   const q = query.trim();
   if (!q) return [];
   const out = new Set<string>([q]);
+  const queryTokens = tokenizeNormalized(normalizeEmbedInput(q), ontology.locale);
   const aliases = ontology.terms.filter((t) => t.kind === "alias" && t.value);
   const matches = matchOntologyTerms(query, ontology).filter((m) => m.term.kind === "alias");
 
   for (const match of matches) {
+    // Alias values are complete search-query alternatives, not token-level
+    // replacements. Expanding a partial match would discard qualifiers:
+    // "חלב תנובה 3%" → "חלב", poisoning recall with generic/substring hits.
+    if (match.tokenStart !== 0 || match.tokenEnd !== queryTokens.length) continue;
     const alias = match.term;
     if (!alias.value) continue;
     out.add(alias.value);

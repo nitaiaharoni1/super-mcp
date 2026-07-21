@@ -37,6 +37,25 @@ import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
 import type { QueryResolveResult, QuerySearchContext } from "./resolveQuery.js";
 import type { BasketCandidate, BasketSubstitutionMeta } from "./types.js";
 import { isVectorOnly } from "./vectorOnly.js";
+import {
+  chickenNameIsUndesired,
+  rejectUnsafeChickenName,
+} from "./chickenSafety.js";
+import {
+  plainMilkNameIsUndesired,
+  rejectUnsafePlainMilkName,
+} from "./milkSafety.js";
+
+export { chickenNameIsUndesired } from "./chickenSafety.js";
+export { plainMilkNameIsUndesired } from "./milkSafety.js";
+
+/** Drop organ/processed chicken and specialty milk traps for staple queries. */
+function rejectUnsafeStapleName(queryText: string, candidateName: string): boolean {
+  return (
+    rejectUnsafeChickenName(queryText, candidateName) ||
+    rejectUnsafePlainMilkName(queryText, candidateName)
+  );
+}
 
 export interface SafePrimaryInput {
   query: string;
@@ -104,47 +123,6 @@ const EMPTY_FAST_AVAILABILITY = {
   minPrice: null as number | null,
 };
 
-/** Processed / prepared chicken — never a safe default for generic עוף. */
-const PROCESSED_CHICKEN_TOKENS: ReadonlySet<string> = new Set([
-  "קפוא",
-  "קפואה",
-  "מעובד",
-  "מעושן",
-  "נקניק",
-  "נקניקיות",
-  "שניצל",
-  "נאגטס",
-]);
-
-/**
- * Organ / carcass bits that share productClass with fresh chicken and pass
- * head-anchor on fat catalogs. Reject for generic עוף unless the query names them.
- */
-const ORGAN_CHICKEN_TOKENS: ReadonlySet<string> = new Set([
-  "קורקבן",
-  "כבד",
-  "לבבות",
-  "צוואר",
-  "גב",
-]);
-
-/**
- * True when a chicken candidate name is processed or an unrequested organ cut.
- * Token-based (not substring) so names like עגבניות are unaffected by "גב".
- */
-export function chickenNameIsUndesired(
-  name: string,
-  queryTokens: readonly string[],
-): boolean {
-  const tokens = tokenizeNormalized(normalizeEmbedInput(name));
-  const querySet = new Set(queryTokens);
-  for (const token of tokens) {
-    if (PROCESSED_CHICKEN_TOKENS.has(token)) return true;
-    if (ORGAN_CHICKEN_TOKENS.has(token) && !querySet.has(token)) return true;
-  }
-  return false;
-}
-
 /**
  * Preference order for fast best-effort selection among already-safe candidates:
  * local price → regular/default → pack match → score → store/chain coverage.
@@ -161,7 +139,7 @@ export function rankSafeCandidatesForFast(
   const pieceWanted =
     profile.attributes.piece_count != null ? Number(profile.attributes.piece_count) : null;
   const amountWanted = profile.requestedAmount;
-  const chickenQueryTokens = tokenizeNormalized(profile.normalizedText);
+  const queryTokens = tokenizeNormalized(profile.normalizedText);
 
   const packScore = (c: BasketCandidate): number => {
     if (pieceWanted != null && Number.isFinite(pieceWanted)) {
@@ -198,14 +176,13 @@ export function rankSafeCandidatesForFast(
       if (bCanola !== aCanola) return bCanola - aCanola;
     }
     if (opts?.preferPlainMilk) {
-      const flavor = (n: string) => /בטעם|וניל|שוקולד|אגוזי|לוז/.test(normalizeEmbedInput(n));
-      const aPlain = Number(isRegular(a) && !flavor(a.name));
-      const bPlain = Number(isRegular(b) && !flavor(b.name));
+      const aPlain = Number(isRegular(a) && !plainMilkNameIsUndesired(a.name, queryTokens));
+      const bPlain = Number(isRegular(b) && !plainMilkNameIsUndesired(b.name, queryTokens));
       if (bPlain !== aPlain) return bPlain - aPlain;
     }
     if (opts?.preferFreshChicken) {
-      const aFresh = Number(!chickenNameIsUndesired(a.name, chickenQueryTokens));
-      const bFresh = Number(!chickenNameIsUndesired(b.name, chickenQueryTokens));
+      const aFresh = Number(!chickenNameIsUndesired(a.name, queryTokens));
+      const bFresh = Number(!chickenNameIsUndesired(b.name, queryTokens));
       if (bFresh !== aFresh) return bFresh - aFresh;
     }
 
@@ -702,28 +679,30 @@ export function rankQueryCandidates(
     risk.kind === "commodity" &&
     overrideSafe &&
     candidates[0] != null &&
-    !isVectorOnly(chosen) &&
-    queryHeadAnchored(queryText, candidates[0].name)
+    !isVectorOnly(chosen)
   ) {
-    const equivalents = buildCommodityEquivalents(
-      candidates[0],
-      candidates,
-      queryText,
-      searchConfig?.maxEquivalents ?? 5,
-      searchConfig?.packTolerance ?? 0.5,
-    );
-    if (equivalents.length >= 2) {
-      const top = candidates[0];
-      return {
-        ...base,
-        productId: top.productId,
-        name: top.name,
-        resolvedBy: "query",
-        confidence: base.confidence ?? top.score,
-        lowConfidence: false,
-        resolutionStatus: "resolved",
-        equivalents,
-      };
+    const stapleSafe = candidates.filter((c) => !rejectUnsafeStapleName(queryText, c.name));
+    const top = stapleSafe.find((c) => queryHeadAnchored(queryText, c.name));
+    if (top) {
+      const equivalents = buildCommodityEquivalents(
+        top,
+        stapleSafe,
+        queryText,
+        searchConfig?.maxEquivalents ?? 5,
+        searchConfig?.packTolerance ?? 0.5,
+      );
+      if (equivalents.length >= 2) {
+        return {
+          ...base,
+          productId: top.productId,
+          name: top.name,
+          resolvedBy: "query",
+          confidence: base.confidence ?? top.score,
+          lowConfidence: false,
+          resolutionStatus: "resolved",
+          equivalents,
+        };
+      }
     }
   }
 
@@ -751,7 +730,11 @@ export function rankQueryCandidates(
       penaltyBlock: searchConfig?.penaltyBlockThreshold ?? 1,
       penaltyOf: (id) => gateById.get(id)?.penaltyScore ?? 0,
     });
-    if (equivalents.length >= 2 && queryHeadAnchored(queryText, equivalents[0]!.name)) {
+    if (
+      equivalents.length >= 2 &&
+      queryHeadAnchored(queryText, equivalents[0]!.name) &&
+      !rejectUnsafeStapleName(queryText, equivalents[0]!.name)
+    ) {
       const top = equivalents[0]!;
       return {
         ...base,
@@ -782,15 +765,19 @@ export function rankQueryCandidates(
     !isVectorOnly(chosen)
   ) {
     const primary = candidates.find((c) => c.productId === base.productId) ?? candidates[0]!;
-    const equivalents = buildCommodityEquivalents(
-      primary,
-      candidates,
-      item.query ?? "",
-      searchConfig?.maxEquivalents ?? 5,
-      searchConfig?.packTolerance ?? 0.5,
-    );
-    if (equivalents.length >= 2) {
-      return { ...base, equivalents };
+    const queryForEq = item.query ?? "";
+    const stapleSafe = candidates.filter((c) => !rejectUnsafeStapleName(queryForEq, c.name));
+    if (!rejectUnsafeStapleName(queryForEq, primary.name)) {
+      const equivalents = buildCommodityEquivalents(
+        primary,
+        stapleSafe,
+        queryForEq,
+        searchConfig?.maxEquivalents ?? 5,
+        searchConfig?.packTolerance ?? 0.5,
+      );
+      if (equivalents.length >= 2) {
+        return { ...base, equivalents };
+      }
     }
   }
 

@@ -75,46 +75,27 @@ function clampLimit(limit: number | undefined): number {
   return Math.max(1, Math.min(MAX_LIMIT, Math.trunc(limit)));
 }
 
-export async function listPromotions(params: ListPromotionsParams): Promise<PromotionSummary[]> {
-  const limit = clampLimit(params.limit);
-  const cityKeys = params.city ? cityMatchKeys(params.city) : null;
-
-  // Two-phase: pick the limited set of promotion ids FIRST (no item_code aggregation),
-  // then aggregate item_codes only for that page. This keeps the aggregation from
-  // fanning out over every promotion before the LIMIT applies.
-  const res = await query<PromotionRow>(
-    `WITH page AS (
-       SELECT pr.id
-       FROM promotion pr
-       WHERE ($1::uuid IS NULL
+const STORE_FILTER = `($1::uuid IS NULL
           OR pr.store_id = $1
           OR (pr.store_id IS NULL
-              AND pr.chain_id = (SELECT chain_id FROM store WHERE id = $1)))
-         AND (
-           $2::uuid IS NULL OR EXISTS (
-             SELECT 1 FROM promotion_item pi2
-             JOIN listing l2 ON l2.chain_id = pr.chain_id
-               AND l2.item_code <> ''
-               AND (l2.item_code = pi2.item_code OR l2.item_code = regexp_replace(pi2.item_code, '\\D', '', 'g'))
-             WHERE pi2.promotion_id = pr.id AND l2.product_id = $2
-           )
-         )
-         AND (
+              AND pr.chain_id = (SELECT chain_id FROM store WHERE id = $1)))`;
+
+const ACTIVE_FILTER = `(
            $3::boolean IS NULL
            OR ($3 IS TRUE AND pr.start_ts <= now() AND pr.end_ts >= now())
            OR ($3 IS FALSE AND (pr.start_ts > now() OR pr.end_ts < now()))
-         )
-         AND (
+         )`;
+
+const CITY_FILTER = `(
            $4::text[] IS NULL
            OR EXISTS (
              SELECT 1 FROM store s
              WHERE s.city = ANY($4::text[])
                AND (pr.store_id = s.id OR (pr.store_id IS NULL AND s.chain_id = pr.chain_id))
            )
-         )
-       ORDER BY pr.end_ts ASC, pr.id
-       LIMIT $5
-     )
+         )`;
+
+const DETAIL_SELECT = `
      SELECT
        pr.id, pr.chain_id, c.name_he AS chain_name, pr.store_id, pr.store_code, pr.promo_code,
        pr.description, pr.mechanic_type, pr.mechanic_params, pr.club_only,
@@ -125,14 +106,83 @@ export async function listPromotions(params: ListPromotionsParams): Promise<Prom
      JOIN chain c ON c.id = pr.chain_id
      LEFT JOIN promotion_item pi ON pi.promotion_id = pr.id
      GROUP BY pr.id, c.name_he
-     ORDER BY pr.end_ts ASC, pr.id`,
-    [
-      params.storeId ?? null,
-      params.productId ?? null,
-      params.activeOnly ?? null,
-      cityKeys,
-      limit,
-    ],
+     ORDER BY pr.end_ts ASC, pr.id`;
+
+/**
+ * Product-scoped path: start from the product's listings (tiny), match promotion_item
+ * by item_code, then filter. Avoids scanning every active promotion in a city.
+ */
+async function listPromotionsForProduct(
+  params: ListPromotionsParams & { productId: string },
+  limit: number,
+  cityKeys: string[] | null,
+): Promise<PromotionSummary[]> {
+  // Normalize item codes on the tiny product side only — never regexp_replace across
+  // promotion_item (full-table scan / timeout on Israel-scale dumps).
+  const res = await query<PromotionRow>(
+    `WITH product_codes AS (
+       SELECT DISTINCT l.chain_id, l.item_code AS item_code
+       FROM listing l
+       WHERE l.product_id = $2
+         AND l.item_code <> ''
+       UNION
+       SELECT DISTINCT l.chain_id, regexp_replace(l.item_code, '\\D', '', 'g') AS item_code
+       FROM listing l
+       WHERE l.product_id = $2
+         AND l.item_code <> ''
+         AND regexp_replace(l.item_code, '\\D', '', 'g') <> l.item_code
+     ),
+     page AS (
+       SELECT pr.id
+       FROM product_codes pc
+       JOIN promotion_item pi ON pi.item_code = pc.item_code
+       JOIN promotion pr ON pr.id = pi.promotion_id AND pr.chain_id = pc.chain_id
+       WHERE ${STORE_FILTER}
+         AND ${ACTIVE_FILTER}
+         AND ${CITY_FILTER}
+       GROUP BY pr.id, pr.end_ts
+       ORDER BY pr.end_ts ASC, pr.id
+       LIMIT $5
+     )
+     ${DETAIL_SELECT}`,
+    [params.storeId ?? null, params.productId, params.activeOnly ?? null, cityKeys, limit],
   );
   return res.rows.map(mapPromotion);
+}
+
+/** Catalog / store / city browse path — page promotions first, then attach item codes. */
+async function listPromotionsBrowse(
+  params: ListPromotionsParams,
+  limit: number,
+  cityKeys: string[] | null,
+): Promise<PromotionSummary[]> {
+  const res = await query<PromotionRow>(
+    `WITH page AS (
+       SELECT pr.id
+       FROM promotion pr
+       WHERE ${STORE_FILTER}
+         AND ${ACTIVE_FILTER}
+         AND ${CITY_FILTER}
+       ORDER BY pr.end_ts ASC, pr.id
+       LIMIT $5
+     )
+     ${DETAIL_SELECT}`,
+    // $2 unused in browse path — keep bind positions aligned with product path / unit tests.
+    [params.storeId ?? null, null, params.activeOnly ?? null, cityKeys, limit],
+  );
+  return res.rows.map(mapPromotion);
+}
+
+export async function listPromotions(params: ListPromotionsParams): Promise<PromotionSummary[]> {
+  const limit = clampLimit(params.limit);
+  const cityKeys = params.city ? cityMatchKeys(params.city) : null;
+
+  if (params.productId) {
+    return listPromotionsForProduct(
+      { ...params, productId: params.productId },
+      limit,
+      cityKeys,
+    );
+  }
+  return listPromotionsBrowse(params, limit, cityKeys);
 }

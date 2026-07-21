@@ -37,6 +37,23 @@ SUPER_MCP_URL=https://<host>/mcp \
   pnpm --filter @super-mcp/api canary:mcp-contract
 ```
 
+## Live MCP real-world flow tests (populated DB)
+
+In-process MCP tool harness against Postgres — no mocks. Skips when `DATABASE_URL`
+is unset or the catalog is too small. Full Israel dumps also run BBQ / Neve Amal coverage.
+
+```bash
+pnpm --filter @super-mcp/api test:live
+pnpm --filter @super-mcp/api test:perf   # latency/size gates (p95)
+```
+
+Opt out: `SUPER_MCP_SKIP_LIVE=1`. Raise samples with `SUPER_MCP_PERF_ITERS=10`.
+Strict canary budgets (3s / 15KB / 0.8 coverage): `SUPER_MCP_PERF_STRICT=1`.
+Fast-basket benchmark quality gates (complete / safe / coverage) are always hard;
+latency/size default to full-dump regression budgets — set `FAST_BASKET_CANARY=1`
+for aspirational 3s / 15KB. The CI `benchmark` job runs live + perf + this
+benchmark after seed + fixture ingest.
+
 ## Post-deploy live smoke (populated DB)
 
 ```bash

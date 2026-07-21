@@ -42,8 +42,7 @@ export function AccessPanel() {
               </div>
 
               <div className="flex flex-col justify-center p-7 md:p-10">
-                <p className="text-sm font-semibold text-[var(--color-accent)]">{he.access.eyebrow}</p>
-                <h2 className="mt-3 font-[family-name:var(--font-secular)] text-[clamp(1.85rem,3.2vw,2.5rem)] leading-[1.12] tracking-[-0.02em]">
+                <h2 className="font-[family-name:var(--font-secular)] text-[clamp(1.85rem,3.2vw,2.5rem)] leading-[1.12] tracking-[-0.02em]">
                   {he.access.title}
                 </h2>
                 <p className="mt-4 max-w-[36ch] text-[var(--color-ink-muted)] leading-7">

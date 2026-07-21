@@ -14,10 +14,10 @@ export function Hero() {
 
   return (
     <section id="top" className="relative isolate overflow-hidden">
-      <Container className="pt-14 pb-8 text-center md:pt-20 md:pb-10">
+      <Container className="pt-14 pb-16 text-center md:pt-20 md:pb-24">
         <MotionReveal>
           <p className="text-sm font-semibold text-[var(--color-accent)]">{he.hero.eyebrow}</p>
-          <h1 className="mx-auto mt-4 max-w-[14ch] font-[family-name:var(--font-secular)] text-[clamp(2.5rem,6vw,4rem)] leading-[1.08] tracking-[-0.02em] text-[var(--color-ink)]">
+          <h1 className="mx-auto mt-4 max-w-[22ch] font-[family-name:var(--font-secular)] text-[clamp(2.5rem,6vw,4rem)] leading-[1.08] tracking-[-0.02em] text-[var(--color-ink)]">
             {he.hero.title}
           </h1>
           <p className="mx-auto mt-5 max-w-[36ch] text-base leading-7 text-[var(--color-ink-muted)] md:text-lg md:leading-8">
@@ -39,22 +39,21 @@ export function Hero() {
             </Button>
           </div>
         </MotionReveal>
-      </Container>
 
-      <div className="relative overflow-hidden bg-[var(--color-brand-band)] pt-6 md:pt-8">
-        <Container>
-          <MotionReveal className="relative mx-auto aspect-[16/10] w-full max-w-3xl md:aspect-[16/9]">
-            <Image
-              src="/hero-basket.webp"
-              alt="סל מצרכים טריים"
-              fill
-              priority
-              sizes="(max-width: 768px) 100vw, 768px"
-              className="object-contain object-bottom"
-            />
-          </MotionReveal>
-        </Container>
-      </div>
+        <MotionReveal
+          delay={0.08}
+          className="relative mx-auto mt-12 aspect-[16/9] w-full max-w-3xl overflow-hidden rounded-[var(--radius-xl)] bg-[var(--color-brand-band)] shadow-[0_40px_80px_-40px_oklch(0.58_0.14_230_/_0.5)]"
+        >
+          <Image
+            src="/hero-basket.webp"
+            alt="סל מצרכים טריים על רקע תכלת"
+            fill
+            priority
+            sizes="(max-width: 768px) 100vw, 768px"
+            className="object-cover object-center"
+          />
+        </MotionReveal>
+      </Container>
     </section>
   );
 }
