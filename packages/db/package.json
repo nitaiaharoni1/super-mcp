@@ -31,7 +31,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.112.1",
+    "@anthropic-ai/sdk": "^0.112.4",
     "@huggingface/transformers": "^4.2.0",
     "@super-mcp/shared": "workspace:*",
     "dotenv": "^16.5.0",
