@@ -19,9 +19,10 @@ COPY services/api/package.json services/api/
 COPY services/ingestion/package.json services/ingestion/
 RUN pnpm install --frozen-lockfile
 
-# Bring in the source and build the dist/ that @super-mcp/{shared,db} export from.
+# Bring in the source and build only packages needed by the API/ingestion image.
+# apps/web is a separate Firebase App Hosting deploy — do not require Next here.
 COPY . .
-RUN pnpm -r build
+RUN pnpm --filter @super-mcp/shared --filter @super-mcp/db --filter @super-mcp/api --filter @super-mcp/ingestion run build
 
 # Pre-download the embedding model into the library-relative transformers cache so
 # cold starts never reach out to the HuggingFace Hub. Runs inside @super-mcp/db so
