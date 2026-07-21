@@ -9,6 +9,13 @@
  *
  * Without SUPER_MCP_URL, validates the in-process tool registration + instructions
  * (useful for local CI without a live server).
+ *
+ * Requires:
+ * - protocol basket-optimize-fast-v2
+ * - optimize_basket registered first
+ * - resolution_mode and response_detail in schema
+ * - title/description contain one-call shopping-list keywords
+ * - legacy prepare_basket absent
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,24 +32,45 @@ import { registerStoreTools } from "../mcp/tools/stores/index.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
 
+/** Keywords that must appear in optimize_basket title or description (discovery copy). */
+const ONE_CALL_SHOPPING_LIST_KEYWORDS = ["shopping list", "one call"] as const;
+
+type ToolSnapshot = McpToolDescriptor & {
+  title?: string;
+  description?: string;
+};
+
 function collectInProcessTools(): {
   toolNames: string[];
-  tools: McpToolDescriptor[];
+  tools: ToolSnapshot[];
   instructions: string;
 } {
-  const tools: McpToolDescriptor[] = [];
+  const tools: ToolSnapshot[] = [];
   const server = {
-    registerTool: (name: string, def: { inputSchema?: { shape?: Record<string, unknown> } }) => {
+    registerTool: (
+      name: string,
+      def: {
+        title?: string;
+        description?: string;
+        inputSchema?: { shape?: Record<string, unknown> };
+      },
+    ) => {
       // registerTool wraps the shape in z.object(...).strict() before calling us.
       const shape = def.inputSchema?.shape ?? {};
       const properties: Record<string, unknown> = {};
       for (const key of Object.keys(shape)) properties[key] = {};
-      tools.push({ name, inputSchema: { properties } });
+      tools.push({
+        name,
+        title: def.title,
+        description: def.description,
+        inputSchema: { properties },
+      });
     },
   } as unknown as Parameters<typeof registerBasketTools>[0];
 
-  registerProductTools(server);
+  // Match production registerTools order: basket first for discovery.
   registerBasketTools(server);
+  registerProductTools(server);
   registerStoreTools(server);
 
   return {
@@ -54,7 +82,7 @@ function collectInProcessTools(): {
 
 async function fetchRemoteTools(url: string, apiKey: string): Promise<{
   toolNames: string[];
-  tools: McpToolDescriptor[];
+  tools: ToolSnapshot[];
   instructions: string;
 }> {
   // Minimal JSON-RPC tools/list against Streamable HTTP MCP.
@@ -104,14 +132,43 @@ async function fetchRemoteTools(url: string, apiKey: string): Promise<{
     throw new Error(`MCP tools/list failed: HTTP ${listed.status}`);
   }
   const listBody = (await listed.json()) as {
-    result?: { tools?: Array<{ name: string; inputSchema?: McpToolDescriptor["inputSchema"] }> };
+    result?: {
+      tools?: Array<{
+        name: string;
+        title?: string;
+        description?: string;
+        inputSchema?: McpToolDescriptor["inputSchema"];
+      }>;
+    };
   };
   const remoteTools = listBody.result?.tools ?? [];
   return {
     toolNames: remoteTools.map((t) => t.name),
-    tools: remoteTools.map((t) => ({ name: t.name, inputSchema: t.inputSchema })),
+    tools: remoteTools.map((t) => ({
+      name: t.name,
+      title: t.title,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    })),
     instructions,
   };
+}
+
+/** Extra discovery checks beyond validateMcpBasketContract. */
+function validateOptimizeBasketDiscoveryCopy(tools: ToolSnapshot[]): string[] {
+  const errors: string[] = [];
+  const optimize = tools.find((t) => t.name === "optimize_basket");
+  if (!optimize) return errors;
+
+  const haystack = `${optimize.title ?? ""} ${optimize.description ?? ""}`.toLowerCase();
+  for (const keyword of ONE_CALL_SHOPPING_LIST_KEYWORDS) {
+    if (!haystack.includes(keyword)) {
+      errors.push(
+        `optimize_basket title/description must contain "${keyword}" (one-call shopping-list discovery)`,
+      );
+    }
+  }
+  return errors;
 }
 
 async function main(): Promise<void> {
@@ -134,6 +191,10 @@ async function main(): Promise<void> {
     requireDeployedRevision: requireDeployed,
   });
 
+  const discoveryErrors = validateOptimizeBasketDiscoveryCopy(snapshot.tools);
+  const errors = [...result.errors, ...discoveryErrors];
+  const ok = errors.length === 0;
+
   console.log(
     JSON.stringify(
       {
@@ -142,8 +203,8 @@ async function main(): Promise<void> {
         url: url ?? null,
         identity: result.identity,
         expectedBuild,
-        ok: result.ok,
-        errors: result.errors,
+        ok,
+        errors,
         toolNames: snapshot.toolNames,
       },
       null,
@@ -151,7 +212,7 @@ async function main(): Promise<void> {
     ),
   );
 
-  if (!result.ok) {
+  if (!ok) {
     process.exit(1);
   }
 }
