@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AppError } from "@super-mcp/shared";
 import { optimizeBasket } from "../../../services/basket/index.js";
+import type {
+  BasketResolutionMode,
+  BasketResponseDetail,
+} from "../../../services/basket/types.js";
 import { DEFAULT_RADIUS_KM } from "../../../lib/defaults.js";
 import { registerTool } from "../register.js";
 import { locationShape, resolveToolLocation } from "../shared/location.js";
@@ -56,6 +60,42 @@ function mapBasketItems(items: z.infer<typeof basketItemsSchema>) {
   }));
 }
 
+function mapResolutionMode(value: "fast" | "strict" | undefined): BasketResolutionMode {
+  const mode = value ?? "fast";
+  switch (mode) {
+    case "fast":
+      return "fast";
+    case "strict":
+      return "strict";
+    default: {
+      const exhaustive: never = mode;
+      return exhaustive;
+    }
+  }
+}
+
+function mapResponseDetail(
+  responseDetail: "summary" | "standard" | "debug" | undefined,
+  verbose: boolean | undefined,
+): BasketResponseDetail {
+  if (responseDetail != null) {
+    switch (responseDetail) {
+      case "summary":
+        return "summary";
+      case "standard":
+        return "standard";
+      case "debug":
+        return "debug";
+      default: {
+        const exhaustive: never = responseDetail;
+        return exhaustive;
+      }
+    }
+  }
+  if (verbose === true) return "debug";
+  return "summary";
+}
+
 function continuationOptions() {
   return {
     continuationSecret: process.env.BASKET_CONTINUATION_SECRET ?? "",
@@ -93,6 +133,18 @@ export function registerBasketTools(server: McpServer): void {
         stores_limit: z.number().int().min(0).max(500).optional(),
         distance_penalty_per_km: z.number().min(0).max(100).optional(),
         verbose: z.boolean().optional(),
+        resolution_mode: z
+          .enum(["fast", "strict"])
+          .optional()
+          .default("fast")
+          .describe(
+            "fast returns a best-effort priced basket in one call; strict pauses for material ambiguity.",
+          ),
+        response_detail: z
+          .enum(["summary", "standard", "debug"])
+          .optional()
+          .default("summary")
+          .describe("Controls response size. Use debug only for diagnostics."),
       },
     },
     async (args) => {
@@ -152,6 +204,8 @@ export function registerBasketTools(server: McpServer): void {
           storesLimit: args.stores_limit,
           distancePenaltyPerKm: args.distance_penalty_per_km,
           verbose: args.verbose,
+          resolutionMode: mapResolutionMode(args.resolution_mode),
+          responseDetail: mapResponseDetail(args.response_detail, args.verbose),
         },
         continuationOptions(),
       );

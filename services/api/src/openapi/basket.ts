@@ -76,7 +76,20 @@ export const basketInitialRequestSchema = {
       type: "boolean",
       default: false,
       description:
-        "When false, per-store lines are returned only for recommended stores; missingItems always kept.",
+        "Deprecated. Prefer response_detail=debug. When false, per-store lines are returned only for recommended stores; missingItems always kept.",
+    },
+    resolution_mode: {
+      type: "string",
+      enum: ["fast", "strict"],
+      default: "fast",
+      description:
+        "fast returns a best-effort priced basket in one call; strict pauses for material ambiguity.",
+    },
+    response_detail: {
+      type: "string",
+      enum: ["summary", "standard", "debug"],
+      default: "summary",
+      description: "Controls response size. Use debug only for diagnostics.",
     },
   },
 };
@@ -237,6 +250,34 @@ export const basketNeedsConfirmationResponseSchema = {
   },
 };
 
+const basketAssumptionSchema = {
+  type: "object",
+  required: [
+    "itemIndex",
+    "query",
+    "selectedProductId",
+    "selectedName",
+    "reason",
+    "message",
+  ],
+  properties: {
+    itemIndex: { type: "integer" },
+    query: { type: "string", nullable: true },
+    selectedProductId: { type: "string", format: "uuid", nullable: true },
+    selectedName: { type: "string", nullable: true },
+    reason: {
+      type: "string",
+      enum: [
+        "commodity_best_effort",
+        "generic_variant_default",
+        "location_city_fallback",
+        "unsafe_line_omitted",
+      ],
+    },
+    message: { type: "string" },
+  },
+};
+
 export const basketCompleteResponseSchema = {
   type: "object",
   required: [
@@ -249,6 +290,7 @@ export const basketCompleteResponseSchema = {
     "storesCompared",
     "storesTruncated",
     "location",
+    "assumptions",
   ],
   properties: {
     status: { type: "string", enum: ["complete"] },
@@ -279,6 +321,7 @@ export const basketCompleteResponseSchema = {
     storesCompared: { type: "integer" },
     storesTruncated: { type: "boolean" },
     location: storeLocationMetadataSchema,
+    assumptions: { type: "array", items: basketAssumptionSchema },
   },
 };
 

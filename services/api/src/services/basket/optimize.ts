@@ -364,6 +364,7 @@ async function optimizeInitialOrResumedBasket(
       storesCompared: 0,
       storesTruncated: false,
       location,
+      assumptions: [],
     };
   }
 
@@ -454,6 +455,7 @@ async function optimizeInitialOrResumedBasket(
     storesCompared: storeResults.length,
     storesTruncated,
     location,
+    assumptions: [],
   };
 }
 

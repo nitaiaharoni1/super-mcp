@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { resolveLocationInput } from "../../lib/locationInput.js";
 import { optimizeBasket } from "../../services/basket/index.js";
-import type { BasketOptimizeRequest } from "../../services/basket/types.js";
+import type {
+  BasketOptimizeRequest,
+  BasketResolutionMode,
+  BasketResponseDetail,
+} from "../../services/basket/types.js";
 import { createHandler } from "../shared/handlers.js";
 import {
   basketInitialBodySchema,
@@ -13,6 +17,34 @@ function continuationOptions() {
   return {
     continuationSecret: process.env.BASKET_CONTINUATION_SECRET ?? "",
   };
+}
+
+function mapResolutionMode(value: "fast" | "strict"): BasketResolutionMode {
+  switch (value) {
+    case "fast":
+      return "fast";
+    case "strict":
+      return "strict";
+    default: {
+      const exhaustive: never = value;
+      return exhaustive;
+    }
+  }
+}
+
+function mapResponseDetail(value: "summary" | "standard" | "debug"): BasketResponseDetail {
+  switch (value) {
+    case "summary":
+      return "summary";
+    case "standard":
+      return "standard";
+    case "debug":
+      return "debug";
+    default: {
+      const exhaustive: never = value;
+      return exhaustive;
+    }
+  }
 }
 
 export async function registerBasketRoutes(app: FastifyInstance): Promise<void> {
@@ -54,6 +86,8 @@ export async function registerBasketRoutes(app: FastifyInstance): Promise<void> 
           storesLimit: initial.stores_limit,
           distancePenaltyPerKm: initial.distance_penalty_per_km,
           verbose: initial.verbose,
+          resolutionMode: mapResolutionMode(initial.resolution_mode),
+          responseDetail: mapResponseDetail(initial.response_detail),
         };
       }
       return optimizeBasket(request, continuationOptions());

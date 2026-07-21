@@ -56,6 +56,22 @@ export interface BasketLocationInput {
   locationOrigin?: BasketLocationOrigin;
 }
 
+export type BasketResolutionMode = "fast" | "strict";
+export type BasketResponseDetail = "summary" | "standard" | "debug";
+
+export interface BasketAssumption {
+  itemIndex: number;
+  query: string | null;
+  selectedProductId: string | null;
+  selectedName: string | null;
+  reason:
+    | "commodity_best_effort"
+    | "generic_variant_default"
+    | "location_city_fallback"
+    | "unsafe_line_omitted";
+  message: string;
+}
+
 export interface BasketInitialInput extends BasketLocationInput {
   items: BasketItemInput[];
   includeClub?: boolean;
@@ -67,8 +83,13 @@ export interface BasketInitialInput extends BasketLocationInput {
    * When false (default), per-store `lines` are dropped from every store except
    * the recommended ones (bestSingleStore / cheapestCompleteStore) to keep the
    * response small; `missingItems` is always kept. Set true for full detail.
+   * @deprecated Prefer `responseDetail: "debug"`. Kept for migration compatibility.
    */
   verbose?: boolean;
+  /** fast (default) best-effort one-call; strict pauses for material ambiguity. */
+  resolutionMode: BasketResolutionMode;
+  /** summary (default) | standard | debug — controls response size. */
+  responseDetail: BasketResponseDetail;
 }
 
 export interface BasketAnswer {
@@ -348,6 +369,8 @@ export interface BasketCompleteResult {
   storesCompared: number;
   storesTruncated: boolean;
   location: StoreLocationMetadata;
+  /** Best-effort choices and omissions surfaced in fast mode (empty until policy ships). */
+  assumptions: BasketAssumption[];
 }
 
 export type BasketOptimizeResult =

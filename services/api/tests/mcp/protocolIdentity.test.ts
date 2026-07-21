@@ -51,12 +51,14 @@ describe("validateMcpBasketContract", () => {
           continuation: {},
           answers: {},
           city: {},
+          resolution_mode: {},
+          response_detail: {},
         },
       },
     },
   ];
 
-  it("accepts the current resumable schema and protocol identity", () => {
+  it("accepts the current fast-v2 schema and protocol identity", () => {
     const result = validateMcpBasketContract({
       toolNames: ["optimize_basket", "search_products"],
       tools: goodTools,
@@ -77,7 +79,7 @@ describe("validateMcpBasketContract", () => {
     expect(result.errors.join(" ")).toMatch(/prepare_basket/);
   });
 
-  it("rejects optimize_basket without continuation/answers or with qty", () => {
+  it("rejects optimize_basket without continuation/answers/mode fields or with qty", () => {
     const result = validateMcpBasketContract({
       toolNames: ["optimize_basket"],
       tools: [
@@ -91,6 +93,8 @@ describe("validateMcpBasketContract", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.join(" ")).toMatch(/continuation/);
     expect(result.errors.join(" ")).toMatch(/answers/);
+    expect(result.errors.join(" ")).toMatch(/resolution_mode/);
+    expect(result.errors.join(" ")).toMatch(/response_detail/);
     expect(result.errors.join(" ")).toMatch(/qty/);
   });
 

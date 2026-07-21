@@ -13,6 +13,7 @@ import {
 } from "../../src/openapi/basket.js";
 import { registerBasketRoutes } from "../../src/routes/basket/index.js";
 import {
+  basketInitialBodySchema,
   basketItemSchema,
   optimizeBasketBodySchema,
 } from "../../src/routes/basket/schemas.js";
@@ -22,6 +23,30 @@ const UUID = "11111111-1111-4111-8111-111111111111";
 describe("basket REST contract", () => {
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("defaults resolution_mode to fast and response_detail to summary", () => {
+    expect(
+      basketInitialBodySchema.parse({
+        items: [{ query: "חלב", pack_qty: 1 }],
+        city: "תל אביב",
+      }),
+    ).toMatchObject({
+      resolution_mode: "fast",
+      response_detail: "summary",
+    });
+
+    expect(
+      basketInitialBodySchema.parse({
+        items: [{ query: "חלב", pack_qty: 1 }],
+        city: "תל אביב",
+        resolution_mode: "strict",
+        response_detail: "debug",
+      }),
+    ).toMatchObject({
+      resolution_mode: "strict",
+      response_detail: "debug",
+    });
   });
 
   it("accepts exactly one identifier and one quantity source", () => {
@@ -98,10 +123,13 @@ describe("basket REST contract", () => {
         city: "Herzliya",
         near: undefined,
         radiusKm: 10,
+        locationOrigin: undefined,
         includeClub: true,
         storesLimit: undefined,
         distancePenaltyPerKm: undefined,
         verbose: undefined,
+        resolutionMode: "fast",
+        responseDetail: "summary",
       },
       { continuationSecret: "test-only-basket-continuation-secret-ok" },
     );

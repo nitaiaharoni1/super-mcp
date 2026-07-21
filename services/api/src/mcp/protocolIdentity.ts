@@ -1,5 +1,5 @@
 /** Machine-checkable basket protocol identity for deployed MCP parity. */
-export const BASKET_PROTOCOL_ID = "basket-optimize-resumable-v1";
+export const BASKET_PROTOCOL_ID = "basket-optimize-fast-v2";
 
 const DEV_FALLBACK_REVISION = "dev";
 
@@ -78,6 +78,12 @@ export function validateMcpBasketContract(input: ContractCheckInput): ContractCh
     }
     if (!("answers" in props)) {
       errors.push("optimize_basket schema lacks answers");
+    }
+    if (!("resolution_mode" in props)) {
+      errors.push("optimize_basket schema lacks resolution_mode");
+    }
+    if (!("response_detail" in props)) {
+      errors.push("optimize_basket schema lacks response_detail");
     }
     if ("qty" in props) {
       errors.push("optimize_basket schema still accepts deprecated qty");

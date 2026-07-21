@@ -64,6 +64,8 @@ async function main(): Promise<void> {
       // All verbose stores so the target branch can be located even when not recommended.
       verbose: true,
       storesLimit: 0,
+      resolutionMode: "strict",
+      responseDetail: "debug",
     },
     { continuationSecret: secret },
   );

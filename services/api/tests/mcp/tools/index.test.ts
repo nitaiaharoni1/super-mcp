@@ -53,6 +53,25 @@ describe("MCP domain tool registrars", () => {
     ).toThrow();
   });
 
+  it("publishes resolution_mode and response_detail with fast/summary defaults", () => {
+    const definitions = new Map<string, { inputSchema: z.ZodObject<z.ZodRawShape> }>();
+    const server = {
+      registerTool: (name: string, def: { inputSchema: z.ZodObject<z.ZodRawShape> }) => {
+        definitions.set(name, def);
+      },
+    } as unknown as Parameters<typeof registerBasketTools>[0];
+
+    registerBasketTools(server);
+
+    const shape = definitions.get("optimize_basket")?.inputSchema.shape;
+    expect(shape?.resolution_mode).toBeDefined();
+    expect(shape?.response_detail).toBeDefined();
+    expect(shape?.resolution_mode?.parse(undefined)).toBe("fast");
+    expect(shape?.response_detail?.parse(undefined)).toBe("summary");
+    expect(shape?.resolution_mode?.parse("strict")).toBe("strict");
+    expect(shape?.response_detail?.parse("debug")).toBe("debug");
+  });
+
   it("registers every store tool with a strict schema that rejects unknown args", () => {
     const definitions = new Map<string, { inputSchema: z.ZodObject<z.ZodRawShape> }>();
     const server = {
