@@ -134,7 +134,7 @@ function assumptionReasonFor(query: string): BasketAssumption["reason"] {
 }
 
 function assumptionMessage(query: string, selectedName: string): string {
-  return `Assumed "${selectedName}" for "${query}" (best-effort, no confirmation).`;
+  return `Assumed "${selectedName}" for "${query}".`;
 }
 
 function omitOutcome(

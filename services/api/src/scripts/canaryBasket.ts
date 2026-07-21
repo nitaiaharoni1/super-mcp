@@ -22,7 +22,11 @@ import dotenv from "dotenv";
 import { closePool } from "@super-mcp/db";
 import { resolveLocationInput } from "../lib/locationInput.js";
 import { optimizeBasket } from "../services/basket/optimize.js";
-import type { BasketResolutionMode, BasketResponseDetail } from "../services/basket/types.js";
+import type {
+  BasketLocationOrigin,
+  BasketResolutionMode,
+  BasketResponseDetail,
+} from "../services/basket/types.js";
 import { assertTargetBranchCoverage } from "./canary/assertTargetBranchCoverage.js";
 import {
   pickAnswers,
@@ -37,6 +41,21 @@ dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
 
 const FAST_ELAPSED_BUDGET_MS = 3000;
 const FAST_RESPONSE_BYTES_BUDGET = 15_000;
+
+/** Canary stdout: keep precision/strategy diagnostics, never echo displayName/address. */
+function locationOriginForLog(
+  origin: BasketLocationOrigin | null | undefined,
+): Omit<BasketLocationOrigin, "displayName"> | null {
+  if (!origin) return null;
+  return {
+    precision: origin.precision,
+    provider: origin.provider,
+    cached: origin.cached,
+    fallbackApplied: origin.fallbackApplied,
+    attribution: origin.attribution,
+    warning: origin.warning,
+  };
+}
 
 function resolveCanaryMode(): BasketResolutionMode {
   const raw = process.env.CANARY_BASKET_RESOLUTION_MODE?.trim().toLowerCase();
@@ -125,7 +144,9 @@ async function main(): Promise<void> {
           responseDetail,
           city: loc.city,
           near: loc.near,
-          locationOrigin: loc.locationOrigin ?? first.location.origin ?? null,
+          locationOrigin: locationOriginForLog(
+            loc.locationOrigin ?? first.location.origin ?? null,
+          ),
           locationChars: locationText?.length ?? null,
           geocodeMs: loc.geocodeMs,
           targetStoreId,
@@ -151,7 +172,7 @@ async function main(): Promise<void> {
           resolutionMode,
           city: loc.city,
           near: loc.near,
-          locationOrigin: loc.locationOrigin,
+          locationOrigin: locationOriginForLog(loc.locationOrigin),
           locationChars: locationText?.length ?? null,
           targetStoreId,
           elapsedMs: initialMs,
@@ -198,7 +219,9 @@ async function main(): Promise<void> {
           resolutionMode,
           city: loc.city,
           near: loc.near,
-          locationOrigin: loc.locationOrigin ?? second.location.origin ?? null,
+          locationOrigin: locationOriginForLog(
+            loc.locationOrigin ?? second.location.origin ?? null,
+          ),
           targetStoreId,
           initialMs,
           resumeMs,
@@ -227,7 +250,9 @@ async function main(): Promise<void> {
         resolutionMode,
         city: loc.city,
         near: loc.near,
-        locationOrigin: loc.locationOrigin ?? first.location.origin ?? null,
+        locationOrigin: locationOriginForLog(
+          loc.locationOrigin ?? first.location.origin ?? null,
+        ),
         targetStoreId,
         elapsedMs: initialMs,
         targetBranch,

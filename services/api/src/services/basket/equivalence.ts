@@ -323,10 +323,39 @@ export function isStapleIncompatible(
   }
 
   if (opts?.requestedAmount) {
-    if (!amountCompatible(opts.requestedAmount, candidate)) return true;
+    // Weight requests (kg/g) are purchase quantities for weighed produce/meat,
+    // not pack sizes. Pack-tolerance against the catalog's 1kg weighted stub
+    // would reject every 1.5–2kg line. Volume (L/ml) still enforces pack match
+    // so "שמן 1 ל" does not accept a 750ml bottle.
+    if (
+      !isWeightRequestUnit(opts.requestedAmount.unit) &&
+      !amountCompatible(opts.requestedAmount, candidate)
+    ) {
+      return true;
+    }
   }
 
   return false;
+}
+
+function isWeightRequestUnit(unit: string): boolean {
+  const u = unit
+    .trim()
+    .toLowerCase()
+    .replace(/[׳′]/g, "'")
+    .replace(/[״″]/g, '"')
+    .replace(/\s+/g, "");
+  return (
+    u === "kg" ||
+    u === "g" ||
+    u === "גרם" ||
+    u === "גרמים" ||
+    u === "קג" ||
+    u === 'ק"ג' ||
+    u === "ק'ג" ||
+    u === "קילו" ||
+    u === "קילוגרם"
+  );
 }
 
 function queryTokensHasPersonalCare(queryTokens: Set<string>): boolean {

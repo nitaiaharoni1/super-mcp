@@ -136,9 +136,17 @@ export function selectRecommendationPlans(
         cheapestCompleteStore: null,
         multiStore: null,
       };
+      // When one store already prices every line, skip multiStore in summary so
+      // full-coverage baskets stay under the agent payload budget (~15KB).
+      const bestCoversAll =
+        bestSingleStore != null &&
+        bestSingleStore.requestedLines > 0 &&
+        bestSingleStore.pricedLines >= bestSingleStore.requestedLines;
       let kept = 0;
       for (const [key, plan] of candidates) {
-        if (plan == null || kept >= 2) continue;
+        if (plan == null) continue;
+        const maxSlots = key === "multiStore" && bestCoversAll ? 1 : 2;
+        if (kept >= maxSlots) continue;
         if (key === "multiStore") {
           selected.multiStore = plan as BasketMultiStorePlan;
         } else if (key === "bestSingleStore") {

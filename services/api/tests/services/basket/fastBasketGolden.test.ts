@@ -76,7 +76,7 @@ const LINE_CATALOG: LineCatalog[] = [
     productClass: "eggs",
     pieceCount: 12,
   },
-  { safeName: "לחם אחיד פרוס", traps: [], productClass: "bakery" },
+  { safeName: "לחם אחיד 750 גרם", traps: [], productClass: "bakery" },
   { safeName: "קוטג' 5%", traps: [], productClass: "dairy_cottage" },
   {
     safeName: "עגבניות טריות",
