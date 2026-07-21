@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedItem } from "../../../src/services/basket/types.js";
 
+// One-call fast staples regression (default path): see fastBasketGolden.test.ts
+// and fixtures/telAvivStaplesBasket.ts. This suite remains the strict/resume contract.
+
 const resolveItems = vi.fn();
 const listStores = vi.fn();
 const loadBasketPricingData = vi.fn();
