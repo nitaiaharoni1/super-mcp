@@ -11,6 +11,8 @@
   "scripts": {
     "build": "pnpm -r run build",
     "dev": "pnpm --filter @super-mcp/api dev",
+    "dev:web": "pnpm --filter @super-mcp/web dev",
+    "build:web": "pnpm --filter @super-mcp/web build",
     "db:migrate": "pnpm --filter @super-mcp/db migrate",
     "db:seed": "pnpm --filter @super-mcp/db seed",
     "db:embed-products": "pnpm --filter @super-mcp/shared build && pnpm --filter @super-mcp/db embed-products",
