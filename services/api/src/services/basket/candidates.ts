@@ -26,7 +26,8 @@ export function hitToCandidate(
     classL2: classInfo?.l2 ?? null,
     classL3: classInfo?.l3 ?? null,
     variant: classInfo?.variant ?? null,
-    brandExtracted: classInfo?.brand ?? null,
+    // Prefer offline brand_extracted; fall back to catalog brand when present.
+    brandExtracted: classInfo?.brand ?? hit.brand ?? null,
     intentTier: hit.intentTier,
   };
 }

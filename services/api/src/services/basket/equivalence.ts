@@ -294,7 +294,9 @@ export function isStapleIncompatible(
   const queryTokens = new Set(tokenizeNormalized(normalizeEmbedInput(queryText)));
   if (hasUnrequestedPreservedForm(queryTokens, candidate.name)) return true;
   if (hasUnrequestedPersonalCare(queryTokens, candidate.name)) return true;
-  if (!queryHeadAnchored(queryText, candidate.name)) return true;
+  // Head-anchoring stays a soft preference (preferQueryHeadAnchored / override
+  // guards). Hard-rejecting every non-anchored name empties shortlists for
+  // opaque queries like "מוצר" and incorrectly re-labels them unresolved.
 
   const l1 = candidate.classL1 ?? "";
   if (l1 && NON_FOOD_CLASS_L1.has(l1) && !queryTokensHasPersonalCare(queryTokens)) {

@@ -1,3 +1,4 @@
+import { buildQueryProfile } from "@super-mcp/shared";
 import { heRetailOntologyFixture } from "@super-mcp/shared/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SearchProductHit } from "../../../src/services/search/types.js";
@@ -22,9 +23,14 @@ vi.mock("../../../src/lib/features.js", () => ({
   semanticV2Shadow: () => false,
 }));
 
-import { rankQueryCandidates } from "../../../src/services/basket/rankQueryCandidates.js";
+import {
+  filterSafeCandidates,
+  rankQueryCandidates,
+  selectSafePrimary,
+} from "../../../src/services/basket/rankQueryCandidates.js";
 import { resolveQueryItem } from "../../../src/services/basket/resolveQuery.js";
 import type { ProductClassInfo } from "../../../src/services/basket/productClasses.js";
+import type { BasketCandidate } from "../../../src/services/basket/types.js";
 
 /** A lexical hit; evidence overrides let a case force exact/vector recall. */
 function hit(
@@ -406,6 +412,182 @@ describe("resolveQuery risk + equivalence wiring", () => {
     const eggNames = eggs.candidates.map((c) => c.name);
     expect(eggNames).not.toContain("6 ביצים L");
     expect(eggs.name).not.toMatch(/^6 ביצים/);
+  });
+
+  it("all-trap shortlist stays unresolved without re-admitting unsafe candidates", () => {
+    const ontology = heRetailOntologyFixture();
+    const classMap = new Map<string, ProductClassInfo>([
+      [
+        "crushed",
+        {
+          l1: "canned_preserved",
+          l2: "tomato_paste_sauce",
+          l3: null,
+          variant: "regular",
+          brand: null,
+        },
+      ],
+      [
+        "bath",
+        { l1: "personal_care", l2: "hygiene", l3: null, variant: "regular", brand: null },
+      ],
+    ]);
+
+    const item = rankQueryCandidates(
+      {
+        item: { query: "עגבניות", amount: 1, unit: "kg" },
+        base: { index: 0, amount: 1, unit: "kg" },
+        hasAmount: true,
+        wantsPackSize: false,
+        hits: [
+          hit("crushed", "עגבניות מרוסקות 850 גרם", 0.99, {
+            sizeQty: 850,
+            sizeUnit: "g",
+            evidence: { exactPhrase: true, matchedTokenCount: 1, queryTokenCount: 1 },
+          }),
+          hit("bath", "אמול שמן אמבט פורטה", 0.5, {
+            evidence: { exactPhrase: false, matchedTokenCount: 0, queryTokenCount: 1 },
+          }),
+        ],
+        searchMs: 0,
+        candidateLimit: 20,
+        semantic: true,
+        ontology,
+        location: { city: "תל אביב" },
+      },
+      new Map(),
+      { classMap },
+    );
+
+    expect(item.candidates).toHaveLength(0);
+    expect(item.productId).toBeNull();
+    expect(item.name).not.toMatch(/מרוסקות|אמבט/);
+    expect(item.resolvedBy).toBe("unresolved");
+    expect(selectSafePrimary({
+      query: "עגבניות",
+      profile: buildQueryProfile("עגבניות", ontology, { amount: 1, unit: "kg" }),
+      candidates: item.candidates,
+    })).toBeNull();
+  });
+
+  it("explicit diet/organic variant rejects regular and unlabeled peers from the safe list", () => {
+    const ontology = heRetailOntologyFixture();
+    const cand = (
+      id: string,
+      name: string,
+      variant: string | null,
+      over: Partial<BasketCandidate> = {},
+    ): BasketCandidate => ({
+      productId: id,
+      name,
+      score: 0.9,
+      matchedVia: "product",
+      sizeQty: 1500,
+      sizeUnit: "ml",
+      pieceCount: null,
+      hasPrice: true,
+      hasLocalPrice: true,
+      productClass: "beverage",
+      classL1: "beverage",
+      classL2: "soft_drink",
+      classL3: null,
+      variant,
+      brandExtracted: null,
+      intentTier: 1,
+      ...over,
+    });
+
+    const dietProfile = buildQueryProfile("קולה דיאט", ontology);
+    expect(dietProfile.attributes.variant).toBe("diet");
+    const dietSafe = filterSafeCandidates({
+      query: "קולה דיאט",
+      profile: dietProfile,
+      candidates: [
+        cand("reg", "קוקה קולה 1.5 ל", "regular"),
+        cand("missing", "קוקה קולה קלאסי", null),
+        cand("diet", "קוקה קולה דיאט 1.5 ל", "diet_zero"),
+      ],
+    });
+    expect(dietSafe.map((c) => c.productId)).toEqual(["diet"]);
+    expect(selectSafePrimary({
+      query: "קולה דיאט",
+      profile: dietProfile,
+      candidates: dietSafe,
+    })?.productId).toBe("diet");
+
+    const organicSafe = filterSafeCandidates({
+      query: "עגבניות אורגניות",
+      profile: {
+        ...buildQueryProfile("עגבניות", ontology, { amount: 1, unit: "kg" }),
+        attributes: {
+          ...buildQueryProfile("עגבניות", ontology, { amount: 1, unit: "kg" }).attributes,
+          variant: "organic",
+        },
+      },
+      candidates: [
+        cand("reg-t", "עגבניות חממה", "regular", {
+          sizeQty: 1,
+          sizeUnit: "kg",
+          productClass: "produce",
+          classL1: "produce",
+          classL2: "vegetable_fresh",
+        }),
+        cand("unlabeled", "עגבניות שרי", null, {
+          sizeQty: 1,
+          sizeUnit: "kg",
+          productClass: "produce",
+          classL1: "produce",
+          classL2: "vegetable_fresh",
+        }),
+        cand("org", "עגבניות אורגניות", "organic", {
+          sizeQty: 1,
+          sizeUnit: "kg",
+          productClass: "produce",
+          classL1: "produce",
+          classL2: "vegetable_fresh",
+        }),
+      ],
+    });
+    expect(organicSafe.map((c) => c.productId)).toEqual(["org"]);
+  });
+
+  it("explicit brand intent rejects conflicting labeled brands from the safe list", () => {
+    const ontology = heRetailOntologyFixture();
+    const profile = buildQueryProfile("חלב תנובה", ontology);
+    expect(profile.attributes.brand).toBe("תנובה");
+    const cand = (
+      id: string,
+      name: string,
+      brandExtracted: string | null,
+    ): BasketCandidate => ({
+      productId: id,
+      name,
+      score: 0.9,
+      matchedVia: "product",
+      sizeQty: 1,
+      sizeUnit: "L",
+      pieceCount: null,
+      hasPrice: true,
+      hasLocalPrice: true,
+      productClass: "dairy",
+      classL1: "dairy_eggs",
+      classL2: "milk",
+      classL3: null,
+      variant: "regular",
+      brandExtracted,
+      intentTier: 1,
+    });
+    const safe = filterSafeCandidates({
+      query: "חלב תנובה",
+      profile,
+      candidates: [
+        cand("other", "חלב טרה 3%", "טרה"),
+        cand("match", "חלב תנובה 3%", "תנובה"),
+        cand("unknown", "חלב 3%", null),
+      ],
+    });
+    expect(safe.map((c) => c.productId)).toEqual(["match", "unknown"]);
+    expect(safe.map((c) => c.name)).not.toContain("חלב טרה 3%");
   });
 
   it("bare יין ignores utensil peers that would otherwise create cross_class", () => {

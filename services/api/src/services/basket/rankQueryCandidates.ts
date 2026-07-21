@@ -43,6 +43,14 @@ export interface SafePrimaryInput {
   candidates: BasketCandidate[];
 }
 
+/** True when candidate variant satisfies an explicit query variant (diet↔diet_zero). */
+function variantMatchesWanted(wanted: string, got: string): boolean {
+  const dietWanted = wanted === "diet" || wanted === "diet_zero";
+  const dietGot = got === "diet_zero" || got === "diet";
+  if (dietWanted) return dietGot;
+  return got === wanted;
+}
+
 /** Candidates compatible with hard query intent (form, pack, domain, brand). */
 export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[] {
   const { query, profile, candidates } = input;
@@ -65,17 +73,16 @@ export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[]
     ) {
       return false;
     }
-    if (variantWanted && c.variant && c.variant !== "regular") {
-      const dietWanted = variantWanted === "diet" || variantWanted === "diet_zero";
-      const dietGot = c.variant === "diet_zero" || c.variant === "diet";
-      if (dietWanted) {
-        if (!dietGot) return false;
-      } else if (c.variant !== variantWanted) {
-        return false;
-      }
+    // Explicit variant intent: reject regular and unlabeled peers (organic≠regular).
+    if (variantWanted) {
+      const got = c.variant ?? null;
+      if (!got || got === "regular") return false;
+      if (!variantMatchesWanted(variantWanted, got)) return false;
     }
-    if (brandWanted && c.brandExtracted && !brandMatches(c.brandExtracted, brandWanted)) {
-      return false;
+    // Explicit brand intent: reject labeled conflicts (catalog brand or brand_extracted).
+    if (brandWanted) {
+      const candidateBrand = c.brandExtracted ?? null;
+      if (candidateBrand && !brandMatches(candidateBrand, brandWanted)) return false;
     }
     return true;
   });
@@ -373,9 +380,25 @@ export function rankQueryCandidates(
   // and can outrank real bottles on lexical score + local stock. Keep them in
   // the shortlist for transparency, but never ahead of head-anchored products.
   const shortlist = preferQueryHeadAnchored(item.query ?? "", shortlistRaw);
+
+  // Hard intent first: exclude traps before decideResolution / display primary.
+  // When nothing is safe, keep the empty list (do NOT re-admit unsafe candidates).
+  const rankedCandidates: BasketCandidate[] = shortlist.map((hit) =>
+    hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
+  );
+  const candidates = filterSafeCandidates({
+    query: item.query ?? "",
+    profile: queryProfile,
+    candidates: rankedCandidates,
+  });
+  const safeHits = candidates.flatMap((c) => {
+    const hit = shortlist.find((h) => h.id === c.productId);
+    return hit ? [hit] : [];
+  });
+
   let decision = decideResolution(
     item.query ?? "",
-    shortlist.map((hit) => ({
+    safeHits.map((hit) => ({
       ...hit,
       lexicalScore: hit.lexicalScore ?? hit.evidence?.lexicalScore ?? null,
       evidence: { ...defaultEvidence(hit), ...hit.evidence },
@@ -413,8 +436,8 @@ export function rankQueryCandidates(
     }),
   );
   let chosen = decision.productId
-    ? (shortlist.find((hit) => hit.id === decision.productId) ?? shortlist[0])
-    : shortlist[0];
+    ? (safeHits.find((hit) => hit.id === decision.productId) ?? safeHits[0])
+    : safeHits[0];
   // Modifier-trap guard at the DECISION level (covers the normal auto-resolve
   // path, not just the needs_confirmation overrides): a strong lexical/name match
   // can still resolve a line to a product where the query word is a trailing
@@ -436,29 +459,6 @@ export function rankQueryCandidates(
       lowConfidence: true,
       autoPrice: false,
     };
-  }
-
-  // Build candidates first so hard intent can exclude traps before the display /
-  // pricing primary is locked into `base`.
-  const rankedCandidates: BasketCandidate[] = shortlist.map((hit) =>
-    hitToCandidate(hit, productClassFor(hit), classMap?.get(hit.id)),
-  );
-  const safeCandidates = filterSafeCandidates({
-    query: item.query ?? "",
-    profile: queryProfile,
-    candidates: rankedCandidates,
-  });
-  const safePrimary = safeCandidates[0] ?? null;
-  const candidates = safeCandidates.length > 0 ? safeCandidates : rankedCandidates;
-  if (safePrimary) {
-    chosen = shortlist.find((hit) => hit.id === safePrimary.productId) ?? chosen;
-    if (decision.productId && decision.productId !== safePrimary.productId) {
-      decision = {
-        ...decision,
-        productId: decision.autoPrice ? safePrimary.productId : null,
-        name: safePrimary.name,
-      };
-    }
   }
 
   if (!chosen) {
@@ -575,8 +575,7 @@ export function rankQueryCandidates(
     risk.kind === "commodity" &&
     overrideSafe &&
     candidates[0] != null &&
-    shortlist[0] != null &&
-    !isVectorOnly(shortlist[0]) &&
+    !isVectorOnly(chosen) &&
     queryHeadAnchored(queryText, candidates[0].name)
   ) {
     const equivalents = buildCommodityEquivalents(
@@ -617,8 +616,7 @@ export function rankQueryCandidates(
     risk.kind !== "cross_class" &&
     overrideSafe &&
     candidates[0] != null &&
-    shortlist[0] != null &&
-    !isVectorOnly(shortlist[0])
+    !isVectorOnly(chosen)
   ) {
     const equivalents = buildAvailabilityEquivalents(candidates, queryText, {
       maxEquivalents: searchConfig?.maxEquivalents ?? 5,
@@ -654,8 +652,7 @@ export function rankQueryCandidates(
     decision.status === "resolved" &&
     risk.kind === "commodity" &&
     base.productId != null &&
-    shortlist[0] != null &&
-    !isVectorOnly(shortlist[0])
+    !isVectorOnly(chosen)
   ) {
     const primary = candidates.find((c) => c.productId === base.productId) ?? candidates[0]!;
     const equivalents = buildCommodityEquivalents(
