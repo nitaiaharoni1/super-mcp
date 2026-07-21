@@ -157,6 +157,21 @@ describe("recommendationPlans honesty", () => {
     expect(plans.bestSingleStore?.totalScope).toBe("priced_lines_only");
   });
 
+  it("complete N-item store beats a cheaper N-1 store", () => {
+    const plans = buildRecommendationPlans(
+      [
+        storeResult("complete", 10, 250, 3, 10),
+        storeResult("one-short-cheaper", 9, 100, 1, 10),
+      ],
+      Array.from({ length: 10 }, (_, i) => resolved(i)),
+      OPTIONS,
+      10,
+    );
+    expect(plans.bestSingleStore?.storeId).toBe("complete");
+    expect(plans.bestSingleStore?.totalScope).toBe("complete_basket");
+    expect(plans.bestSingleStore?.coverageRatio).toBe(1);
+  });
+
   it("excludes unreliable-distance stores from multiStore recommendations", () => {
     const local = storeResult("local", 2, 20, 1, 2);
     const unknown = storeResult("unknown-geo", 2, 10, null, 2);

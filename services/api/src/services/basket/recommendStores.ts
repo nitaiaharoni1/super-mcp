@@ -26,25 +26,45 @@ export function effectiveCost(s: BasketStoreResult, opts: RecommendationOptions)
   return s.total + km * opts.distancePenaltyPerKm;
 }
 
-/**
- * Primary single-store pick: maximize coverage within a 1-line band of the max,
- * then minimize effective cost, then prefer fuller coverage, then store id.
- */
-export function pickBestSingleStore(
+function sortByEffectiveCost(
   stores: BasketStoreResult[],
   opts: RecommendationOptions,
 ): BasketStoreResult | null {
-  if (stores.length === 0) return null;
-  const maxCoverage = Math.max(...stores.map((store) => store.lines.length));
-  const eligible = stores.filter((store) => store.lines.length >= maxCoverage - 1);
   return (
-    [...eligible].sort(
+    [...stores].sort(
       (a, b) =>
         effectiveCost(a, opts) - effectiveCost(b, opts) ||
         b.lines.length - a.lines.length ||
         a.storeId.localeCompare(b.storeId),
     )[0] ?? null
   );
+}
+
+/**
+ * Primary single-store pick.
+ *
+ * A store that prices every resolvable line (complete) always beats any
+ * incomplete store, regardless of price. Among incomplete stores only, maximize
+ * coverage within a 1-line band of the max, then minimize effective cost.
+ */
+export function pickBestSingleStore(
+  stores: BasketStoreResult[],
+  opts: RecommendationOptions,
+  /** When set, stores with this many priced lines are treated as complete. */
+  completeLineCount?: number,
+): BasketStoreResult | null {
+  if (stores.length === 0) return null;
+
+  if (completeLineCount != null && completeLineCount > 0) {
+    const complete = stores.filter((store) => store.lines.length >= completeLineCount);
+    if (complete.length > 0) {
+      return sortByEffectiveCost(complete, opts);
+    }
+  }
+
+  const maxCoverage = Math.max(...stores.map((store) => store.lines.length));
+  const eligible = stores.filter((store) => store.lines.length >= maxCoverage - 1);
+  return sortByEffectiveCost(eligible, opts);
 }
 
 /** Lowest-total store that prices every resolvable line; null if none is complete. */

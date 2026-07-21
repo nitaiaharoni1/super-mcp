@@ -128,6 +128,8 @@ export function registerBasketTools(server: McpServer): void {
         "returned question and call the same tool once more with only continuation and answers. " +
         "selectionEffect: representative→commodity peers, brand_family→same-brand compatible packs " +
         "(larger packs may appear as alternative_available), pin→exact SKU. " +
+        "When status is complete, plan totals (bestSingleStore / cheapestCompleteStore / multiStore) " +
+        "sum priced lines only — read totalScope; priced_lines_only is not the full basket total. " +
         "Never reconstruct items and do not call search_products per line. " +
         `Initial calls require city, near, and/or location (default ${DEFAULT_RADIUS_KM}km when a point is set). ` +
         "Prefer location for neighborhoods/addresses (e.g. 'נווה עמל, הרצליה'); near remains lat,lng.",

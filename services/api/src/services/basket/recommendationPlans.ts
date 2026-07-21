@@ -105,7 +105,7 @@ export function buildRecommendationPlans(
 ): RecommendationPlans {
   const resolvableLines = resolvedItems.filter((item) => item.productId != null).length;
   const eligibleResults = filterEligibleStoreResults(storeResults, eligibility);
-  const bestSingleStoreResult = pickBestSingleStore(eligibleResults, opts);
+  const bestSingleStoreResult = pickBestSingleStore(eligibleResults, opts, resolvableLines);
   const cheapestCompleteResult = pickCheapestCompleteStore(eligibleResults, resolvableLines);
   return {
     bestSingleStore: toStorePlan(bestSingleStoreResult, resolvableLines, requestedLines),

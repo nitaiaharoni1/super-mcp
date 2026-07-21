@@ -160,18 +160,41 @@ const basketLineSchema = {
   },
 };
 
+const basketTotalScopeSchema = {
+  type: "string",
+  enum: ["complete_basket", "priced_lines_only"],
+  description:
+    "complete_basket when every requested line is priced; priced_lines_only when total " +
+    "covers only the priced subset (not the full basket).",
+};
+
 const basketStorePlanSchema = {
   allOf: [
     basketCoverageSchema,
     {
       type: "object",
-      required: ["storeId", "storeName", "chainId", "chainName", "total", "currency", "lines", "missingItems"],
+      required: [
+        "storeId",
+        "storeName",
+        "chainId",
+        "chainName",
+        "total",
+        "totalScope",
+        "currency",
+        "lines",
+        "missingItems",
+      ],
       properties: {
         storeId: { type: "string", format: "uuid" },
         storeName: { type: "string" },
         chainId: { type: "string", format: "uuid" },
         chainName: { type: "string" },
-        total: { type: "number" },
+        total: {
+          type: "number",
+          description:
+            "Sum of priced lines only. When totalScope is priced_lines_only this is not the full basket total.",
+        },
+        totalScope: basketTotalScopeSchema,
         currency: { type: "string" },
         distanceKm: { type: "number", nullable: true },
         lines: { type: "array", items: basketLineSchema },
@@ -303,8 +326,14 @@ export const basketCompleteResponseSchema = {
             basketCoverageSchema,
             {
               type: "object",
+              required: ["total", "totalScope", "currency", "storeCount", "lines", "missingItemIndexes"],
               properties: {
-                total: { type: "number" },
+                total: {
+                  type: "number",
+                  description:
+                    "Sum of priced lines only. When totalScope is priced_lines_only this is not the full basket total.",
+                },
+                totalScope: basketTotalScopeSchema,
                 currency: { type: "string" },
                 storeCount: { type: "integer" },
                 lines: { type: "array", items: { type: "object" } },
@@ -347,8 +376,9 @@ export const basketPaths = {
         "Call once with the original shopping list (city, near, or location required). If status is " +
         "needs_confirmation, ask every returned question and call again with only continuation and " +
         "answers. If status is complete, use bestSingleStore, cheapestCompleteStore, and multiStore. " +
-        "Never reconstruct items and do not call search_products per line. Prefer location for " +
-        "neighborhoods/addresses; near remains lat,lng.",
+        "Plan totals are the sum of priced lines; check totalScope — priced_lines_only means the total " +
+        "is not the full basket. Never reconstruct items and do not call search_products per line. " +
+        "Prefer location for neighborhoods/addresses; near remains lat,lng.",
       requestBody: {
         required: true,
         content: { "application/json": { schema: basketOptimizeRequestSchema } },

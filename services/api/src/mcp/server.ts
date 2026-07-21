@@ -22,7 +22,8 @@ export function buildMcpServerInstructions(
     "'נווה עמל, הרצליה'). Prefer location for neighborhoods; near remains coordinates. Do not combine " +
     "near with location. If status is needs_confirmation, answer every required question and call again " +
     "with only {continuation, answers}. If status is complete, use bestSingleStore / cheapestCompleteStore " +
-    "/ multiStore. Do not call search_products per line first; use search_products / resolve_products only " +
+    "/ multiStore. Plan totals sum priced lines only — check totalScope; priced_lines_only is not the " +
+    "full basket total. Do not call search_products per line first; use search_products / resolve_products only " +
     "for unresolved or missing lines. Use amount+unit for natural counts and weighed goods " +
     "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). Location filters default to 10km when a " +
     "point is resolved. Use get_promotions to explain discounts. " +
