@@ -25,3 +25,5 @@ data/raw/
 # Local git worktrees and SDD scratch
 .worktrees/
 .superpowers/
+
+.firebase/

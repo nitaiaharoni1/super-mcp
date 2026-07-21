@@ -38,21 +38,21 @@ This app uses the TypeScript 6 npm alias for Next.js 15 compatibility:
 
 That is an intentional deviation from the rest of the monorepo. Do not bump to TypeScript 7 here without verifying Next 15 support.
 
-## Firebase App Hosting
+## Production deploy (Cloud Run)
 
-Deploy with [Firebase App Hosting](https://firebase.google.com/docs/app-hosting), not classic static Firebase Hosting export.
+Operator deploy (project `super-mcp-il`, region `europe-west1`) builds `apps/web/Dockerfile` from the repo root and serves `super-mcp-web`.
 
-Setup:
+```bash
+# Build args come from apps/web/.env.local (or Secret Manager) — never commit them.
+gcloud builds submit --project=super-mcp-il --config=<(...)  # see ops notes
+gcloud run deploy super-mcp-web \
+  --project=super-mcp-il \
+  --region=europe-west1 \
+  --image=europe-west1-docker.pkg.dev/super-mcp-il/super-mcp/web:latest \
+  --allow-unauthenticated
+```
 
-1. Blaze billing plan required.
-2. Connect the GitHub repo in the Firebase console.
-3. Set the **app root directory** to `apps/web`.
-4. Provide `NEXT_PUBLIC_MCP_URL` and `NEXT_PUBLIC_ACCESS_EMAIL` for build and runtime.
-5. Provide PostHog (optional but recommended): Firebase secret `NEXT_PUBLIC_POSTHOG_KEY`. Host is set in `apphosting.yaml` to `https://eu.i.posthog.com`. Uses the shared Baliprop + Reflex project; every event is tagged `product=super_mcp`.
-
-`apphosting.yaml` binds the key from a Firebase secret (BUILD and RUNTIME).
-
-Do not commit production URLs or secrets to the repo.
+`apphosting.yaml` remains for an optional Firebase App Hosting path; the live site is Cloud Run. Do not commit production URLs or secrets to the repo.
 
 ## Scripts
 
