@@ -58,6 +58,50 @@ describe("analytics metadata extractors", () => {
     expect(extractResultMeta({ ok: true })).toEqual({});
   });
 
+  it("extracts geocode/response telemetry without raw location strings", () => {
+    const meta = extractResultMeta({
+      status: "complete",
+      geocodeMs: 18,
+      geocodeStrategy: "city_fallback",
+      resolutionMode: "fast",
+      responseDetail: "summary",
+      responseBytes: 4200,
+      location: {
+        origin: {
+          provider: "city_centroid",
+          cached: false,
+          fallbackApplied: true,
+          displayName: "תל אביב-יפו",
+        },
+      },
+    });
+    expect(meta).toEqual({
+      basket_status: "complete",
+      geocode_ms: 18,
+      geocode_strategy: "city_fallback",
+      resolution_mode: "fast",
+      response_detail: "summary",
+      response_bytes: 4200,
+    });
+    expect(JSON.stringify(meta)).not.toContain("תל אביב");
+  });
+
+  it("extracts resolution_mode and response_detail from request args", () => {
+    expect(
+      extractRequestMeta({
+        items: [{ query: "חלב" }],
+        resolution_mode: "fast",
+        response_detail: "summary",
+        location: "רחוב בן גוריון, תל אביב",
+      }),
+    ).toEqual({
+      item_count: 1,
+      has_location: true,
+      resolution_mode: "fast",
+      response_detail: "summary",
+    });
+  });
+
   it("tracks shopping REST paths and skips admin/public", () => {
     expect(shouldTrackRestPath("/v1/basket/optimize")).toBe(true);
     expect(shouldTrackRestPath("/v1/products/search")).toBe(true);

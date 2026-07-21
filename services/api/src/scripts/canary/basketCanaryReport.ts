@@ -38,7 +38,8 @@ export function summarizeComplete(result: Extract<BasketOptimizeResult, { status
   }));
 
   // Effective-cost ranking so the geo-anchored single-store pick is auditable.
-  const distanceRanking = [...result.stores]
+  // Summary detail omits `stores`; fall back to an empty ranking.
+  const distanceRanking = [...(result.stores ?? [])]
     .map((s) => ({
       storeName: `${s.chainName} / ${s.storeName}`,
       total: s.total,

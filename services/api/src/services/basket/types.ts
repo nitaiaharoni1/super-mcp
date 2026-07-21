@@ -54,6 +54,11 @@ export interface BasketLocationInput {
    * Frozen into the signed continuation so resume never re-geocodes.
    */
   locationOrigin?: BasketLocationOrigin;
+  /**
+   * Milliseconds spent resolving location before optimize (boundary-measured).
+   * Kept separate from basket phase timings.
+   */
+  geocodeMs?: number;
 }
 
 export type BasketResolutionMode = "fast" | "strict";

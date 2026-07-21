@@ -147,6 +147,7 @@ describe("basket REST contract", () => {
         near: undefined,
         radiusKm: 10,
         locationOrigin: undefined,
+        geocodeMs: 0,
         includeClub: true,
         storesLimit: undefined,
         distancePenaltyPerKm: undefined,

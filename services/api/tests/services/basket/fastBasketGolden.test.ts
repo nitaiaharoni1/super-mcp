@@ -6,6 +6,7 @@ import type {
   StorePriceRow,
 } from "../../../src/services/basket/types.js";
 import {
+  FORBIDDEN_FAST_SELECTIONS,
   TEL_AVIV_LOCATION,
   TEL_AVIV_STAPLES_ITEMS,
 } from "../../fixtures/telAvivStaplesBasket.js";
@@ -43,16 +44,6 @@ const OPTIONS = { continuationSecret: "test-only-basket-continuation-secret-ok" 
 
 const CHAIN_ID = "22222222-2222-4222-8222-222222222222";
 const STORE_COUNT = 8;
-
-/** Observed trap names from the failing agent flow — must never be selected. */
-const forbiddenFastSelections = [
-  "עגבניות מרוסקות",
-  "קמח תפוחי אדמה",
-  "ניוקי תפוחי אדמה",
-  "אמול שמן אמבט",
-  "חלב בטעם אגוזי לוז",
-  "6 ביצים",
-];
 
 const productId = (i: number, variant = 0) =>
   `00000000-0000-4000-8000-${String(i * 10 + variant).padStart(12, "0")}`;
@@ -284,7 +275,10 @@ describe("fast one-call Tel Aviv staples golden", () => {
       omittedLines: expect.any(Number),
     });
     expect(Array.isArray(result.omittedItems)).toBe(true);
-    expect(JSON.stringify(result)).not.toContain(forbiddenFastSelections.join("|"));
+    const payload = JSON.stringify(result);
+    for (const name of FORBIDDEN_FAST_SELECTIONS) {
+      expect(payload).not.toContain(name);
+    }
 
     // Quantity invariants — preserve requested physical amounts.
     expect(result.items[4]).toMatchObject({ amount: 1, unit: "kg" });
@@ -304,5 +298,60 @@ describe("fast one-call Tel Aviv staples golden", () => {
         expect(line.qty).not.toBe(0.3);
       }
     }
+  });
+
+  it("emits geocode/response telemetry separate from basket phase timings", async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      if (typeof line === "string") logs.push(line);
+    });
+
+    try {
+      await optimizeBasket(
+        {
+          items: TEL_AVIV_STAPLES_ITEMS,
+          city: "תל אביב",
+          geocodeMs: 12,
+          locationOrigin: {
+            precision: "city",
+            provider: "city_centroid",
+            cached: false,
+            fallbackApplied: true,
+            displayName: "תל אביב-יפו",
+            attribution: null,
+            warning: "Using city-level location for a faster estimate; distances are approximate.",
+          },
+          resolutionMode: "fast",
+          responseDetail: "summary",
+          storesLimit: 3,
+        },
+        OPTIONS,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+
+    const event = logs
+      .map((line) => {
+        try {
+          return JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .find((row) => row?.event === "basket_optimize");
+
+    expect(event).toMatchObject({
+      geocodeMs: 12,
+      geocodeStrategy: "city_fallback",
+      resolutionMode: "fast",
+      responseDetail: "summary",
+    });
+    expect(typeof event?.responseBytes).toBe("number");
+    expect(event?.responseBytes).toBeLessThan(15_000);
+    // Basket phases remain present and distinct from geocodeMs.
+    expect(typeof event?.searchMs).toBe("number");
+    expect(typeof event?.pricingMs).toBe("number");
+    expect(JSON.stringify(event)).not.toContain(TEL_AVIV_LOCATION);
   });
 });

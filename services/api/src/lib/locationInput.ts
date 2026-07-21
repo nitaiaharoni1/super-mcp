@@ -40,11 +40,39 @@ export interface LocationInputFields {
   radiusKm?: number;
 }
 
+/** How the origin point was obtained (telemetry / analytics; never raw text). */
+export type GeocodeTelemetryStrategy =
+  | "cache"
+  | "city_fallback"
+  | "nominatim"
+  | "coordinates"
+  | "none";
+
 export interface ResolvedLocationInput {
   city?: string;
   near?: GeoPoint;
   radiusKm?: number;
   locationOrigin?: LocationOriginMeta;
+  /** Wall time spent in this resolve call (geocode / parse); 0 when city-only. */
+  geocodeMs: number;
+}
+
+/** Map provenance to a telemetry strategy label (never includes raw location text). */
+export function deriveGeocodeTelemetryStrategy(
+  origin:
+    | {
+        provider: LocationOriginProvider;
+        cached: boolean;
+        fallbackApplied: boolean;
+      }
+    | undefined,
+): GeocodeTelemetryStrategy {
+  if (!origin) return "none";
+  if (origin.provider === "coordinates") return "coordinates";
+  if (origin.cached) return "cache";
+  if (origin.provider === "city_centroid" || origin.fallbackApplied) return "city_fallback";
+  if (origin.provider === "nominatim") return "nominatim";
+  return "none";
 }
 
 export type GeocodeResolver = (input: {
@@ -93,10 +121,12 @@ export async function resolveLocationInput(
     geocodeStrategy?: GeocodeStrategy;
   } = {},
 ): Promise<ResolvedLocationInput> {
+  const startedAt = Date.now();
   const explicitCity = input.city?.trim() || undefined;
   const location = input.location?.trim() || undefined;
   const nearRaw = asNearString(input.near);
   const geocodeStrategy = resolveGeocodeStrategy(opts.geocodeStrategy);
+  const elapsed = (): number => Date.now() - startedAt;
 
   if (nearRaw && location) {
     throw new AppError(
@@ -124,6 +154,7 @@ export async function resolveLocationInput(
         attribution: null,
         warning: null,
       },
+      geocodeMs: elapsed(),
     };
   }
 
@@ -174,6 +205,7 @@ export async function resolveLocationInput(
         attribution: result.attribution,
         warning: result.warning,
       },
+      geocodeMs: elapsed(),
     };
   }
 
@@ -182,6 +214,7 @@ export async function resolveLocationInput(
     near: undefined,
     radiusKm: input.radiusKm,
     locationOrigin: undefined,
+    geocodeMs: elapsed(),
   };
 }
 

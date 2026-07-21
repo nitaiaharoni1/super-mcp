@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applyLocationOriginHonesty,
+  deriveGeocodeTelemetryStrategy,
   resolveLocationInput,
 } from "../../src/lib/locationInput.js";
 import type { StoreLocationMetadata } from "../../src/lib/resolveStoreLocation.js";
@@ -33,6 +34,8 @@ describe("resolveLocationInput", () => {
     expect(result.near).toEqual({ lat: 32.1656, lng: 34.8469 });
     expect(result.radiusKm).toBe(5);
     expect(result.locationOrigin?.precision).toBe("coordinates");
+    expect(result.geocodeMs).toBeGreaterThanOrEqual(0);
+    expect(deriveGeocodeTelemetryStrategy(result.locationOrigin)).toBe("coordinates");
   });
 
   it("rejects near + location", async () => {
@@ -108,6 +111,8 @@ describe("resolveLocationInput", () => {
           "Using city-level location for a faster estimate; distances are approximate.",
       },
     });
+    expect(result.geocodeMs).toBeGreaterThanOrEqual(0);
+    expect(deriveGeocodeTelemetryStrategy(result.locationOrigin)).toBe("city_fallback");
   });
 
   it("maps not_found → 400 and unavailable → 503", async () => {
@@ -160,7 +165,9 @@ describe("resolveLocationInput", () => {
       near: undefined,
       radiusKm: undefined,
       locationOrigin: undefined,
+      geocodeMs: 0,
     });
+    expect(deriveGeocodeTelemetryStrategy(result.locationOrigin)).toBe("none");
   });
 });
 

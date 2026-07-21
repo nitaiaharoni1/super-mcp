@@ -224,6 +224,7 @@ export function registerBasketTools(server: McpServer): void {
           near: loc.near,
           radiusKm: loc.radiusKm,
           locationOrigin: loc.locationOrigin,
+          geocodeMs: loc.geocodeMs,
           includeClub: args.include_club,
           storesLimit: args.stores_limit,
           distancePenaltyPerKm: args.distance_penalty_per_km,

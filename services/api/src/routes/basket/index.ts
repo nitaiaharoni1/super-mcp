@@ -101,6 +101,7 @@ export async function registerBasketRoutes(app: FastifyInstance): Promise<void> 
           near: loc.near,
           radiusKm: loc.radiusKm,
           locationOrigin: loc.locationOrigin,
+          geocodeMs: loc.geocodeMs,
           includeClub: initial.include_club,
           storesLimit: initial.stores_limit,
           distancePenaltyPerKm: initial.distance_penalty_per_km,
