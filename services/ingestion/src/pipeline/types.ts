@@ -21,6 +21,14 @@ export interface PipelineResult {
   chainsWithNoFiles: string[];
   /** Chains that yielded files but zero usable rows. */
   chainsWithNoRows: string[];
+  /**
+   * Whether the run covered everything or only the local-smoke subset. Reported
+   * because a capped run is otherwise indistinguishable from a full one in the
+   * summary, which is how production ran at 8/898 stores for a week.
+   */
+  coverageMode: "full" | "capped_smoke";
+  /** Per-chain store cap in force, null when unlimited. */
+  storeCap: number | null;
   errorSummary?: string;
 }
 

@@ -24,6 +24,7 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `SUPER_MCP_READY_REQUIRE_AUTH` | server (`1` recommended on public hosts) |
 | `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY` | server (must stay unset/`0`) |
 | `NOMINATIM_USER_AGENT` | server (identifying contact for OSM policy) |
+| `SUPER_MCP_NO_CAP` | **ingest job (required, `1`)**. Without it the ingest silently covers ~1% of stores. See below. |
 | `NEXT_PUBLIC_MCP_URL` | web hosting only |
 | `NEXT_PUBLIC_POSTHOG_KEY` | web hosting only (Baliprop + Reflex project token) |
 | `NEXT_PUBLIC_POSTHOG_HOST` | web hosting only (`https://eu.i.posthog.com`) |
@@ -33,6 +34,41 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 Filter PostHog insights with `product = super_mcp`. Design: [docs/superpowers/specs/2026-07-21-posthog-analytics-design.md](./superpowers/specs/2026-07-21-posthog-analytics-design.md).
 
 Self-hosters clone this repo and supply **their own** values; they receive no access to the operator’s cloud.
+
+## The ingest job MUST set SUPER_MCP_NO_CAP=1
+
+`ingestCaps.ts` defaults to **2 stores per chain** for fast local smoke runs, and
+`expectedChains.ts` narrows Cerberus to `CERBERUS_CHAINS.slice(0, 2)`. Both defaults
+apply unless `SUPER_MCP_NO_CAP=1` or `SUPER_MCP_FULL=1` is set.
+
+This bit production for a week. The Cloud Run job `super-mcp-ingest` had neither flag,
+so every nightly run refreshed **8 of 898 stores**: 2 stores each for the first two
+Cerberus chains (Rami Levy, Yohananof) plus Shufersal and Carrefour, and nothing at all
+for Osher Ad, Keshet Taamim, Fresh Market, Tiv Taam, Stop Market and Salach Dabach. Six
+chains sat at the same prices for seven days.
+
+It was invisible because every signal said the run was healthy: `status: "success"`,
+`rowsError: 0`, no alert. The chain-coverage gate could not catch it either, since
+`expectedChainIdsForSource` deliberately mirrors what the adapter ATTEMPTS, so the
+expectation shrank to match the degraded mode.
+
+The run summary now carries `coverageMode` (`full` | `capped_smoke`) and `storeCap`, and
+a capped run against a database holding more than 50 stores logs a WARNING
+`ingestion_capped_run` naming the flag to set. Verify freshness after any ingest change:
+
+```sql
+SELECT c.name_he,
+       count(DISTINCT s.id) AS stores,
+       count(DISTINCT CASE WHEN sp.ingested_at::date = current_date THEN s.id END) AS refreshed_today
+FROM chain c JOIN store s ON s.chain_id = c.id
+LEFT JOIN store_price sp ON sp.store_id = s.id
+GROUP BY 1 ORDER BY 3 DESC;
+```
+
+`refreshed_today` in the low single digits per chain means the caps are still in force.
+
+`SUPER_MCP_REGION_FILTER` is a separate, deliberate scope limit (Gush Dan/Sharon,
+Jerusalem, Haifa, Beersheva). Leave it on unless you want national coverage.
 
 ## Release order for migrations 023 / 024 (breaking if reversed)
 

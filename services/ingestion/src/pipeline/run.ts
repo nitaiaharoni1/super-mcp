@@ -2,6 +2,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SourceAdapter } from "@super-mcp/shared";
 import { fileConcurrency, mapPool } from "@super-mcp/shared";
+import { getPool } from "@super-mcp/db";
+import { activeStoreCap, coverageMode } from "../ingestCaps.js";
 import { emitAlert } from "./alert.js";
 import { drainSemanticAfterIngest } from "./enrich.js";
 import { finishRun, reapStaleRuns, startRun } from "./persist.js";
@@ -11,6 +13,27 @@ import type { PipelineResult } from "./types.js";
 import { expectedChainIdsForSource } from "../expectedChains.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+
+/**
+ * Store count above which a capped run is treated as a misconfiguration rather
+ * than a smoke test. A local fixture DB holds a handful of stores; anything past
+ * this is a real catalog that a 2-store-per-chain run would leave stale.
+ */
+const CAPPED_RUN_STORE_ALARM = 50;
+
+/** Once per process: the caps are process-wide, so one warning carries the signal. */
+let cappedRunWarned = false;
+
+/** Stores currently in the database, for the capped-run warning. 0 on any error. */
+async function countStores(): Promise<number> {
+  try {
+    const { rows } = await getPool().query<{ n: string }>("SELECT count(*) AS n FROM store");
+    return Number(rows[0]?.n ?? 0);
+  } catch {
+    // Reporting must never break an ingest.
+    return 0;
+  }
+}
 
 function absorb(result: PipelineResult, stats: FileProcessStats): void {
   result.rowsOk += stats.ok;
@@ -67,7 +90,28 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
     pricesReconciled: 0,
     chainsWithNoFiles: [],
     chainsWithNoRows: [],
+    coverageMode: coverageMode(),
+    storeCap: activeStoreCap(),
   };
+
+  // A capped run against a database that already holds a full catalog is almost
+  // always a misconfiguration, not a smoke test. Warn loudly with the numbers so
+  // it cannot pass for a healthy national ingest the way it did in production.
+  if (result.coverageMode === "capped_smoke" && !cappedRunWarned) {
+    cappedRunWarned = true;
+    const storeCount = await countStores();
+    console.error(
+      JSON.stringify({
+        severity: storeCount > CAPPED_RUN_STORE_ALARM ? "WARNING" : "INFO",
+        event: "ingestion_capped_run",
+        sourceId: adapter.sourceId,
+        coverageMode: result.coverageMode,
+        storeCap: result.storeCap,
+        storesInDatabase: storeCount,
+        hint: "Set SUPER_MCP_NO_CAP=1 (or SUPER_MCP_FULL=1) for a full ingest. Without it only the first 2 Cerberus chains and 2 stores per chain are refreshed.",
+      }),
+    );
+  }
 
   try {
     const files = await adapter.discover();
