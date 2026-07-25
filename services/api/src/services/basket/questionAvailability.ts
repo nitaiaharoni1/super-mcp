@@ -102,6 +102,29 @@ export function collectQuestionOptionProductIds(items: BasketItemStatus[]): stri
   return [...ids];
 }
 
+/**
+ * Every product whose local availability the basket needs — the resolved pick and
+ * the whole shortlist, on EVERY line, not just the questioned ones.
+ *
+ * `collectQuestionOptionProductIds` deliberately covers only `needs_confirmation`
+ * lines, because that is all a confirmation question can offer. But the fast
+ * policy uses the same map to notice that a line resolved onto a SKU almost
+ * nobody nearby stocks (`חמאה` → a 1-store import while a 762-store butter sits
+ * in the shortlist). Feeding it the narrow set left it blind on exactly the lines
+ * it had to fix, so availability is loaded for the full candidate space in one
+ * grouped query.
+ */
+export function collectAvailabilityProductIds(items: BasketItemStatus[]): string[] {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (item.productId != null) ids.add(item.productId);
+    for (const candidate of item.candidates) {
+      ids.add(candidate.productId);
+    }
+  }
+  return [...ids];
+}
+
 export function buildBasketQuestions(
   inputItems: BasketItemInput[],
   items: BasketItemStatus[],

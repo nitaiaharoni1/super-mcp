@@ -14,6 +14,7 @@ function baseLocation(overrides: Partial<StoreLocationMetadata> = {}): StoreLoca
     fallbackApplied: false,
     warning: null,
     distanceReliable: true,
+    distanceApproximate: false,
     requested: {
       city: null,
       near: { lat: 32.17, lng: 34.84 },
@@ -98,7 +99,11 @@ describe("resolveLocationInput", () => {
       strategy: "fast",
     });
     expect(result).toMatchObject({
-      city: "תל אביב-יפו",
+      // The city was INFERRED from the free text, so it qualifies geocoding but
+      // must not become a hard store filter — that restricted every address-based
+      // basket to same-city stores and hid branches a few km across the border.
+      city: undefined,
+      derivedCity: "תל אביב-יפו",
       near: CITY_CENTROID["תל אביב-יפו"],
       locationOrigin: {
         precision: "city",
@@ -172,7 +177,7 @@ describe("resolveLocationInput", () => {
 });
 
 describe("applyLocationOriginHonesty", () => {
-  it("suppresses distance ranking for city-precision origins", () => {
+  it("keeps distance ranking but marks it approximate for city-precision origins", () => {
     const merged = applyLocationOriginHonesty(baseLocation(), {
       precision: "city",
       provider: "city_centroid",
@@ -182,16 +187,19 @@ describe("applyLocationOriginHonesty", () => {
       attribution: null,
       warning: "using city centroid",
     });
-    expect(merged.distanceReliable).toBe(false);
+    // Measuring from a city centroid shifts every store by a few km but preserves
+    // their ORDER, so distance still ranks. Only the precision drops.
+    expect(merged.distanceReliable).toBe(true);
+    expect(merged.distanceApproximate).toBe(true);
     expect(merged.precision).toBe("city");
     expect(merged.fallbackApplied).toBe(true);
     expect(merged.warning).toMatch(/centroid/i);
     expect(merged.origin?.provider).toBe("city_centroid");
   });
 
-  it("suppresses distance ranking for a nominatim origin downgraded to city on mismatch", () => {
+  it("marks a nominatim origin downgraded to city on mismatch as approximate", () => {
     // resolveGeocodeQuery downgrades a wrong-neighborhood Nominatim hit to city
-    // precision while keeping provider=nominatim; distance must still be suppressed.
+    // precision while keeping provider=nominatim; distance stays usable but coarse.
     const merged = applyLocationOriginHonesty(baseLocation(), {
       precision: "city",
       provider: "nominatim",
@@ -202,7 +210,8 @@ describe("applyLocationOriginHonesty", () => {
       warning:
         "Approximate match: the geocoder resolved this to a different area than the neighborhood requested; distance ranking may be imprecise.",
     });
-    expect(merged.distanceReliable).toBe(false);
+    expect(merged.distanceReliable).toBe(true);
+    expect(merged.distanceApproximate).toBe(true);
     expect(merged.precision).toBe("city");
     expect(merged.warning).toMatch(/approximate/i);
     expect(merged.origin?.provider).toBe("nominatim");

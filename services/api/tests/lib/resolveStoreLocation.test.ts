@@ -19,6 +19,7 @@ function store(overrides: Partial<StoreSummary> = {}): StoreSummary {
     lat: null,
     lng: null,
     geoSource: null,
+    storeKind: "branch",
     distanceKm: null,
     ...overrides,
   };
@@ -137,7 +138,7 @@ describe("resolveStoreLocation", () => {
     expect(result.location.warning).toBeNull();
   });
 
-  it("suppresses distance ranking when every geocoded store is a city_centroid", async () => {
+  it("keeps coarse distance ranking when stores sit on distinct city centroids", async () => {
     const loadStores = vi.fn().mockResolvedValue([
       store({
         id: "11111111-1111-4111-8111-111111111111",
@@ -146,10 +147,42 @@ describe("resolveStoreLocation", () => {
         geoSource: "city_centroid",
         distanceKm: 1.2,
       }),
+      // A different city's centroid — genuinely further away, and the ordering
+      // between the two is real information.
       store({
         id: "22222222-2222-4222-8222-222222222222",
-        lat: 32.16,
-        lng: 34.84,
+        lat: 32.09,
+        lng: 34.78,
+        geoSource: "city_centroid",
+        distanceKm: 9.4,
+      }),
+    ]);
+
+    const result = await resolveStoreLocation(
+      { near: { lat: 32.17, lng: 34.85 }, radiusKm: 10 },
+      loadStores,
+    );
+
+    // Distinct centroids still order the stores, so ranking stays on — coarse,
+    // not suppressed. Suppressing it here is what hid whole chains.
+    expect(result.location.distanceReliable).toBe(true);
+    expect(result.location.distanceApproximate).toBe(true);
+    expect(result.location.precision).toBe("radius");
+    expect(result.location.warning).toMatch(/approximate/i);
+  });
+
+  it("suppresses distance ranking only when every store shares one coordinate", async () => {
+    const shared = { lat: 32.16, lng: 34.84 };
+    const loadStores = vi.fn().mockResolvedValue([
+      store({
+        id: "11111111-1111-4111-8111-111111111111",
+        ...shared,
+        geoSource: "city_centroid",
+        distanceKm: 1.2,
+      }),
+      store({
+        id: "22222222-2222-4222-8222-222222222222",
+        ...shared,
         geoSource: "city_centroid",
         distanceKm: 1.2,
       }),
@@ -162,7 +195,7 @@ describe("resolveStoreLocation", () => {
 
     expect(result.location.distanceReliable).toBe(false);
     expect(result.location.precision).toBe("city");
-    expect(result.location.warning).toMatch(/city-level centroids/i);
+    expect(result.location.warning).toMatch(/cannot be told apart/i);
   });
 
   it("keeps distanceReliable when at least one store has address geo", async () => {
@@ -190,7 +223,9 @@ describe("resolveStoreLocation", () => {
 
     expect(result.location.distanceReliable).toBe(true);
     expect(result.location.precision).toBe("radius");
-    expect(result.location.warning).toBeNull();
+    // One store is only city-placed, so distances are flagged coarse.
+    expect(result.location.distanceApproximate).toBe(true);
+    expect(result.location.warning).toMatch(/approximate/i);
   });
 
   it("rejects known out-of-radius branches from a reliable near scope", async () => {
@@ -238,6 +273,7 @@ describe("resolveStoreLocation", () => {
       fallbackApplied: false,
       warning: null,
       distanceReliable: true,
+      distanceApproximate: false,
       requested: {
         city: null,
         near: { lat: 32.0819, lng: 34.7712 },
@@ -261,18 +297,54 @@ describe("resolveStoreLocation", () => {
         location,
       ),
     ).toBe(false);
+    // A city-placed store inside the radius is now eligible: excluding these
+    // removed ~45% of the catalog, including entire discount chains.
     expect(
       isEligibleForDistanceRecommendation(
         store({ geoSource: "city_centroid", distanceKm: 1, lat: 32.08, lng: 34.77 }),
         location,
       ),
+    ).toBe(true);
+    // ...but only within a small slack, not arbitrarily far.
+    expect(
+      isEligibleForDistanceRecommendation(
+        store({ geoSource: "city_centroid", distanceKm: 20, lat: 32.08, lng: 34.77 }),
+        location,
+      ),
     ).toBe(false);
+    // No usable distance at all: cannot honestly place it in a radius scope.
     expect(
       isEligibleForDistanceRecommendation(
         store({ geoSource: "address", distanceKm: null, lat: 32.08, lng: 34.77 }),
         location,
       ),
     ).toBe(false);
+  });
+
+  it("never recommends a non-branch endpoint, however close or cheap", () => {
+    const location: StoreLocationMetadata = {
+      scope: "near",
+      precision: "radius",
+      fallbackApplied: false,
+      warning: null,
+      distanceReliable: true,
+      distanceApproximate: false,
+      requested: { city: null, near: { lat: 32.0819, lng: 34.7712 }, radiusKm: 3 },
+    };
+    for (const storeKind of ["online", "pickup", "warehouse"] as const) {
+      expect(
+        isEligibleForDistanceRecommendation(
+          store({ geoSource: "address", distanceKm: 0.1, lat: 32.08, lng: 34.77, storeKind }),
+          location,
+        ),
+      ).toBe(false);
+    }
+    expect(
+      isEligibleForDistanceRecommendation(
+        store({ geoSource: "address", distanceKm: 0.1, lat: 32.08, lng: 34.77, storeKind: "branch" }),
+        location,
+      ),
+    ).toBe(true);
   });
 
   it("isEligibleForDistanceRecommendation uses city membership when distance is unreliable", () => {
@@ -282,6 +354,7 @@ describe("resolveStoreLocation", () => {
       fallbackApplied: true,
       warning: "city-level",
       distanceReliable: false,
+      distanceApproximate: true,
       requested: {
         city: "הרצליה",
         near: { lat: 32.16, lng: 34.84 },

@@ -1,5 +1,5 @@
 import type { PoolClient } from "pg";
-import { normalizeStoreCoordinates } from "@super-mcp/shared";
+import { classifyStoreKind, normalizeStoreCoordinates, type StoreKind } from "@super-mcp/shared";
 import { getPool } from "../client/index.js";
 
 export interface UpsertChainInput {
@@ -11,13 +11,24 @@ export interface UpsertChainInput {
   currency?: string;
 }
 
+/** Offline fixtures must never claim ownership of a chain a real feed supplies. */
+const FIXTURE_SOURCE_ID = "il-fixture";
+
 export async function upsertChain(input: UpsertChainInput, client?: PoolClient) {
   const q = client ?? getPool();
+  // source_id ownership: a real source always takes over a fixture-owned row
+  // (Shufersal and Rami Levy were both stuck on 'il-fixture', which broke
+  // per-source health and reapStaleRuns' `WHERE source_id = $1` filter), but a
+  // fixture run must never downgrade a chain a real adapter owns.
   await q.query(
     `INSERT INTO chain (id, source_id, market, name_he, name_en, currency)
      VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT (id) DO UPDATE SET
-       source_id = EXCLUDED.source_id,
+       source_id = CASE
+         WHEN EXCLUDED.source_id = '${FIXTURE_SOURCE_ID}'
+              AND chain.source_id <> '${FIXTURE_SOURCE_ID}' THEN chain.source_id
+         ELSE EXCLUDED.source_id
+       END,
        name_he = EXCLUDED.name_he,
        name_en = COALESCE(EXCLUDED.name_en, chain.name_en),
        updated_at = now()`,
@@ -41,11 +52,16 @@ export interface UpsertStoreInput {
   zip?: string;
   lat?: number;
   lng?: number;
+  /** branch | online | pickup | warehouse — see classifyStoreKind in shared. */
+  storeKind?: StoreKind;
 }
 
 export async function upsertStore(input: UpsertStoreInput, client?: PoolClient): Promise<string> {
   const q = client ?? getPool();
   const geo = normalizeStoreCoordinates(input.lat, input.lng);
+  // Derived here rather than trusted from the caller so no ingestion path can
+  // forget it and leave an online storefront ranked as a shoppable branch.
+  const storeKind = input.storeKind ?? classifyStoreKind(input.name, input.address);
   // Price/promo files may stub a branch before (or after) Stores XML lands.
   // Never let a "Store NNN" placeholder clobber a real branch name, and never
   // let a reingest erase or downgrade a hard-won geocoded point: coordinates are
@@ -53,12 +69,20 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
   // untouched except to (a) mark real feed coords 'feed' or (b) reset to NULL so
   // the address geocoder re-runs when a branch's street address actually changes.
   const res = await q.query<{ id: string }>(
-    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng, geo_source)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng, geo_source, store_kind)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (chain_id, store_code) DO UPDATE SET
        name = CASE
          WHEN EXCLUDED.name ~ '^Store[[:space:]]' THEN store.name
          ELSE EXCLUDED.name
+       END,
+       -- Positive evidence (a non-branch kind) always wins. A "Store NNN"
+       -- placeholder stubbed from a price file classifies as 'branch' and must
+       -- never downgrade a storefront already identified from the Stores XML.
+       store_kind = CASE
+         WHEN EXCLUDED.store_kind <> 'branch' THEN EXCLUDED.store_kind
+         WHEN EXCLUDED.name ~ '^Store[[:space:]]' THEN store.store_kind
+         ELSE EXCLUDED.store_kind
        END,
        address = COALESCE(EXCLUDED.address, store.address),
        city = COALESCE(EXCLUDED.city, store.city),
@@ -89,6 +113,7 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
       geo?.lat ?? null,
       geo?.lng ?? null,
       geo ? "feed" : null,
+      storeKind,
     ],
   );
   return res.rows[0]!.id;

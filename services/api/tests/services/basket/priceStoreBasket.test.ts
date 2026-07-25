@@ -961,3 +961,158 @@ describe("priceStoreBasket", () => {
     });
   });
 });
+
+/** Minimal single-candidate line for the pricing-metadata assertions below. */
+function simpleItem(over: Partial<ResolvedItem> = {}): ResolvedItem {
+  return {
+    index: 0,
+    qty: 1,
+    qtyMode: "packs",
+    amount: null,
+    unit: null,
+    productId: "p",
+    name: "Product",
+    resolvedBy: "query",
+    resolutionStatus: "resolved",
+    confidence: 1,
+    lowConfidence: false,
+    candidates: [
+      {
+        productId: "p",
+        name: "Product",
+        score: 1,
+        matchedVia: "product",
+        sizeQty: 200,
+        sizeUnit: "g",
+        pieceCount: null,
+        hasPrice: true,
+        hasLocalPrice: true,
+        productClass: null,
+      },
+    ],
+    primaryProductId: "p",
+    primaryName: "Product",
+    substitution: null,
+    ...over,
+  };
+}
+
+const LISTINGS = new Map([
+  [
+    "chain",
+    new Map<string, ListingRow[]>([
+      [
+        "p",
+        [
+          {
+            id: "L",
+            product_id: "p",
+            chain_id: "chain",
+            item_code: "code",
+            name: "Product",
+            gtin: null,
+          },
+        ],
+      ],
+    ]),
+  ],
+]);
+
+const PRICES = new Map<string, StorePriceRow>([
+  [
+    "L:store",
+    {
+      listing_id: "L",
+      store_id: "store",
+      price: "10",
+      currency: "ILS",
+      source_ts: "2026-07-18T00:00:00Z",
+      ingested_at: "2026-07-18T00:00:00Z",
+    },
+  ],
+]);
+
+describe("priceStoreBasket pricing metadata", () => {
+  it("flags a loyalty-club price so the shopper knows a card is required", () => {
+    const promoMap = new Map([
+      [
+        "L",
+        [
+          {
+            listingId: "L",
+            storeId: "store",
+            chainId: "chain",
+            promoCode: "CLUB1",
+            description: "מבצע מועדון",
+            clubOnly: true,
+            mechanic: { type: "simple_discount" as const, params: { discountedPrice: 7 } },
+          },
+        ],
+      ],
+    ]);
+    const result = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, promoMap);
+    expect(result?.lines[0]).toMatchObject({
+      lineTotal: 7,
+      promoApplied: true,
+      clubOnly: true,
+    });
+  });
+
+  it("leaves clubOnly false for an everyday promo anyone can get", () => {
+    const promoMap = new Map([
+      [
+        "L",
+        [
+          {
+            listingId: "L",
+            storeId: "store",
+            chainId: "chain",
+            promoCode: "OPEN1",
+            description: "מבצע",
+            clubOnly: false,
+            mechanic: { type: "simple_discount" as const, params: { discountedPrice: 8 } },
+          },
+        ],
+      ],
+    ]);
+    const result = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, promoMap);
+    expect(result?.lines[0]).toMatchObject({ promoApplied: true, clubOnly: false });
+  });
+
+  it("exposes the pack size and a normalized unit price for cross-store comparison", () => {
+    const result = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, new Map());
+    // ₪10 for 200g = ₪5 per 100g.
+    expect(result?.lines[0]).toMatchObject({
+      sizeQty: 200,
+      sizeUnit: "g",
+      normalizedUnitPrice: 5,
+      normalizedUnitBasis: "per_100g",
+      clubOnly: false,
+    });
+  });
+
+  it("labels distance accuracy from the store's coordinate provenance", () => {
+    const branch = priceStoreBasket(
+      { ...STORE, geoSource: "address", distanceKm: 2.5 },
+      [simpleItem()],
+      LISTINGS,
+      PRICES,
+      new Map(),
+    );
+    expect(branch).toMatchObject({ distanceKm: 2.5, distanceAccuracy: "branch" });
+
+    // A centroid keeps its distance but is labelled coarse rather than nulled —
+    // nulling it used to make whole chains unrankable.
+    const centroid = priceStoreBasket(
+      { ...STORE, geoSource: "city_centroid", distanceKm: 4 },
+      [simpleItem()],
+      LISTINGS,
+      PRICES,
+      new Map(),
+    );
+    expect(centroid).toMatchObject({ distanceKm: 4, distanceAccuracy: "city" });
+
+    const none = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, new Map());
+    expect(none).toMatchObject({ distanceKm: null, distanceAccuracy: "unknown" });
+  });
+});

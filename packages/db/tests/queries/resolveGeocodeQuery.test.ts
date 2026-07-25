@@ -12,7 +12,10 @@ import {
   _resetNominatimStateForTests,
   precisionFromNominatim,
 } from "../../src/queries/nominatim.js";
-import { resolveGeocodeQuery } from "../../src/queries/resolveGeocodeQuery.js";
+import {
+  _resetGeocodeWarmupsForTests,
+  resolveGeocodeQuery,
+} from "../../src/queries/resolveGeocodeQuery.js";
 
 const SECRET = "test-only-geocoding-cache-secret-32b!";
 
@@ -67,16 +70,22 @@ describe("resolveGeocodeQuery", () => {
     process.env.NOMINATIM_MIN_INTERVAL_MS = "1000";
     query.mockReset();
     _resetNominatimStateForTests();
+    // A test that leaves a warm-up hanging would otherwise consume the single
+    // background slot and silently disable warm-up in the next test.
+    _resetGeocodeWarmupsForTests();
     vi.stubGlobal("fetch", vi.fn());
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     _resetNominatimStateForTests();
+    _resetGeocodeWarmupsForTests();
   });
 
-  it("fast strategy returns embedded-city centroid without calling Nominatim", async () => {
+  it("fast strategy answers from the city centroid without awaiting Nominatim", async () => {
     query.mockResolvedValueOnce({ rows: [] }); // cache miss
+    // Never settles: proves the answer does not depend on the geocoder replying.
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<never>(() => {}));
 
     const result = await resolveGeocodeQuery({
       location: "רחוב בן גוריון, תל אביב",
@@ -94,10 +103,48 @@ describe("resolveGeocodeQuery", () => {
     expect(result.warning).toBe(
       "Using city-level location for a faster estimate; distances are approximate.",
     );
-    expect(fetch).not.toHaveBeenCalled();
-    // Fast city-centroid must not be persisted as a positive geocode hit.
+    // Fast city-centroid must not be persisted as a positive geocode hit; the
+    // detached warm-up only writes once Nominatim answers, which it never does here.
     expect(query.mock.calls.length).toBe(1);
     expect(String(query.mock.calls[0]![0])).toMatch(/SELECT/i);
+  });
+
+  it("fast strategy warms the cache in the background so the next call is precise", async () => {
+    query.mockResolvedValueOnce({ rows: [] }); // cache miss
+    let releaseFetch: (() => void) | null = null;
+    const fetchGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    vi.mocked(fetch).mockImplementationOnce(async () => {
+      await fetchGate;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => [
+          {
+            lat: "32.0853",
+            lon: "34.7818",
+            display_name: "בן גוריון, תל אביב-יפו",
+            place_rank: 26,
+          },
+        ],
+      } as unknown as Response;
+    });
+
+    const result = await resolveGeocodeQuery({
+      location: "רחוב בן גוריון, תל אביב",
+      strategy: "fast",
+    });
+    // Answered from the centroid while the geocoder is still in flight.
+    expect(result.provider).toBe("city_centroid");
+
+    releaseFetch!();
+    // Let the detached warm-up run to completion.
+    await vi.waitFor(() => {
+      const wrote = query.mock.calls.some((call) => /INSERT INTO geocode_cache/i.test(String(call[0])));
+      expect(wrote).toBe(true);
+    });
   });
 
   it("returns a cache hit without calling Nominatim", async () => {
@@ -195,7 +242,10 @@ describe("resolveGeocodeQuery", () => {
       () => Promise.reject(new Error("timeout")) as never,
     );
 
-    const result = await resolveGeocodeQuery({ location: "נווה עמל בלי עיר" });
+    // Must carry no recognizable locality OR neighborhood: "נווה עמל" used to
+    // qualify, but the neighborhood layer now resolves it to הרצליה, which is a
+    // legitimate city fallback and would make this an "ok" result.
+    const result = await resolveGeocodeQuery({ location: "רחוב ללא שם 999" });
     expect(result.status).toBe("unavailable");
     expect(result.point).toBeNull();
   });

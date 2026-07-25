@@ -18,6 +18,13 @@ export function classifyStatus(result: PipelineResult): PipelineResult["status"]
   // A file we discovered but failed to process is lost data; never report success.
   if (result.filesProcessed < result.filesDiscovered) return "degraded";
 
+  // A configured chain that yielded no files (or no rows) is missing coverage,
+  // even when the other chains supplied plenty. HaziHinam authenticates and
+  // publishes nothing, which used to pass as 'success'.
+  if (result.chainsWithNoFiles.length > 0 || result.chainsWithNoRows.length > 0) {
+    return "degraded";
+  }
+
   const errorRatio = result.rowsError / (result.rowsOk + result.rowsError || 1);
   if (errorRatio > DEGRADED_ERROR_RATIO) return "degraded";
   return "success";

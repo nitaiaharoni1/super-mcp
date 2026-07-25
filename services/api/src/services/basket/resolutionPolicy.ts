@@ -2,12 +2,14 @@ import {
   buildQueryProfile,
   normalizeEmbedInput,
   parseExplicitPackConstraints,
+  queryTokensSatisfied,
   resolvePurchaseQty,
   tokenizeNormalized,
   type OntologySnapshot,
   type QueryProfile,
 } from "@super-mcp/shared";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
+import { preferDirectForm } from "./derivedForm.js";
 import { queryHeadAnchored } from "./equivalence.js";
 import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
@@ -177,6 +179,7 @@ function selectOutcome(
   item: ResolvedItem,
   input: BasketItemInput,
   chosen: BasketCandidate,
+  reasonOverride?: BasketAssumption["reason"],
 ): FastResolutionOutcome {
   const purchase = resolvePurchaseQty({
     packQty: input.packQty,
@@ -200,7 +203,7 @@ function selectOutcome(
     query: query || null,
     selectedProductId: chosen.productId,
     selectedName: chosen.name,
-    reason: assumptionReasonFor(query),
+    reason: reasonOverride ?? assumptionReasonFor(query),
     message: assumptionMessage(query || chosen.name, chosen.name),
   };
 
@@ -245,7 +248,93 @@ function filterPool(
   const anchored = withoutUnsafeStaples.filter(
     (c) => !query || queryHeadAnchored(query, c.name),
   );
-  return anchored.length > 0 ? anchored : withoutUnsafeStaples;
+  const headAnchored = anchored.length > 0 ? anchored : withoutUnsafeStaples;
+
+  // Derived products (rice paper for rice, bread crumbs for bread) are already
+  // hard-rejected by isStapleIncompatible. This is the graceful layer for the
+  // reverse case: if a query's ONLY matches are derived forms, rank them last
+  // rather than dropping the line entirely.
+  return preferDirectForm(query, headAnchored);
+}
+
+/**
+ * How much better-carried a peer must be before it displaces the name-score
+ * winner on a basket line.
+ *
+ * Resolution ranks on name-match score, and score is a float that essentially
+ * never ties, so the store-coverage tiebreaker in `rankSafeCandidatesForFast`
+ * could never fire. On the live catalog that produced answers nobody would pick:
+ * `חלב 3%` resolved to a milk in 1 of 159 nearby stores while an equally valid
+ * one sat in 73; `לחם אחיד` took a 7-store SKU over a 41-store SKU with the SAME
+ * NAME (the catalog holds 7,373 duplicate-name product rows, fragmenting
+ * availability); `ביצים L` landed on a SKU carried by ZERO nearby stores while
+ * `ביצים L רגילות 12 יח` sits in 102.
+ *
+ * A 3x ratio is the "not marginal" line: it separates those cases from ordinary
+ * jitter between two widely-stocked SKUs (700 vs 780 stores), where the better
+ * name match should still win. The absolute floor stops a 2-store SKU from
+ * displacing a 1-store SKU on a technicality when nothing is really available.
+ */
+const AVAILABILITY_UPGRADE_MIN_RATIO = 3;
+const AVAILABILITY_UPGRADE_MIN_STORES = 3;
+
+function nearbyCoverage(
+  candidate: BasketCandidate,
+  availability: Map<string, CandidateAvailability>,
+): number {
+  return availability.get(candidate.productId)?.pricedStoreCount ?? 0;
+}
+
+/**
+ * A peer carried by materially more nearby stores than the resolved primary.
+ *
+ * Specificity is enforced with `queryTokensSatisfied` rather than the ontology's
+ * `brand` attribute, because the ontology does not know most catalog brands —
+ * `חמאה לה גאל` extracts NO attributes at all, so an attribute-based test would
+ * happily swap Le Gall for whichever butter is most widely stocked. Requiring
+ * every query token to appear in the peer's name pins the shopper's own words:
+ * a bare `חמאה` line may move to any butter, `חמאה לה גאל` only ever to another
+ * Le Gall, and `קוקה קולה 1.5 ליטר` only to another 1.5L Coke.
+ *
+ * The pool is already safety-filtered (class, pack, percentage, derived-form,
+ * staple traps) by `filterPool`, so anything reaching here is a legitimate
+ * answer to the line — the choice among them is purely which one shoppers can
+ * actually buy nearby.
+ */
+function betterCoveredPeer(
+  primary: BasketCandidate | null,
+  pool: BasketCandidate[],
+  availability: Map<string, CandidateAvailability>,
+  queryText: string,
+): BasketCandidate | null {
+  const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
+  if (queryTokens.length === 0) return null;
+
+  const specific = pool.filter((c) => queryTokensSatisfied(queryTokens, c.name));
+  if (specific.length === 0) return null;
+
+  const primaryCoverage = primary ? nearbyCoverage(primary, availability) : 0;
+  const threshold = Math.max(
+    AVAILABILITY_UPGRADE_MIN_STORES,
+    primaryCoverage * AVAILABILITY_UPGRADE_MIN_RATIO,
+  );
+
+  let best: { candidate: BasketCandidate; coverage: number } | null = null;
+  for (const candidate of specific) {
+    if (primary && candidate.productId === primary.productId) continue;
+    const coverage = nearbyCoverage(candidate, availability);
+    if (coverage < threshold) continue;
+    // Among qualifying peers take the widest coverage, then the better name
+    // score, so the swap is deterministic.
+    if (
+      !best ||
+      coverage > best.coverage ||
+      (coverage === best.coverage && candidate.score > best.candidate.score)
+    ) {
+      best = { candidate, coverage };
+    }
+  }
+  return best?.candidate ?? null;
 }
 
 /** True when an already-resolved primary fails hard staple/safety filters. */
@@ -282,6 +371,35 @@ function lockedPrimaryIsUnsafe(
   );
 }
 
+/**
+ * Move an already-resolved line onto a materially better-stocked peer, or return
+ * null to leave it alone.
+ *
+ * Never fires for a line the shopper pinned by `product_id` / `gtin`: those carry
+ * `resolvedBy` of "product_id"/"gtin" and are an exact instruction, not a guess.
+ */
+function upgradeResolvedLine(
+  item: ResolvedItem,
+  input: BasketItemInput,
+  query: string,
+  profile: QueryProfile,
+  availability: Map<string, CandidateAvailability>,
+): FastResolutionOutcome | null {
+  if (item.resolvedBy !== "query") return null;
+  if (!query) return null;
+
+  const pool = restrictToDominantClass(filterPool(item, query, profile));
+  if (pool.length === 0) return null;
+
+  const primary = item.candidates.find((c) => c.productId === item.productId) ?? null;
+  const peer = betterCoveredPeer(primary, pool, availability, query);
+  if (!peer) return null;
+
+  // Route through selectOutcome so purchase qty is recomputed against the new
+  // pack size and the swap is reported as an assumption rather than silently.
+  return selectOutcome(item, input, peer, "availability_upgrade");
+}
+
 function resolveFastOutcome(
   item: ResolvedItem,
   input: BasketItemInput,
@@ -294,6 +412,12 @@ function resolveFastOutcome(
   // Even a "resolved" primary can be an organ/specialty/personal-care trap that
   // slipped through commodity auto-resolve. Re-run the safe pool instead.
   if (isSafelyPricable(item) && !lockedPrimaryIsUnsafe(item, query, profile)) {
+    // A line resolved on name score alone can still be a SKU almost nobody
+    // nearby stocks. Availability used to be consulted ONLY for lines arriving
+    // unresolved, so these were never checked — the largest single source of
+    // "cheapest store" answers built on products the shopper cannot buy.
+    const upgraded = upgradeResolvedLine(item, input, query, profile, availability);
+    if (upgraded) return upgraded;
     return { kind: "selected", item, assumption: null };
   }
 
@@ -317,7 +441,11 @@ function resolveFastOutcome(
     preferPlainMilk: tokens.length === 1 && tokens[0] === "חלב",
     preferFreshChicken: tokens.includes("עוף"),
   });
-  const chosen = ranked[0]!;
+  // Same availability upgrade the resolved path gets: `rankSafeCandidatesForFast`
+  // treats local stock as a boolean (≥1 store) and only reaches its coverage
+  // tiebreaker after `score`, which never ties, so a 1-store SKU still wins there.
+  const topRanked = ranked[0]!;
+  const chosen = betterCoveredPeer(topRanked, ranked, availability, query) ?? topRanked;
 
   if (!isEligibleForFastBestEffortCandidate(chosen, availability)) {
     return omitOutcome(item, input);

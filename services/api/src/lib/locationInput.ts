@@ -49,9 +49,23 @@ export type GeocodeTelemetryStrategy =
   | "none";
 
 export interface ResolvedLocationInput {
+  /**
+   * City to use as a HARD store filter. Only ever set when the caller explicitly
+   * passed one — a city merely inferred from free text is a geocoding hint, not a
+   * filter (see `derivedCity`).
+   */
   city?: string;
   near?: GeoPoint;
   radiusKm?: number;
+  /**
+   * City inferred from the free-text `location` (e.g. "הרצליה" out of
+   * "רחוב הבנים, הרצליה"). Used to qualify geocoding and as a last-resort scope
+   * when no point could be resolved. Deliberately NOT applied as a store filter:
+   * doing so restricted every address-based basket to same-city stores and hid
+   * branches 3km away across a municipal border, which in Gush Dan is most of
+   * the cheap competition.
+   */
+  derivedCity?: string;
   locationOrigin?: LocationOriginMeta;
   /** Wall time spent in this resolve call (geocode / parse); 0 when city-only. */
   geocodeMs: number;
@@ -193,7 +207,9 @@ export async function resolveLocationInput(
     const provider: LocationOriginProvider =
       result.provider === "city_centroid" ? "city_centroid" : "nominatim";
     return {
-      city: derivedCity,
+      // Explicit city stays a filter; an inferred one does not (see derivedCity).
+      city: explicitCity,
+      derivedCity,
       near: result.point,
       radiusKm: resolveRadiusKm(result.point, input.radiusKm),
       locationOrigin: {
@@ -219,8 +235,15 @@ export async function resolveLocationInput(
 }
 
 /**
- * Merge user-origin provenance into store-scope metadata and suppress distance
- * ranking when the origin is only city-level (even if branches have exact coords).
+ * Merge user-origin provenance into store-scope metadata.
+ *
+ * A city-level origin makes distances COARSE, not meaningless: measuring from the
+ * city centroid instead of the doorstep shifts every store by a few km but keeps
+ * their order, so the nearest branch to the centroid is still a good answer.
+ * This used to set `distanceReliable = false`, which made eligibility fall back
+ * to city-name matching and cut a 131-store radius comparison down to 16
+ * same-city stores — the single biggest source of missed savings. Now it only
+ * marks the figures approximate and records the reduced precision.
  */
 export function applyLocationOriginHonesty(
   location: StoreLocationMetadata,
@@ -233,7 +256,7 @@ export function applyLocationOriginHonesty(
     ...location,
     warning,
     fallbackApplied: location.fallbackApplied || origin.fallbackApplied,
-    distanceReliable: cityOrigin ? false : location.distanceReliable,
+    distanceApproximate: location.distanceApproximate || cityOrigin,
     precision: cityOrigin ? "city" : location.precision,
     origin: {
       precision: origin.precision,

@@ -112,3 +112,87 @@ describe("buildMultiStorePlan (bounded set-cover)", () => {
     expect(JSON.stringify(build())).toBe(JSON.stringify(build()));
   });
 });
+
+/** Store with a distance, for the travel-aware assertions below. */
+function storeAt(
+  id: string,
+  prices: Record<number, number>,
+  distanceKm: number,
+): BasketStoreResult {
+  return {
+    ...store(id, prices),
+    distanceKm,
+    distanceAccuracy: "branch",
+    storeKind: "branch",
+  } as unknown as BasketStoreResult;
+}
+
+describe("buildMultiStorePlan travel awareness", () => {
+  const items = [resolved(0, "p0"), resolved(1, "p1")];
+
+  it("refuses an extra stop whose savings do not cover the drive", () => {
+    // B saves ₪25 on item 1 — over the flat ₪20 floor, so it used to be added
+    // unconditionally. At 9km that is a 18km round trip costing ₪54 at 3₪/km.
+    const stores = [storeAt("A", { 0: 10, 1: 100 }, 0.5), storeAt("B", { 0: 300, 1: 75 }, 9)];
+    const plan = buildMultiStorePlan(items, stores, {
+      distancePenaltyPerKm: 3,
+      distanceReliable: true,
+    });
+    expect(plan?.storeCount).toBe(1);
+    expect(plan?.lines.every((l) => l.storeId === "A")).toBe(true);
+  });
+
+  it("still adds a nearby stop when the saving is worth the short drive", () => {
+    const stores = [storeAt("A", { 0: 10, 1: 100 }, 0.5), storeAt("B", { 0: 300, 1: 75 }, 0.6)];
+    const plan = buildMultiStorePlan(items, stores, {
+      distancePenaltyPerKm: 3,
+      distanceReliable: true,
+    });
+    expect(plan?.storeCount).toBe(2);
+  });
+
+  it("ignores travel entirely when distance cannot order the stores", () => {
+    const stores = [storeAt("A", { 0: 10, 1: 100 }, 0.5), storeAt("B", { 0: 300, 1: 75 }, 9)];
+    const plan = buildMultiStorePlan(items, stores, {
+      distancePenaltyPerKm: 3,
+      distanceReliable: false,
+    });
+    expect(plan?.storeCount).toBe(2);
+  });
+
+  it("reports every stop with its distance, subtotal and the round-trip estimate", () => {
+    const stores = [storeAt("A", { 0: 10, 1: 100 }, 2), storeAt("B", { 0: 300, 1: 40 }, 1)];
+    const plan = buildMultiStorePlan(items, stores, {
+      distancePenaltyPerKm: 3,
+      distanceReliable: true,
+    });
+    expect(plan?.storeCount).toBe(2);
+    // Nearest stop first.
+    expect(plan?.stops.map((s) => s.storeId)).toEqual(["B", "A"]);
+    expect(plan?.stops.find((s) => s.storeId === "A")).toMatchObject({
+      distanceKm: 2,
+      subtotal: 10,
+      lines: 1,
+    });
+    expect(plan?.stops.find((s) => s.storeId === "B")).toMatchObject({
+      distanceKm: 1,
+      subtotal: 40,
+      lines: 1,
+    });
+    expect(plan?.maxDistanceKm).toBe(2);
+    // Hub-and-spoke upper bound: 2 x (2 + 1).
+    expect(plan?.estimatedTravelKm).toBe(6);
+  });
+
+  it("leaves the travel estimate null when a stop has no usable distance", () => {
+    const stores = [
+      storeAt("A", { 0: 10, 1: 100 }, 2),
+      { ...storeAt("B", { 0: 300, 1: 40 }, 1), distanceKm: null } as unknown as BasketStoreResult,
+    ];
+    const plan = buildMultiStorePlan(items, stores, {
+      distancePenaltyPerKm: 0,
+      distanceReliable: true,
+    });
+    expect(plan?.estimatedTravelKm).toBeNull();
+  });
+});

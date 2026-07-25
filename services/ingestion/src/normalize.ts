@@ -1,6 +1,6 @@
 import {
   canonicalItemCode,
-  canonicalizeCity,
+  classifyStoreKind,
   computeUnitPrice,
   inferPackSizeFromName,
   isGtinItem,
@@ -8,6 +8,7 @@ import {
   normalizeGtin,
   normalizeMeasure,
   reconcileMeasureFamilyWithName,
+  resolveStoreCity,
   scrubJson,
   scrubNullChars,
   scrubOptionalText,
@@ -149,6 +150,14 @@ export interface NormalizeStats {
   promoOther: number;
   unitUnparseable: number;
   regionFiltered: number;
+  /**
+   * Price rows written per store UUID in this file. Delisting reconciliation
+   * needs both the store identity and a plausibility count, and only the
+   * normalizer knows the store_code → UUID mapping.
+   */
+  pricesByStore: Map<string, number>;
+  /** Stores whose city had to be recovered from the branch name (telemetry). */
+  storeCityFromName: number;
 }
 
 /** A fully-normalized price row awaiting a batched write. */
@@ -198,6 +207,11 @@ export class Normalizer {
     this.sourceId = sourceId;
   }
 
+  /** Count an actually-written price row against its store (reconcile input). */
+  private notePriceWritten(stats: NormalizeStats, storeUuid: string): void {
+    stats.pricesByStore.set(storeUuid, (stats.pricesByStore.get(storeUuid) ?? 0) + 1);
+  }
+
   private noteMiss(kind: MatchMiss["kind"], term: string, context?: Record<string, unknown>): void {
     const key = `${kind} ${term}`;
     const existing = this.misses.get(key);
@@ -213,6 +227,8 @@ export class Normalizer {
       promoOther: 0,
       unitUnparseable: 0,
       regionFiltered: 0,
+      pricesByStore: new Map(),
+      storeCityFromName: 0,
     };
     for await (const record of records as AsyncIterable<RawRecord>) {
       try {
@@ -316,8 +332,9 @@ export class Normalizer {
         if (!listingId) continue;
         priceByKey.set(`${listingId} ${r.storeUuid}`, { row: r, listingId });
       }
+      const written = [...priceByKey.values()];
       await bulkUpsertStorePrices(
-        [...priceByKey.values()].map(({ row, listingId }) => ({
+        written.map(({ row, listingId }) => ({
           listingId,
           storeId: row.storeUuid,
           price: row.price,
@@ -327,6 +344,7 @@ export class Normalizer {
           sourceTs: row.sourceTs,
         })),
       );
+      for (const { row } of written) this.notePriceWritten(stats, row.storeUuid);
 
       stats.rowsOk += batch.length;
     } catch (err) {
@@ -390,6 +408,7 @@ export class Normalizer {
           allowDiscount: r.allowDiscount,
           sourceTs: r.sourceTs,
         });
+        this.notePriceWritten(stats, r.storeUuid);
         stats.rowsOk++;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -421,7 +440,15 @@ export class Normalizer {
       case "store": {
         const storeCode = normalizeStoreCode(record.storeId);
         const name = scrubOptionalText(record.name) ?? `Store ${storeCode}`;
-        const city = canonicalizeCity(scrubOptionalText(record.city));
+        const address = scrubOptionalText(record.address);
+        // Yohananof, Keshet Taamim and Salach Dabach publish an empty <City> but
+        // put the locality in <StoreName> ("חולון המרכבה", "ירושלים תלפיות").
+        // Recovering it here is what lets those branches be geocoded at all —
+        // both geocode tiers key on store.city — and keeps the city we store
+        // consistent with the city the region filter judged.
+        const feedCity = scrubOptionalText(record.city);
+        const city = resolveStoreCity(feedCity, name);
+        if (city && !feedCity) stats.storeCityFromName++;
         if (
           regionFilterEnabled() &&
           !isStoreInIngestRegion({
@@ -434,9 +461,12 @@ export class Normalizer {
         ) {
           stats.regionFiltered++;
           // Key on the city alone: an unmatched city is the actionable alias
-          // signal. A store with no city was dropped on geo/name grounds, not a
-          // city-alias gap, so it counts but isn't proposed. Keying on the store
-          // name would spam match_miss with a unique row per branch.
+          // signal — and `city` is now the resolved locality, so a city-less
+          // feed whose branch name names a real town lands here too (that IS a
+          // coverage decision worth reviewing). Only a store with no
+          // recoverable locality at all is dropped without a proposal, since
+          // keying on the raw branch name would spam match_miss with a unique
+          // row per branch.
           const c = city?.trim();
           if (c) this.noteMiss("region_unmatched", c, { chainId: cleanChainId });
           return true; // Stores XML is nationwide; only keep coverage cities
@@ -445,11 +475,12 @@ export class Normalizer {
           chainId: scrubNullChars(record.chainId),
           storeCode,
           name,
-          address: scrubOptionalText(record.address),
+          address,
           city,
           zip: scrubOptionalText(record.zip),
           lat: record.geo?.lat,
           lng: record.geo?.lng,
+          storeKind: classifyStoreKind(name, address),
         });
         this.storeIds.set(`${record.chainId}:${storeCode}`, id);
         return true;

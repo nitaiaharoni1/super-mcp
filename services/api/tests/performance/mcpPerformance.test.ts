@@ -11,7 +11,7 @@
  *
  * Opt out: SUPER_MCP_SKIP_LIVE=1
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   BBQ_ITEMS,
   DEFAULT_NEVE_AMAL_STORE_ID,
@@ -40,6 +40,15 @@ import {
   type LiveCatalogStats,
 } from "../integration/helpers/liveEnv.js";
 import { createMcpHarness, type McpHarness } from "../integration/helpers/mcpHarness.js";
+/**
+ * Live-DB suites are seconds per case, and vitest runs test FILES in parallel, so
+ * several of them contend for the same connection pool and CPU. Against the 5s
+ * default that is a coin flip: observed failures in the full-suite run that pass
+ * every time in isolation. The 30s budget is what individual cases in these files
+ * already asked for; applying it file-wide covers the rest.
+ */
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 import {
   logPerf,
   measure,

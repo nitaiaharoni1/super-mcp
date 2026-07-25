@@ -10,6 +10,17 @@ export interface PipelineResult {
   promoOtherRows: number;
   unitUnparseableRows: number;
   regionFilteredStores: number;
+  /** Stores whose city was recovered from the branch name (feed <City> empty). */
+  storeCityFromName: number;
+  /** store_price rows deleted because a full snapshot no longer listed them. */
+  pricesReconciled: number;
+  /**
+   * Configured chains that produced no files at all this run. A chain we tried
+   * and got nothing from is lost coverage, never a success.
+   */
+  chainsWithNoFiles: string[];
+  /** Chains that yielded files but zero usable rows. */
+  chainsWithNoRows: string[];
   errorSummary?: string;
 }
 

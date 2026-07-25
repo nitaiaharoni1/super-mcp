@@ -19,15 +19,20 @@ export function buildMcpServerInstructions(
     "Accept the default fast best-effort choices unless the user explicitly requests " +
     "exact products; then set resolution_mode=strict. " +
     "Never search or compare each basket line separately. " +
-    "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness " +
-    "(source_ts/ingested_at) — treat prices older than ~48h as possibly stale. " +
+    "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness: " +
+    "ingested_at is when the feed last showed us the item (the staleness signal), source_ts is when " +
+    "the chain last CHANGED that price — an old source_ts is normal for a stable price, not stale data. " +
     "Call optimize_basket with items[{query|gtin|product_id, pack_qty|amount+unit}] " +
     "and city (Hebrew/English), near=lat,lng, or location (free-text neighborhood/address, e.g. " +
     "'נווה עמל, הרצליה'). Prefer location for neighborhoods; near remains coordinates. Do not combine " +
     "near with location. If status is needs_confirmation, answer every required question and call again " +
     "with only {continuation, answers}. If status is complete, use bestSingleStore / cheapestCompleteStore " +
-    "/ multiStore. Plan totals sum priced lines only — check totalScope; priced_lines_only is not the " +
-    "full basket total. Use search_products / resolve_products only for unresolved or missing lines. " +
+    "/ closestStore / multiStore. Compare stores on comparableTotal (same-basket figure that adds a " +
+    "market reference price for lines a store does not stock); raw total covers priced lines only, so " +
+    "check totalScope. Set preference=cheapest when the shopper says distance does not matter, " +
+    "preference=closest when they say price is not a big factor, else leave it balanced. " +
+    "Lines flagged clubOnly need the chain loyalty card; plans report clubOnlyLines. " +
+    "Use search_products / resolve_products only for unresolved or missing lines. " +
     "Use pack_qty alone for pack counts (3 milk cartons: pack_qty=3). " +
     "Use amount+unit for natural counts and weighed goods " +
     "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). " +

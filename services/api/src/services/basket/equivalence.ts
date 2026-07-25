@@ -1,5 +1,7 @@
 import {
   compareClassPaths,
+  inferPackSizeFromName,
+  isCountUnit,
   normalizeEmbedInput,
   packSizesCompatible,
   queryTokensSatisfied,
@@ -8,7 +10,9 @@ import {
 } from "@super-mcp/shared";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
+import { hasUnrequestedDerivedForm } from "./derivedForm.js";
 import { rejectUnsafePlainMilkName } from "./milkSafety.js";
+import { percentConflict, rejectPercentMismatch } from "./percentAttribute.js";
 import { resolveCoverageClassScope, scopedClassesConflict } from "./coverageScope.js";
 import type { BasketCandidate } from "./types.js";
 
@@ -136,12 +140,34 @@ function allowCountToWeight(
   return false;
 }
 
+/**
+ * Default pack tolerance for treating two SKUs as ONE basket line.
+ *
+ * Was 0.5 (±50%), which is far too loose for a price comparison: line totals are
+ * pack prices, never size-normalized, so a 50% window lets the SMALLER pack win
+ * on every line. It grouped `חמאה איטלקית 100 גרם` with `חמאה נורמנדי 125 גרם`
+ * (₪119/kg vs ₪97/kg compared as equals) and would pair a 1L oil with 1.5L.
+ *
+ * 0.15 keeps genuine same-size variation interchangeable (700ml↔750ml = 6.7%,
+ * 240g↔250g = 4%) while blocking the 20–50% jumps that flip a cheapest-store
+ * verdict: 100g↔125g is 25%, 200g↔300g is 50%, 1L↔1.5L is 50%.
+ *
+ * Tolerance is measured against the FIRST argument (`|b - a| / a`), i.e. the
+ * primary, so the window is anchored on the SKU the shopper's query resolved to.
+ */
+export const DEFAULT_PACK_TOLERANCE = 0.15;
+
 function packsCompatible(
   a: BasketCandidate,
   b: BasketCandidate,
   queryText: string,
   packTolerance: number,
 ): boolean {
+  // Count-sold goods first: `packSizesCompatible` skips tolerance whenever a side
+  // is a "1 unit" stub, and 98.5% of the catalog has no piece_count, so eggs and
+  // toilet paper reach it as 1-unit stubs and every pack size looks compatible.
+  // That is how a 6-pack of eggs was priced for a 12-pack request.
+  if (pieceCountsConflict(a, b)) return false;
   return packSizesCompatible(
     { sizeQty: a.sizeQty, sizeUnit: a.sizeUnit, name: a.name },
     { sizeQty: b.sizeQty, sizeUnit: b.sizeUnit, name: b.name },
@@ -150,6 +176,50 @@ function packsCompatible(
       allowCountToWeight: allowCountToWeight(a, b, queryText),
     },
   ).compatible;
+}
+
+/**
+ * Units per pack, from the explicit field when present and the name otherwise.
+ * `inferPackSizeFromName` covers `מארז N` / `N יחידות` / `N יח`; the local
+ * patterns add the count idioms it misses — `תבנית 12`, a leading `6 ביצים`, and
+ * roll counts (`32 גלילים`, and the glued `פסטל32גל` the feeds emit).
+ */
+export function packUnitCount(candidate: {
+  pieceCount?: number | null;
+  sizeQty?: number | null;
+  sizeUnit?: string | null;
+  name: string;
+}): number | null {
+  if (candidate.pieceCount != null && Number.isFinite(candidate.pieceCount)) {
+    return Math.round(candidate.pieceCount);
+  }
+  // A real (non-stub) unit size doubles as the pack count.
+  if (
+    candidate.sizeUnit === "unit" &&
+    candidate.sizeQty != null &&
+    Number.isFinite(candidate.sizeQty) &&
+    candidate.sizeQty > 1
+  ) {
+    return Math.round(candidate.sizeQty);
+  }
+  const fromName = inferPieceCountFromName(candidate.name);
+  if (fromName != null) return fromName;
+  const inferred = inferPackSizeFromName(candidate.name);
+  if (inferred && inferred.unit === "unit" && inferred.quantity > 1) {
+    return Math.round(inferred.quantity);
+  }
+  return null;
+}
+
+/** True when both sides state a pack count and the counts differ. */
+export function pieceCountsConflict(
+  a: { pieceCount?: number | null; sizeQty?: number | null; sizeUnit?: string | null; name: string },
+  b: { pieceCount?: number | null; sizeQty?: number | null; sizeUnit?: string | null; name: string },
+): boolean {
+  const left = packUnitCount(a);
+  const right = packUnitCount(b);
+  if (left == null || right == null) return false;
+  return left !== right;
 }
 
 /**
@@ -207,6 +277,21 @@ export function preferQueryHeadAnchored<T extends { name: string }>(
 // are excluded from the list because they're legitimate for staples like coffee
 // (קפה נמס מיובש / קפה טחון) and would over-filter.
 const PRESERVED_FORM_TOKENS: ReadonlySet<string> = new Set([
+  // Moist / wipe forms. `נייר טואלט` resolved to "נייר טואלט לח קידס … 56 דפים" —
+  // moist kids' wipes, not paper rolls. Availability cannot separate them (wipes
+  // are in 513-567 stores against 651 for rolls), so only a form guard can.
+  // Catalog blast radius is small and every hit is a genuine wet-vs-dry
+  // distinction the shopper would notice: 44 products carry a standalone `לח`
+  // (`תמר לח` moist dates, `מזון חתולים לח` wet cat food), 83 carry `לחים`, 333
+  // carry a `מגבונ…` wipe form. Asking for the form keeps it, since the token is
+  // then requested.
+  "לח",
+  "לחה",
+  "לחים",
+  "לחות",
+  "מגבון",
+  "מגבוני",
+  "מגבונים",
   "כבוש",
   "כבושה",
   "כבושי",
@@ -261,6 +346,12 @@ const NON_FOOD_CLASS_L1: ReadonlySet<string> = new Set([
   "non_food_other",
 ]);
 
+/** True when this candidate is a household / personal-care product. */
+export function isNonFoodCandidate(candidate: BasketCandidate): boolean {
+  const l1 = candidate.classL1 ?? "";
+  return l1 !== "" && NON_FOOD_CLASS_L1.has(l1);
+}
+
 /** L1/L2 that poison an inferred fresh-produce line. */
 const FRESH_PRODUCE_INCOMPATIBLE_L1: ReadonlySet<string> = new Set([
   "canned_preserved",
@@ -299,19 +390,54 @@ export function isStapleIncompatible(
     requireFreshProduce?: boolean;
     pieceCount?: number | null;
     requestedAmount?: { quantity: number; unit: string } | null;
+    /**
+     * The query is itself asking for a household / personal-care product, so the
+     * non-food class rejection must not apply. Decided by the caller from the
+     * candidate pool — see `filterSafeCandidates`.
+     */
+    allowNonFood?: boolean;
   },
 ): boolean {
   const queryTokens = new Set(tokenizeNormalized(normalizeEmbedInput(queryText)));
+  // NOTE: `queryTokensSatisfied` is deliberately NOT enforced here, although the
+  // commodity-equivalents and coverage-peer paths do enforce it. Requiring every
+  // typed word to appear literally in the PRIMARY would defeat semantic retrieval,
+  // whose whole purpose is matching a synonym that shares no token. Measured cost
+  // of adding it: 8 test failures spanning vector-matched lines and the cross-class
+  // confirmation flow. The defect it would fix needs a query word that appears
+  // NOWHERE in the catalog (`אבקת כיבוס` matched `אבקת שום` on the shared generic
+  // head `אבקת`; `כיבוס` occurs in 0 of 122k products, the feeds spell it
+  // `כביסה`), so it is a degenerate input rather than a common one. The safe shape
+  // for a future fix is to require token satisfaction only for LEXICALLY matched
+  // candidates, leaving vector matches exempt.
   if (hasUnrequestedPreservedForm(queryTokens, candidate.name)) return true;
   if (hasUnrequestedPersonalCare(queryTokens, candidate.name)) return true;
+  // A product MADE FROM the staple is not the staple (rice paper / rice noodles /
+  // bread crumbs / butter-flavoured margarine). class_l3 would separate these but
+  // is populated for under a fifth of the catalog.
+  if (hasUnrequestedDerivedForm(queryText, candidate.name)) return true;
+  // An explicitly requested percentage is a hard constraint the shopper stated:
+  // "קוטג׳ תנובה 5%" must not resolve to 1%.
+  if (rejectPercentMismatch(queryText, candidate.name)) return true;
   if (rejectUnsafePlainMilkName(queryText, candidate.name)) return true;
   if (rejectUnsafeChickenName(queryText, candidate.name)) return true;
   // Head-anchoring stays a soft preference (preferQueryHeadAnchored / override
   // guards). Hard-rejecting every non-anchored name empties shortlists for
   // opaque queries like "מוצר" and incorrectly re-labels them unresolved.
 
+  // Non-food rejection exists so a food query ("שמן") never matches bath oil.
+  // But keyed only on personal-care WORDS IN THE QUERY it also killed every
+  // genuine household ask: "נייר טואלט" carries no bath vocabulary, its whole
+  // candidate pool is class `household`, so all 20 candidates were rejected and
+  // the line came back unresolved with an empty shortlist — the entire household
+  // aisle was unreachable. `allowNonFood` lets the caller decide from the pool.
   const l1 = candidate.classL1 ?? "";
-  if (l1 && NON_FOOD_CLASS_L1.has(l1) && !queryTokensHasPersonalCare(queryTokens)) {
+  if (
+    l1 &&
+    NON_FOOD_CLASS_L1.has(l1) &&
+    !opts?.allowNonFood &&
+    !queryTokensHasPersonalCare(queryTokens)
+  ) {
     return true;
   }
 
@@ -335,14 +461,20 @@ export function isStapleIncompatible(
   }
 
   if (opts?.requestedAmount) {
-    // Weight requests (kg/g) are purchase quantities for weighed produce/meat,
-    // not pack sizes. Pack-tolerance against the catalog's 1kg weighted stub
-    // would reject every 1.5–2kg line. Volume (L/ml) still enforces pack match
-    // so "שמן 1 ל" does not accept a 750ml bottle.
-    if (
-      !isWeightRequestUnit(opts.requestedAmount.unit) &&
-      !amountCompatible(opts.requestedAmount, candidate)
-    ) {
+    // Weight (kg/g) and COUNT (יח/unit) requests are purchase quantities, not pack
+    // sizes: "1.5kg tomatoes" and "3 bottles of wine" say how much to buy, and
+    // resolvePurchaseQty turns them into packs. Enforcing pack match on them
+    // rejected the goods outright — a count request could never satisfy a
+    // volume-sized product, so `{amount: 3, unit: "יח"}` for יין dropped every
+    // 750ml bottle and omitted the line. An explicit pack COUNT in the query
+    // ("ביצים תבנית 12") is a different constraint and is enforced by the
+    // `opts.pieceCount` gate above.
+    //
+    // Volume (L/ml) and mass stated as a pack size still enforce pack match, so
+    // "שמן 1 ל" does not accept a 750ml bottle.
+    const requestIsPurchaseQuantity =
+      isWeightRequestUnit(opts.requestedAmount.unit) || isCountUnit(opts.requestedAmount.unit);
+    if (!requestIsPurchaseQuantity && !amountCompatible(opts.requestedAmount, candidate)) {
       return true;
     }
   }
@@ -377,9 +509,42 @@ function queryTokensHasPersonalCare(queryTokens: Set<string>): boolean {
   return false;
 }
 
+/**
+ * Product families whose packs are counted in ROLLS, so a bare "גליל" in the name
+ * means a roll rather than the Galilee region or the "פרי גליל" brand.
+ */
+const ROLL_PRODUCT_CONTEXT = /נייר|טואלט|מגבות|מגבוני|מטבח|סופג/;
+
 function inferPieceCountFromName(name: string): number | null {
   const n = name.replace(/\s+/g, " ").trim();
-  const tray = n.match(/תבנית\s*(\d+)/i) || n.match(/^(\d+)\s*ביצ/) || n.match(/(\d+)\s*יח/);
+  const tray =
+    n.match(/תבנית\s*(\d+)/i) ||
+    // Leading count is the norm for eggs ("6 ביצים L אומגה", "12 ביצים חופש L").
+    // Not anchored to string start: the feeds prefix brands ("מ. ל 12 ביצים").
+    n.match(/(?:^|\s)(\d+)\s*ביצ/) ||
+    n.match(/(\d+)\s*יח/) ||
+    // Roll counts decide toilet-paper/kitchen-towel packs (9 vs 18 vs 32) and the
+    // feeds glue them to the number ("נייר טואלט לילי פסטל32גל").
+    n.match(/(\d+)\s*גל(?:יל(?:ים)?)?(?![א-ת])/) ||
+    // Reversed order, count AFTER the roll noun: "גליל כפול 16", "גלילים 32".
+    // Without this the count came back null, and a null count means
+    // pieceCountsConflict cannot compare — which paired a 16-roll pack with a
+    // 32-roll one as the same basket line, a 2x quantity error that makes the
+    // smaller pack look half price. Observed live on
+    // "נייר טואלט גליל כפול 16 רמילוי".
+    //
+    // Gated on ROLL_PRODUCT_CONTEXT because "גליל" is not only "roll": it is also
+    // the Galilee region (a standard wine descriptor) and the "פרי גליל" brand.
+    // Ungated, this pattern matched 24 products of which 22 were false positives —
+    // it read 750 out of `יין אדום מתוק גליל 750 מ"ל` and 7 out of the
+    // feed-truncated `יין אדום מתוק גליל 7`, giving two genuinely identical 750ml
+    // bottles conflicting pack counts so pieceCountsConflict hard-rejected them as
+    // equivalents. Gated, it matches exactly the 2 real roll products and nothing
+    // else. (The forward `\d+\s*גל…` form above needs no such gate: a number
+    // immediately before the token is already unambiguous.)
+    (ROLL_PRODUCT_CONTEXT.test(n)
+      ? n.match(/(?<![א-ת])גליל(?:ים)?\s*(?:כפול(?:ים)?|רגיל(?:ים)?)?\s*(\d+)\b/)
+      : null);
   if (!tray?.[1]) return null;
   const q = Number(tray[1]);
   return Number.isFinite(q) && q > 0 ? Math.round(q) : null;
@@ -420,7 +585,7 @@ export function buildCommodityEquivalents(
   shortlist: BasketCandidate[],
   queryText: string,
   maxEquivalents: number,
-  packTolerance = 0.5,
+  packTolerance = DEFAULT_PACK_TOLERANCE,
 ): BasketCandidate[] {
   if (!top.productClass) return [top];
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
@@ -433,6 +598,9 @@ export function buildCommodityEquivalents(
     if (c.productClass !== top.productClass) continue;
     if (classesConflict(top, c, queryText)) continue; // different L3 (onion≠scallion); bare יין allows color peers
     if (variantConflict(top, c)) continue; // regular≠cherry/zero/organic
+    // Fat/content percentage is written into the name, never labelled as a
+    // variant, so 1% and 9% cottage both read as "regular" without this.
+    if (percentConflict(top, c)) continue;
     if (!packsCompatible(top, c, queryText, packTolerance)) continue;
     // Prepared-food hosts share a produce token ("עוגת לימונים") but must not join.
     if (!queryHeadAnchored(queryText, c.name)) continue;
@@ -442,6 +610,8 @@ export function buildCommodityEquivalents(
     if (!queryTokensSatisfied(queryTokens, c.name)) continue;
     if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) continue;
     if (hasUnrequestedPersonalCare(queryTokenSet, c.name)) continue;
+    if (hasUnrequestedDerivedForm(queryText, c.name)) continue;
+    if (rejectPercentMismatch(queryText, c.name)) continue;
     if (rejectUnsafeChickenName(queryText, c.name)) continue;
     if (rejectUnsafePlainMilkName(queryText, c.name)) continue;
     out.push(c);
@@ -500,6 +670,8 @@ export function buildAvailabilityEquivalents(
     if (!queryHeadAnchored(queryText, c.name)) return false;
     if (hasUnrequestedPreservedForm(queryTokenSet, c.name)) return false;
     if (hasUnrequestedPersonalCare(queryTokenSet, c.name)) return false;
+    if (hasUnrequestedDerivedForm(queryText, c.name)) return false;
+    if (rejectPercentMismatch(queryText, c.name)) return false;
     if (rejectUnsafeChickenName(queryText, c.name)) return false;
     if (rejectUnsafePlainMilkName(queryText, c.name)) return false;
     return queryTokensSatisfied(queryTokens, c.name);
@@ -514,6 +686,7 @@ export function buildAvailabilityEquivalents(
     if (primary.productClass && c.productClass && primary.productClass !== c.productClass) continue;
     if (classesConflict(primary, c)) continue;
     if (variantConflict(primary, c)) continue;
+    if (percentConflict(primary, c)) continue;
     out.push(c);
   }
   return out.length >= 2 ? out : [];

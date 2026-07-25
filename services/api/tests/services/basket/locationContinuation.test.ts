@@ -122,7 +122,14 @@ describe("location field + continuation freeze", () => {
       encodeBasketContinuation(payload, SECRET),
       SECRET,
     );
-    expect(decoded.input.city).toBe("תל אביב-יפו");
+    // The city inferred from the free text qualifies GEOCODING (asserted above)
+    // but must not be frozen as a store filter: doing so pinned the resumed
+    // basket to same-city branches even though a radius point was resolved.
+    expect(loc.derivedCity).toBe("תל אביב-יפו");
+    expect(decoded.input.city).toBeUndefined();
+    // The resolved point is what carries the scope across the resume.
+    expect(decoded.input.near).toEqual(CITY_CENTROID["תל אביב-יפו"]);
+    expect(decoded.input.radiusKm).toBe(10);
     expect(decoded.input.locationOrigin?.provider).toBe("city_centroid");
     expect(JSON.stringify(decoded)).not.toContain("רחוב בן גוריון");
   });

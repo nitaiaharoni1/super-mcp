@@ -6,4 +6,6 @@ export * from "./config.js";
 export * from "./chainNames.js";
 export * from "./concurrency.js";
 export * from "./storeCoordinates.js";
+export * from "./storeIdentity.js";
 export * from "./cityCentroids.js";
+export * from "./neighborhoods.js";

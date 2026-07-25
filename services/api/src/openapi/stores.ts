@@ -30,6 +30,15 @@ export const storeSchema = {
       nullable: true,
       description: "Provenance of lat/lng: address, feed, city_centroid, or null.",
     },
+    storeKind: {
+      type: "string",
+      nullable: true,
+      enum: ["branch", "online", "pickup", "warehouse"],
+      description:
+        "Fulfilment kind. Only 'branch' is somewhere a shopper can walk in; " +
+        "online/pickup/warehouse rows carry prices but are excluded from basket " +
+        "store recommendations.",
+    },
     distanceKm: { type: "number", nullable: true },
   },
 };
@@ -44,9 +53,15 @@ export const storeLocationMetadataSchema = {
     distanceReliable: {
       type: "boolean",
       description:
-        "False when near-scope results only have city_centroid (or identically shared) coordinates, " +
-        "or when the user origin was only city-precision; distance ranking is suppressed. " +
-        "True when near was not requested or at least one store has address/feed geo and the origin is finer than city.",
+        "False only when distance cannot order the candidates at all — every matching store " +
+        "collapses onto one shared coordinate. A city-level origin no longer clears this: " +
+        "distances stay usable but coarse (see distanceApproximate).",
+    },
+    distanceApproximate: {
+      type: "boolean",
+      description:
+        "True when distances are usable but coarse — a city-level origin, or stores placed " +
+        "by city centroid rather than branch address. Present them as approximate.",
     },
     requested: {
       type: "object",

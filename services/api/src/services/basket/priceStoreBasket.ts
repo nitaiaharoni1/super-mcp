@@ -1,4 +1,4 @@
-import { resolvePurchaseQty } from "@super-mcp/shared";
+import { computeUnitPrice, isShoppableStoreKind, resolvePurchaseQty } from "@super-mcp/shared";
 import { listStores } from "../stores/index.js";
 import { getActivePromotionsForListings, pickBestPromoForStore } from "../promotions/index.js";
 import { buildProductLink } from "../productLinks/index.js";
@@ -15,10 +15,45 @@ import type {
   BasketLine,
   BasketMissingItem,
   BasketStoreResult,
+  DistanceAccuracy,
   ListingRow,
   ResolvedItem,
   StorePriceRow,
 } from "./types.js";
+
+/**
+ * ₪ per 100 g / 100 ml / piece for one pack of the priced SKU.
+ *
+ * Line totals alone cannot be compared across stores once equivalents are in
+ * play: a 100g butter at ₪11.90 beats a 125g at ₪12.10 on pack price while being
+ * 23% more expensive per gram. Exposing the normalized figure lets callers (and
+ * the substitution audit) see which is genuinely cheaper.
+ */
+function normalizedUnitPriceFor(
+  packPrice: number,
+  sizeQty: number | null,
+  sizeUnit: string | null,
+  isWeighted: boolean | null | undefined,
+): Pick<BasketLine, "normalizedUnitPrice" | "normalizedUnitBasis"> {
+  if (sizeQty == null || !sizeUnit) {
+    return { normalizedUnitPrice: null, normalizedUnitBasis: null };
+  }
+  const { measure, pricePerCanonical } = computeUnitPrice(
+    packPrice,
+    sizeQty,
+    sizeUnit,
+    isWeighted ?? undefined,
+  );
+  if (pricePerCanonical == null || measure.unparseable) {
+    return { normalizedUnitPrice: null, normalizedUnitBasis: null };
+  }
+  const basis: BasketLine["normalizedUnitBasis"] =
+    measure.unit === "g" ? "per_100g" : measure.unit === "ml" ? "per_100ml" : "per_piece";
+  return {
+    normalizedUnitPrice: Math.round(pricePerCanonical * 10000) / 10000,
+    normalizedUnitBasis: basis,
+  };
+}
 
 function tryOrderForItem(item: ResolvedItem): BasketCandidate[] {
   if (!item.productId) return [];
@@ -82,6 +117,7 @@ export function priceStoreBasket(
 
     let sawListing = false;
     let matchedTotal = Infinity;
+    let matchedValue: number | null = null;
     const primaryScore = tryOrder[0]?.score ?? 0;
     const primaryProductId = item.productId;
 
@@ -114,6 +150,17 @@ export function priceStoreBasket(
         saleBasis: listing.sale_basis ?? undefined,
       });
       const candidateTotal = Number(priceRow.price) * purchase.qty;
+      // Compare commodity peers on VALUE, not shelf price. Equivalence allows a
+      // small size spread, and line totals are pack prices, so "cheapest" would
+      // otherwise mean "smallest": a 100g butter at ₪11.90 beats a 125g at ₪12.10
+      // while costing 23% more per gram. Falls back to the pack total whenever
+      // either side has no usable size, so behaviour is unchanged for those.
+      const candidateValue = normalizedUnitPriceFor(
+        Number(priceRow.price),
+        candidate.sizeQty,
+        candidate.sizeUnit,
+        listing.is_weighted,
+      ).normalizedUnitPrice;
       const isPrimary = candidate.productId === primaryProductId;
       // Exact / brand_family: prefer the pinned primary whenever stocked.
       // Commodity intent: minimize line total among approved peers (bare יין).
@@ -127,7 +174,13 @@ export function priceStoreBasket(
         };
         break;
       }
-      if (candidateTotal < matchedTotal) {
+      // Prefer the better unit price when both sides expose a comparable size;
+      // otherwise fall back to the pack total.
+      const beatsBest =
+        candidateValue != null && matchedValue != null
+          ? candidateValue < matchedValue
+          : candidateTotal < matchedTotal;
+      if (beatsBest) {
         matched = {
           candidate,
           listing,
@@ -136,6 +189,7 @@ export function priceStoreBasket(
           qtyMode: purchase.mode,
         };
         matchedTotal = candidateTotal;
+        matchedValue = candidateValue;
       }
     }
 
@@ -178,11 +232,13 @@ export function priceStoreBasket(
     let lineTotal = Math.round(listPrice * matched.qty * 100) / 100;
     let promoApplied = false;
     let promoDescription: string | null = null;
+    let clubOnly = false;
 
     if (promo) {
       lineTotal = Math.round(promo.effectiveTotal * 100) / 100;
       promoApplied = true;
       promoDescription = promo.candidate.description;
+      clubOnly = promo.candidate.clubOnly;
     }
 
     // Line arithmetic invariant: never emit non-positive qty/total.
@@ -241,8 +297,17 @@ export function priceStoreBasket(
       itemCode: matched.listing.item_code,
       unitPrice: listPrice,
       lineTotal,
+      sizeQty: matched.candidate.sizeQty,
+      sizeUnit: matched.candidate.sizeUnit,
+      ...normalizedUnitPriceFor(
+        listPrice,
+        matched.candidate.sizeQty,
+        matched.candidate.sizeUnit,
+        matched.listing.is_weighted,
+      ),
       promoApplied,
       promoDescription,
+      clubOnly,
       substituted,
       substitutionReason,
       originalProductId,
@@ -271,8 +336,12 @@ export function priceStoreBasket(
     chainName: store.chainName,
     city: store.city,
     address: store.address,
-    // City-centroid points are not branch addresses — don't expose a fake km.
-    distanceKm: isBranchDistanceReliable(store.geoSource) ? store.distanceKm : null,
+    // Keep the centroid-derived distance but label it, rather than nulling it.
+    // Dropping it used to make whole chains unrankable (every Sharon Rami Levy
+    // branch), which cost the shopper far more than a few km of imprecision.
+    distanceKm: store.distanceKm,
+    distanceAccuracy: distanceAccuracyForGeoSource(store.geoSource, store.distanceKm),
+    storeKind: store.storeKind ?? null,
     currency,
     total,
     itemsFound: lines.length,
@@ -285,4 +354,20 @@ export function priceStoreBasket(
 /** Feed/address/overpass coords are branch-level; city_centroid/null are not. */
 export function isBranchDistanceReliable(geoSource: string | null | undefined): boolean {
   return geoSource === "address" || geoSource === "feed" || geoSource === "overpass";
+}
+
+/** How much a store's distance can be trusted, given its coordinate provenance. */
+export function distanceAccuracyForGeoSource(
+  geoSource: string | null | undefined,
+  distanceKm: number | null,
+): DistanceAccuracy {
+  if (distanceKm == null) return "unknown";
+  if (isBranchDistanceReliable(geoSource)) return "branch";
+  if (geoSource === "city_centroid") return "city";
+  return "unknown";
+}
+
+/** True when this store is somewhere a shopper can actually go and buy. */
+export function isShoppableStore(store: { storeKind?: string | null }): boolean {
+  return isShoppableStoreKind((store.storeKind ?? null) as never);
 }

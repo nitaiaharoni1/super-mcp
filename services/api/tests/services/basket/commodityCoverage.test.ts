@@ -638,3 +638,113 @@ describe("classifyBrandFamilyPeers / package form", () => {
     expect(line.alternatives?.map((c) => c.productId)).toEqual(["tasters-200"]);
   });
 });
+
+/**
+ * `filterClassPeers` decides what may be substituted at PRICING time. It has to
+ * apply the same gates as resolution: anything resolution rejects as the wrong
+ * form must not reappear here as a "chain equivalent". A live Herzliya basket
+ * resolved `נייר טואלט` correctly to a 32-roll pack and was then billed for moist
+ * wipes through exactly this path.
+ */
+describe("filterClassPeers rejects what resolution rejects", () => {
+  const paper = primary({
+    name: "נייר טואלט דו שכבתי 32 גלילים",
+    sizeUnit: "unit",
+    sizeQty: 32,
+    pieceCount: 32,
+    productClass: "household",
+    classL1: "household",
+    classL2: "paper_goods",
+    classL3: null,
+  });
+
+  it("drops a moist-wipe form for a plain toilet-paper query", () => {
+    const kept = filterClassPeers("נייר טואלט", paper, [
+      row("rolls", "נייר טואלט לבבות מולט 32 גלילים", "unit", 32),
+      row("wet", "לילי נייר טואלט לח נ", "unit", 32),
+      row("wipes", "מגבוני נייר טואלט לח לילי קידס", "unit", 32),
+    ]);
+    expect(kept.map((r) => r.product_id)).toEqual(["rolls"]);
+  });
+
+  it("keeps the moist form when the shopper asked for it", () => {
+    const kept = filterClassPeers("נייר טואלט לח", paper, [
+      row("wet", "נייר טואלט לילי לח מארז רביעייה", "unit", 32),
+    ]);
+    expect(kept.map((r) => r.product_id)).toEqual(["wet"]);
+  });
+
+  it("drops a derived form (rice paper for a rice query)", () => {
+    const rice = primary({
+      name: "אורז לבן 1 קג",
+      sizeUnit: "g",
+      sizeQty: 1000,
+      pieceCount: null,
+      productClass: "pantry_dry",
+      classL1: "pantry_dry",
+      classL2: "grains_rice",
+      classL3: null,
+    });
+    const kept = filterClassPeers("אורז", rice, [
+      row("plain", "אורז לבן עגול 1 קג", "g", 1000),
+      row("paper", "דפי אורז עגול 22 סמ", "g", 1000),
+      row("sticks", "מקלוני אורז ללא גלוטן", "g", 1000),
+    ]);
+    expect(kept.map((r) => r.product_id)).toEqual(["plain"]);
+  });
+
+  it("drops a percentage mismatch the shopper stated", () => {
+    const cottage = primary({
+      name: "קוטג' תנובה 5% 250 גרם",
+      sizeUnit: "g",
+      sizeQty: 250,
+      pieceCount: null,
+      productClass: "dairy_eggs",
+      classL1: "dairy_eggs",
+      classL2: "cottage",
+      classL3: null,
+    });
+    const kept = filterClassPeers("קוטג' 5%", cottage, [
+      row("five", "קוטג' 5% שומן 250 גרם", "g", 250),
+      row("nine", "קוטג' 9% שומן 250 גרם", "g", 250),
+    ]);
+    expect(kept.map((r) => r.product_id)).toEqual(["five"]);
+  });
+
+  it("drops a pack-count mismatch (6 eggs must not price a 12-egg line)", () => {
+    const eggs = primary({
+      name: "ביצים L 12 יחידות",
+      sizeUnit: "unit",
+      sizeQty: 12,
+      pieceCount: 12,
+      productClass: "dairy_eggs",
+      classL1: "dairy_eggs",
+      classL2: "eggs",
+      classL3: null,
+    });
+    const kept = filterClassPeers("ביצים L", eggs, [
+      row("twelve", "12 ביצים L מ. ל", "unit", 12),
+      row("six", "6 ביצים L אומגה ביצה", "unit", 6),
+    ]);
+    expect(kept.map((r) => r.product_id)).toEqual(["twelve"]);
+  });
+
+  it("uses the tightened pack tolerance, not the loose shared default", () => {
+    const butter = primary({
+      name: "חמאה 200 גרם",
+      sizeUnit: "g",
+      sizeQty: 200,
+      pieceCount: null,
+      productClass: "dairy_eggs",
+      classL1: "dairy_eggs",
+      classL2: "butter",
+      classL3: null,
+    });
+    // 100g is 50% off the primary: inside the old 0.5 default, outside 0.15.
+    const kept = filterClassPeers("חמאה", butter, [
+      row("same", "חמאה תנובה 200 גרם", "g", 200),
+      row("half", "חמאה איטלקית 100 גרם", "g", 100),
+    ]);
+    expect(kept.map((r) => r.product_id)).toEqual(["same"]);
+  });
+});

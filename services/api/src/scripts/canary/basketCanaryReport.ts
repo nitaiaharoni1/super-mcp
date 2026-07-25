@@ -3,6 +3,7 @@ import {
   effectiveCost,
 } from "../../services/basket/recommendStores.js";
 import type { BasketOptimizeResult, BasketStoreResult } from "../../services/basket/types.js";
+import { buildComparableCosts } from "../../services/basket/comparableBasket.js";
 
 export function summarizeQuestions(
   result: Extract<BasketOptimizeResult, { status: "needs_confirmation" }>,
@@ -39,14 +40,25 @@ export function summarizeComplete(result: Extract<BasketOptimizeResult, { status
 
   // Effective-cost ranking so the geo-anchored single-store pick is auditable.
   // Summary detail omits `stores`; fall back to an empty ranking.
+  //
+  // The comparable-cost map MUST be supplied: without it `comparableCostFor` falls
+  // back to each store's raw `total`, which is the pre-fix ranking this whole
+  // change replaced. An audit report that silently ranks on raw totals would
+  // disagree with `bestSingleStore` for exactly the reason the fix exists, and
+  // whoever read the report would have no way to know that was expected.
+  const comparableCosts = buildComparableCosts(result.stores ?? []);
   const distanceRanking = [...(result.stores ?? [])]
     .map((s) => ({
       storeName: `${s.chainName} / ${s.storeName}`,
       total: s.total,
+      comparableTotal: comparableCosts.get(s.storeId)?.comparableTotal ?? s.total,
       distanceKm: s.distanceKm,
       effectiveCost:
         Math.round(
-          effectiveCost(s, { distancePenaltyPerKm: DEFAULT_DISTANCE_PENALTY_PER_KM }) * 100,
+          effectiveCost(s, {
+            distancePenaltyPerKm: DEFAULT_DISTANCE_PENALTY_PER_KM,
+            comparableCosts,
+          }) * 100,
         ) / 100,
       itemsFound: s.itemsFound,
     }))

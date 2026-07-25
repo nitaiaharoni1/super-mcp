@@ -3,7 +3,13 @@ import {
   type StoreLocationMetadata,
 } from "../../lib/resolveStoreLocation.js";
 import type { StoreSummary } from "../stores/index.js";
-import { pickBestSingleStore, pickCheapestCompleteStore, type RecommendationOptions } from "./recommendStores.js";
+import { buildComparableCosts, comparableCostFor } from "./comparableBasket.js";
+import {
+  pickBestSingleStore,
+  pickCheapestCompleteStore,
+  pickClosestUsefulStore,
+  type RecommendationOptions,
+} from "./recommendStores.js";
 import { buildMultiStorePlan } from "./substitutions.js";
 import type {
   BasketCoverage,
@@ -11,6 +17,7 @@ import type {
   BasketStorePlan,
   BasketStoreResult,
   BasketTotalScope,
+  ComparableCost,
   ResolvedItem,
 } from "./types.js";
 
@@ -35,6 +42,7 @@ export function toStorePlan(
   store: BasketStoreResult | null,
   resolvableLines: number,
   requestedLines: number,
+  comparableCosts?: Map<string, ComparableCost>,
 ): BasketStorePlan | null {
   if (!store) return null;
   const cov = coverage(store.lines.length, resolvableLines, requestedLines);
@@ -47,8 +55,10 @@ export function toStorePlan(
     totalScope: totalScopeFor(cov.coverageRatio),
     currency: store.currency,
     distanceKm: store.distanceKm,
+    distanceAccuracy: store.distanceAccuracy,
     lines: store.lines,
     missingItems: store.missingItems,
+    ...comparableCostFor(store, comparableCosts),
     ...cov,
   };
 }
@@ -65,6 +75,10 @@ export function toMultiStorePlan(
     totalScope: totalScopeFor(cov.coverageRatio),
     currency: plan.currency,
     storeCount: plan.storeCount,
+    stops: plan.stops,
+    maxDistanceKm: plan.maxDistanceKm,
+    estimatedTravelKm: plan.estimatedTravelKm,
+    clubOnlyLines: plan.clubOnlyLines,
     lines: plan.lines,
     missingItemIndexes: plan.missingItemIndexes,
     ...cov,
@@ -74,8 +88,11 @@ export function toMultiStorePlan(
 export interface RecommendationPlans {
   bestSingleStore: BasketStorePlan | null;
   cheapestCompleteStore: BasketStorePlan | null;
+  closestStore: BasketStorePlan | null;
   multiStore: BasketMultiStorePlan | null;
   bestSingleStoreResult: BasketStoreResult | null;
+  /** Same-basket costs used for ranking, so callers can order `stores` the same way. */
+  comparableCosts: Map<string, ComparableCost>;
 }
 
 export interface RecommendationPlanContext {
@@ -105,16 +122,40 @@ export function buildRecommendationPlans(
 ): RecommendationPlans {
   const resolvableLines = resolvedItems.filter((item) => item.productId != null).length;
   const eligibleResults = filterEligibleStoreResults(storeResults, eligibility);
-  const bestSingleStoreResult = pickBestSingleStore(eligibleResults, opts, resolvableLines);
+
+  // Reference prices come from the ELIGIBLE set: imputing a line at the price of
+  // a store the shopper can never use (an online warehouse, or a branch outside
+  // the radius) would distort every comparison.
+  const comparableCosts = buildComparableCosts(eligibleResults);
+  const rankingOpts: RecommendationOptions = { ...opts, comparableCosts };
+
+  const bestSingleStoreResult = pickBestSingleStore(eligibleResults, rankingOpts);
   const cheapestCompleteResult = pickCheapestCompleteStore(eligibleResults, resolvableLines);
+  const closestResult = pickClosestUsefulStore(eligibleResults, rankingOpts);
+
   return {
-    bestSingleStore: toStorePlan(bestSingleStoreResult, resolvableLines, requestedLines),
-    cheapestCompleteStore: toStorePlan(cheapestCompleteResult, resolvableLines, requestedLines),
+    bestSingleStore: toStorePlan(
+      bestSingleStoreResult,
+      resolvableLines,
+      requestedLines,
+      comparableCosts,
+    ),
+    cheapestCompleteStore: toStorePlan(
+      cheapestCompleteResult,
+      resolvableLines,
+      requestedLines,
+      comparableCosts,
+    ),
+    closestStore: toStorePlan(closestResult, resolvableLines, requestedLines, comparableCosts),
     multiStore: toMultiStorePlan(
-      buildMultiStorePlan(resolvedItems, eligibleResults),
+      buildMultiStorePlan(resolvedItems, eligibleResults, {
+        distancePenaltyPerKm: opts.distancePenaltyPerKm,
+        distanceReliable: opts.distanceReliable,
+      }),
       resolvableLines,
       requestedLines,
     ),
     bestSingleStoreResult,
+    comparableCosts,
   };
 }

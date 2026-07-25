@@ -31,8 +31,13 @@ function line(
     itemCode: String(itemIndex),
     unitPrice,
     lineTotal,
+    sizeQty: overrides.sizeQty ?? null,
+    sizeUnit: overrides.sizeUnit ?? null,
+    normalizedUnitPrice: overrides.normalizedUnitPrice ?? null,
+    normalizedUnitBasis: overrides.normalizedUnitBasis ?? null,
     promoApplied: overrides.promoApplied ?? false,
     promoDescription: overrides.promoDescription ?? null,
+    clubOnly: overrides.clubOnly ?? false,
     substituted: false,
     substitutionReason: null,
     originalProductId: null,
@@ -58,6 +63,8 @@ function storeResult(
     city: "תל אביב",
     address: null,
     distanceKm: km,
+    distanceAccuracy: km == null ? ("unknown" as const) : ("branch" as const),
+    storeKind: "branch" as const,
     currency: "ILS",
     total,
     itemsFound: covered,
@@ -105,6 +112,7 @@ function summary(id: string, overrides: Partial<StoreSummary> = {}): StoreSummar
     lat: 32.08,
     lng: 34.77,
     geoSource: "address",
+    storeKind: "branch" as const,
     distanceKm: 1,
     ...overrides,
   };
@@ -117,6 +125,7 @@ function nearLocation(radiusKm = 3): StoreLocationMetadata {
     fallbackApplied: false,
     warning: null,
     distanceReliable: true,
+    distanceApproximate: false,
     requested: {
       city: null,
       near: { lat: 32.0819, lng: 34.7712 },
@@ -157,7 +166,23 @@ describe("recommendationPlans honesty", () => {
     expect(plans.bestSingleStore?.totalScope).toBe("priced_lines_only");
   });
 
-  it("complete N-item store beats a cheaper N-1 store", () => {
+  it("prefers the complete store when the incomplete one is barely cheaper", () => {
+    const plans = buildRecommendationPlans(
+      [
+        storeResult("complete", 10, 250, 3, 10),
+        storeResult("one-short-similar", 9, 240, 1, 10),
+      ],
+      Array.from({ length: 10 }, (_, i) => resolved(i)),
+      OPTIONS,
+      10,
+    );
+    expect(plans.bestSingleStore?.storeId).toBe("complete");
+    expect(plans.bestSingleStore?.totalScope).toBe("complete_basket");
+    expect(plans.bestSingleStore?.coverageRatio).toBe(1);
+    expect(plans.bestSingleStore?.imputedLines).toBe(0);
+  });
+
+  it("prefers a much cheaper incomplete store, and still reports the complete one", () => {
     const plans = buildRecommendationPlans(
       [
         storeResult("complete", 10, 250, 3, 10),
@@ -167,9 +192,12 @@ describe("recommendationPlans honesty", () => {
       OPTIONS,
       10,
     );
-    expect(plans.bestSingleStore?.storeId).toBe("complete");
-    expect(plans.bestSingleStore?.totalScope).toBe("complete_basket");
-    expect(plans.bestSingleStore?.coverageRatio).toBe(1);
+    // ₪100 for 9 of the items against ₪225 for the same 9 at the complete store.
+    expect(plans.bestSingleStore?.storeId).toBe("one-short-cheaper");
+    expect(plans.bestSingleStore?.imputedLines).toBe(1);
+    expect(plans.bestSingleStore?.totalScope).toBe("priced_lines_only");
+    // The guaranteed single-trip answer is still offered separately.
+    expect(plans.cheapestCompleteStore?.storeId).toBe("complete");
   });
 
   it("excludes unreliable-distance stores from multiStore recommendations", () => {

@@ -7,6 +7,13 @@ export interface PromoCandidate {
   chainId: string;
   promoCode: string;
   description: string;
+  /**
+   * True when the promo requires chain loyalty-club membership. Club promos are
+   * included by default (most Israeli shoppers hold the cards, and hiding them
+   * would understate real savings), but the price is unreachable without one, so
+   * it has to travel with the candidate and end up on the priced line.
+   */
+  clubOnly: boolean;
   mechanic: RawPromoRecord["mechanic"];
 }
 
@@ -26,6 +33,7 @@ export async function getActivePromotionsForListings(
     description: string;
     mechanic_type: PromoMechanicType;
     mechanic_params: Record<string, unknown>;
+    club_only: boolean;
   }>(
     // Join through listing.item_code at read time rather than trusting promotion_item.listing_id
     // (which can be NULL forever if the promo file ingested before the price file, and can
@@ -46,7 +54,7 @@ export async function getActivePromotionsForListings(
        WHERE l.id = ANY($1::uuid[]) AND l.item_code <> ''
      )
      SELECT t.listing_id, pr.store_id, pr.chain_id, pr.promo_code, pr.description,
-            pr.mechanic_type, pr.mechanic_params
+            pr.mechanic_type, pr.mechanic_params, pr.club_only
      FROM target t
      JOIN promotion_item pi ON (
          pi.item_code = t.item_code
@@ -70,6 +78,7 @@ export async function getActivePromotionsForListings(
       chainId: row.chain_id,
       promoCode: row.promo_code,
       description: row.description,
+      clubOnly: row.club_only === true,
       mechanic: {
         type: row.mechanic_type,
         params: row.mechanic_params as RawPromoRecord["mechanic"]["params"],

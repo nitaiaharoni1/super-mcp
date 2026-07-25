@@ -12,6 +12,10 @@ export function makePipelineResult(partial: Partial<PipelineResult> = {}): Pipel
     promoOtherRows: 0,
     unitUnparseableRows: 0,
     regionFilteredStores: 0,
+    storeCityFromName: 0,
+    pricesReconciled: 0,
+    chainsWithNoFiles: [],
+    chainsWithNoRows: [],
     ...partial,
   };
 }

@@ -3,6 +3,8 @@ import {
   canonicalizeCity,
   centroidForCity,
   cityMatchKeys,
+  isPlaceholderAddress,
+  localityFromStoreName,
   normalizeStoreCoordinates,
   type StoreCoordinates,
 } from "@super-mcp/shared";
@@ -14,6 +16,12 @@ import { nominatimSearchAddress } from "./nominatim.js";
  * Feeds rarely carry coordinates, so `store.lat/lng` is backfilled in tiers,
  * each recording provenance in `store.geo_source`:
  *
+ *   city     : recover a missing `store.city` from the branch NAME. Several
+ *              chains (Yohananof, Keshet Taamim, Salach Dabach) publish an empty
+ *              <City> while naming the branch after its locality, and BOTH lower
+ *              tiers key on `store.city` — so without this tier those branches
+ *              can never be geocoded at all and stay invisible to every
+ *              location-scoped query. Offline, no coordinates written.
  *   centroid : resolve the store's city to a canonical Hebrew name and stamp the
  *              city centroid. Fast, offline, city-level precision. Runs after
  *              every ingest so a new branch is never left without coordinates.
@@ -28,6 +36,7 @@ import { nominatimSearchAddress } from "./nominatim.js";
 
 interface StoreRow {
   id: string;
+  name: string | null;
   city: string | null;
   address: string | null;
   lat: number | null;
@@ -35,6 +44,22 @@ interface StoreRow {
   geo_source: string | null;
   chain_name_he: string | null;
   chain_name_en: string | null;
+}
+
+export interface GeocodeCityResult {
+  scanned: number;
+  updated: number;
+  unresolved: number;
+  topUnresolved: string[];
+}
+
+/**
+ * The city a row should be geocoded against: its own city when that canonicalizes
+ * to something usable, else the locality recovered from the branch name. Returns
+ * null when neither yields a locality — callers must skip rather than guess.
+ */
+function effectiveCity(row: Pick<StoreRow, "city" | "name">): string | null {
+  return canonicalizeCity(row.city) ?? localityFromStoreName(row.name) ?? null;
 }
 
 export interface GeocodeCentroidResult {
@@ -92,6 +117,61 @@ function storeAddressDedupeKey(address: string, city: string): string {
   return createHash("sha256").update(`store|${address}|${city}`, "utf8").digest("hex");
 }
 
+/**
+ * Tier 0: fill a missing `store.city` from the branch name.
+ *
+ * Runs before the centroid tier because that tier (and the address tier) key on
+ * `store.city`; a null city is a hard dead end for both. Only writes a city that
+ * `localityFromStoreName` could actually resolve, so an unrecognized branch name
+ * is left null rather than being assigned a plausible-looking wrong town.
+ */
+export async function backfillCityFromStoreName(
+  opts: GeocodeOptions = {},
+): Promise<GeocodeCityResult> {
+  const { limit = null, dryRun = false, city = null } = opts;
+  const pool = getPool();
+  const cityFilter = cityFilterClause(city, 1);
+  // A literal "0"/"000" is the feeds' null-city placeholder, and canonicalizeCity
+  // rejects it — treat those rows as city-less too.
+  const res = await pool.query<StoreRow>(
+    `SELECT id, name, city, address, lat, lng, geo_source,
+            NULL AS chain_name_he, NULL AS chain_name_en
+       FROM store
+      WHERE (city IS NULL OR btrim(city) = '' OR btrim(city) ~ '^0+$')${cityFilter.sql}
+      ORDER BY id
+      ${limit ? `LIMIT ${limit}` : ""}`,
+    cityFilter.params,
+  );
+
+  let updated = 0;
+  let unresolved = 0;
+  const unresolvedNames = new Map<string, number>();
+
+  for (const row of res.rows) {
+    const recovered = localityFromStoreName(row.name);
+    if (!recovered) {
+      unresolved += 1;
+      const key = row.name?.trim() || "(unnamed)";
+      unresolvedNames.set(key, (unresolvedNames.get(key) ?? 0) + 1);
+      continue;
+    }
+    if (!dryRun) {
+      await pool.query(`UPDATE store SET city = $1, updated_at = now() WHERE id = $2`, [
+        recovered,
+        row.id,
+      ]);
+    }
+    updated += 1;
+  }
+
+  const topUnresolved = [...unresolvedNames.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15)
+    .map(([name, n]) => `${name}:${n}`);
+
+  return { scanned: res.rows.length, updated, unresolved, topUnresolved };
+}
+
 /** Tier 1: stamp every ungeocoded store with its city centroid. */
 export async function backfillCentroids(
   opts: GeocodeOptions = {},
@@ -100,7 +180,8 @@ export async function backfillCentroids(
   const pool = getPool();
   const cityFilter = cityFilterClause(city, 1);
   const res = await pool.query<StoreRow>(
-    `SELECT id, city, address, lat, lng, geo_source, NULL AS chain_name_he, NULL AS chain_name_en
+    `SELECT id, name, city, address, lat, lng, geo_source,
+            NULL AS chain_name_he, NULL AS chain_name_en
        FROM store
       WHERE (lat IS NULL OR lng IS NULL)${cityFilter.sql}
       ORDER BY id
@@ -113,10 +194,13 @@ export async function backfillCentroids(
   const unmappedCities = new Map<string, number>();
 
   for (const row of res.rows) {
-    const centroid = centroidForCity(row.city);
+    // Fall back to the branch name so a row the city tier could not persist
+    // (or that arrived after it ran) still gets a centroid.
+    const centroid = centroidForCity(row.city) ?? centroidForCity(localityFromStoreName(row.name));
     if (!centroid) {
       unmapped += 1;
-      const key = canonicalizeCity(row.city) ?? String(row.city ?? "(null)");
+      const key =
+        canonicalizeCity(row.city) ?? row.name?.trim() ?? String(row.city ?? "(null)");
       unmappedCities.set(key, (unmappedCities.get(key) ?? 0) + 1);
       continue;
     }
@@ -217,7 +301,7 @@ export async function upgradeStoreAddresses(
   const pool = getPool();
   const cityFilter = cityFilterClause(city, 1);
   const res = await pool.query<StoreRow>(
-    `SELECT s.id, s.city, s.address, s.lat, s.lng, s.geo_source,
+    `SELECT s.id, s.name, s.city, s.address, s.lat, s.lng, s.geo_source,
             c.name_he AS chain_name_he, c.name_en AS chain_name_en
        FROM store s
        JOIN chain c ON c.id = s.chain_id
@@ -235,9 +319,14 @@ export async function upgradeStoreAddresses(
   const MAX_KM = 15;
 
   for (const row of res.rows) {
-    const canonical = canonicalizeCity(row.city);
-    const centroid = centroidForCity(row.city);
-    if (!canonical || !centroid || !row.address) {
+    // A city recovered from the branch name is good enough to anchor the
+    // ≤MAX_KM sanity check, so rows with an empty <City> are no longer skipped.
+    const canonical = effectiveCity(row);
+    const centroid = centroidForCity(canonical);
+    // "unknown"/""/"0"/"-" are feed placeholders, not streets: geocoding them
+    // burns a rate-limited Nominatim call and can only return a wrong hit.
+    const address = row.address;
+    if (!canonical || !centroid || address == null || isPlaceholderAddress(address)) {
       skipped += 1;
       continue;
     }
@@ -245,8 +334,8 @@ export async function upgradeStoreAddresses(
     let hit: StoreCoordinates | null = null;
     let source: "address" | "overpass" = "address";
     try {
-      const outcome = await nominatimSearchAddress(row.address, canonical, {
-        dedupeKey: storeAddressDedupeKey(row.address, canonical),
+      const outcome = await nominatimSearchAddress(address, canonical, {
+        dedupeKey: storeAddressDedupeKey(address, canonical),
       });
       if (outcome.kind === "hit") hit = outcome.hit.point;
     } catch {

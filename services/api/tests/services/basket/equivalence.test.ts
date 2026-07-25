@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  packUnitCount,
+  pieceCountsConflict,
   preferQueryHeadAnchored,
   queryHeadAnchored,
   queryTokensSatisfied,
@@ -431,5 +433,98 @@ describe("buildAvailabilityEquivalents", () => {
     const pickledB = h({ name: "מלפפונים חמוצים בצנצנת", sizeUnit: "kg", sizeQty: 1000 });
     const set = buildAvailabilityEquivalents([pickledA, pickledB], "מלפפונים חמוצים", opts);
     expect(set).toHaveLength(2);
+  });
+});
+
+/**
+ * Roll counts decide the price of a toilet-paper / kitchen-towel line, and the
+ * feeds write them in several shapes. A count that comes back null makes
+ * pieceCountsConflict unable to compare, which paired a 16-roll pack with a
+ * 32-roll one as the same basket line — a 2x quantity error that makes the
+ * smaller pack look half price.
+ */
+describe("packUnitCount roll-count idioms", () => {
+  const count = (name: string, sizeQty: number | null = null, sizeUnit: string | null = null) =>
+    packUnitCount({ name, sizeQty, sizeUnit, pieceCount: null });
+
+  it("reads the count whether it precedes or follows the roll noun", () => {
+    expect(count("נייר טואלט דו שכבתי לבבות מולט 32 גלילים", 32, "unit")).toBe(32);
+    expect(count("סנו סופט נייר טואלט 18 גלילים כפולים", 18, "unit")).toBe(18);
+    expect(count("נייר טואלט לילי פסטל32גל", 1, "unit")).toBe(32);
+    // Count AFTER the noun, with a ply word between.
+    expect(count("נייר טואלט גליל כפול 16 רמילוי")).toBe(16);
+    expect(count("נייר טואלט גלילים 32")).toBe(32);
+  });
+
+  it("makes a 16-roll pack conflict with a 32-roll pack", () => {
+    expect(
+      pieceCountsConflict(
+        { name: "נייר טואלט דו שכבתי לבבות מולט 32 גלילים", sizeQty: 32, sizeUnit: "unit" },
+        { name: "נייר טואלט גליל כפול 16 רמילוי", sizeQty: null, sizeUnit: null },
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * The two-letter abbreviation גל is only safe when the number precedes it.
+   * Accepting it after a number matched inside אנגל / מנגל / מיקרוגל / מיגל /
+   * ריגל and the standalone cosmetic "גל" (gel): 196 bogus counts against 59 real
+   * ones across the catalog, which would have given a challah a pack count of 650
+   * and broken bread equivalence outright.
+   */
+  /**
+   * "גליל" is also the Galilee region (a standard wine descriptor) and the
+   * "פרי גליל" brand. Ungated, the reversed pattern matched 24 catalog products of
+   * which 22 were false positives, giving two genuinely identical 750ml wine
+   * bottles conflicting pack counts so they could never be equivalents.
+   */
+  it("never reads a roll count out of the Galilee region or the פרי גליל brand", () => {
+    for (const [name, sizeQty, sizeUnit] of [
+      ['יין אדום מתוק גליל 750 מ"ל תוצרת איטליה', 750, "ml"],
+      ["יין אדום מתוק גליל 7", 750, "ml"],
+      ["טונה פרי גליל 160גרם", 160, "g"],
+      ["תירס קל פרי גליל 550", 550, "g"],
+      ["פסטה רג'ייה גליל 500", 500, "g"],
+      ["חטיף דוריטוס גליל 55", 55, "g"],
+      ["אוראו עוגיות גולדן גליל 154 גר", 154, "g"],
+      ['צופית דבש מלא פרחי הרי גליל 1 ק"ג', 1000, "g"],
+    ] as Array<[string, number, string]>) {
+      expect(count(name, sizeQty, sizeUnit), name).toBeNull();
+    }
+  });
+
+  it("does not split two identical-size wines whose name contains גליל", () => {
+    expect(
+      pieceCountsConflict(
+        { name: 'יין אדום מתוק גליל 750 מ"ל תוצרת איטליה', sizeQty: 750, sizeUnit: "ml" },
+        { name: "יין אדום מתוק גליל 7", sizeQty: 750, sizeUnit: "ml" },
+      ),
+    ).toBe(false);
+  });
+
+  it("still reads the count when the name is genuinely a roll product", () => {
+    expect(count("נייר טואלט גליל כפול 24 יח רמי לוי")).toBe(24);
+  });
+
+  it("never reads a roll count out of a word that merely contains גל", () => {
+    for (const name of [
+      "חלה קלועה אנגל 650 ג",
+      "לחמניית מזונות אנגל 75ג",
+      "יין מתוק לקידוש סגל750מל",
+      "ויסקי שיבאס ריגל 18",
+      'מארז בירה סאן מיגל 4*330 מ"ל',
+      "רויטליפט פילר קרם גל50מל",
+      "ספיד סטיק סנסיטיב גל 85 גרם",
+      "תפוח אדמה לאפיה לבישול ומיקרוגל 500 ג",
+      "יוגטה מרשמלו מגולגל 180 גרם",
+      'רשת למנגל 23*38 ס"מ',
+    ]) {
+      expect(count(name), name).toBeNull();
+    }
+  });
+
+  it("does not mistake a volume or mass size for a pack count", () => {
+    expect(count("שמן זית כתית מעולה 750 מל", 750, "ml")).toBeNull();
+    expect(count("חמאה תנובה 200 גרם מהדרין", 200, "g")).toBeNull();
   });
 });

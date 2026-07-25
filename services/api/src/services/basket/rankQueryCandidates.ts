@@ -24,9 +24,12 @@ import {
   DEFAULT_CANDIDATE_LIMIT,
   SEMANTIC_CANDIDATE_LIMIT,
 } from "./constants.js";
+import { preferDirectForm } from "./derivedForm.js";
 import {
+  DEFAULT_PACK_TOLERANCE,
   buildAvailabilityEquivalents,
   buildCommodityEquivalents,
+  isNonFoodCandidate,
   isStapleIncompatible,
   preferQueryHeadAnchored,
   queryHeadAnchored,
@@ -71,6 +74,24 @@ function variantMatchesWanted(wanted: string, got: string): boolean {
   return got === wanted;
 }
 
+/**
+ * Whether the line is asking for a household / personal-care product, inferred
+ * from the pool instead of a vocabulary list.
+ *
+ * Two list-free signals, either of which is sufficient:
+ *  - the BEST-ranked candidate is non-food, i.e. the search engine's own top
+ *    match for the shopper's words is a household product ("נייר טואלט");
+ *  - every candidate is non-food, so there is no food reading to prefer.
+ *
+ * A food query keeps its protection: for "שמן" the top match is an edible oil,
+ * so bath oils are still rejected.
+ */
+function queryLooksNonFood(candidates: BasketCandidate[]): boolean {
+  if (candidates.length === 0) return false;
+  if (isNonFoodCandidate(candidates[0]!)) return true;
+  return candidates.every(isNonFoodCandidate);
+}
+
 /** Candidates compatible with hard query intent (form, pack, domain, brand). */
 export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[] {
   const { query, profile, candidates } = input;
@@ -82,6 +103,7 @@ export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[]
   const requireFreshProduce = profile.attributes.form === "fresh";
   const brandWanted = profile.attributes.brand ?? null;
   const variantWanted = profile.attributes.variant ?? null;
+  const allowNonFood = queryLooksNonFood(candidates);
 
   return candidates.filter((c) => {
     if (
@@ -89,6 +111,7 @@ export function filterSafeCandidates(input: SafePrimaryInput): BasketCandidate[]
         requireFreshProduce,
         pieceCount: pieceCount != null && Number.isFinite(pieceCount) ? pieceCount : null,
         requestedAmount: profile.requestedAmount,
+        allowNonFood,
       })
     ) {
       return false;
@@ -482,7 +505,13 @@ export function rankQueryCandidates(
   // Utensil/opener leaders ("חולץ יין") often share a token with the commodity
   // and can outrank real bottles on lexical score + local stock. Keep them in
   // the shortlist for transparency, but never ahead of head-anchored products.
-  const shortlist = preferQueryHeadAnchored(item.query ?? "", shortlistRaw);
+  // Derived products ("אורז אטריות" = rice noodles) are head-anchored, so the
+  // anchoring partition keeps them up front; demote them too before the primary
+  // is picked off the head of this list.
+  const shortlist = preferDirectForm(
+    item.query ?? "",
+    preferQueryHeadAnchored(item.query ?? "", shortlistRaw),
+  );
 
   // Hard intent first: exclude traps before decideResolution / display primary.
   // When nothing is safe, keep the empty list (do NOT re-admit unsafe candidates).
@@ -689,7 +718,7 @@ export function rankQueryCandidates(
         stapleSafe,
         queryText,
         searchConfig?.maxEquivalents ?? 5,
-        searchConfig?.packTolerance ?? 0.5,
+        searchConfig?.packTolerance ?? DEFAULT_PACK_TOLERANCE,
       );
       if (equivalents.length >= 2) {
         return {
@@ -726,7 +755,7 @@ export function rankQueryCandidates(
   ) {
     const equivalents = buildAvailabilityEquivalents(candidates, queryText, {
       maxEquivalents: searchConfig?.maxEquivalents ?? 5,
-      packTolerance: searchConfig?.packTolerance ?? 0.5,
+      packTolerance: searchConfig?.packTolerance ?? DEFAULT_PACK_TOLERANCE,
       penaltyBlock: searchConfig?.penaltyBlockThreshold ?? 1,
       penaltyOf: (id) => gateById.get(id)?.penaltyScore ?? 0,
     });
@@ -773,7 +802,7 @@ export function rankQueryCandidates(
         stapleSafe,
         queryForEq,
         searchConfig?.maxEquivalents ?? 5,
-        searchConfig?.packTolerance ?? 0.5,
+        searchConfig?.packTolerance ?? DEFAULT_PACK_TOLERANCE,
       );
       if (equivalents.length >= 2) {
         return { ...base, equivalents };

@@ -6,7 +6,12 @@
  * Disable with SUPER_MCP_REGION_FILTER=0 for debugging.
  */
 
-import { coveredLocalityCodes, normalizeCityKey, parseLocalityCode } from "@super-mcp/shared";
+import {
+  coveredLocalityCodes,
+  localityFromStoreName,
+  normalizeCityKey,
+  parseLocalityCode,
+} from "@super-mcp/shared";
 
 export interface StoreLocationHint {
   storeId: string;
@@ -194,10 +199,21 @@ function nameHintsCoveredCity(name: string | undefined): boolean {
   return false;
 }
 
-/** True if this store is inside our ingest coverage regions. */
+/**
+ * True if this store is inside our ingest coverage regions.
+ *
+ * `city` is expected to be the RESOLVED locality (see resolveStoreCity) — the
+ * feed's own value when present, else the one recovered from the branch name.
+ * The locality recovered from the name is also checked independently, because
+ * price-file discovery hands us raw Stores-XML hints that have not been through
+ * that resolution yet. It is strictly better than the `nameHintsCoveredCity`
+ * substring scan (it resolves abbreviations like פ"ת and neighborhood suffixes
+ * like "חולון המרכבה"), which is kept only as a last-resort fallback.
+ */
 export function isStoreInIngestRegion(store: StoreLocationHint): boolean {
   if (cityAllowed(store.city)) return true;
   if (geoAllowed(store.lat, store.lng)) return true;
+  if (!store.city && cityAllowed(localityFromStoreName(store.name) ?? undefined)) return true;
   if (nameHintsCoveredCity(store.name) || nameHintsCoveredCity(store.city)) return true;
   return false;
 }

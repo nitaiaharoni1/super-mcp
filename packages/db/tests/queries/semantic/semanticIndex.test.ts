@@ -3,6 +3,18 @@ import { closePool, getPool } from "../../../src/client/index.js";
 import { drainSemanticIndex, loadOntologySnapshot, markProductsDirty } from "../../../src/queries/semantic/index.js";
 import { hasTestDatabase } from "../../../test/helpers/dbAvailability.js";
 
+/**
+ * Live-DB drains are seconds, not milliseconds.
+ *
+ * Each drainSemanticIndex call scans a 122k-row profile table, measured at
+ * 1.5-2.5s, and the first call in a run additionally pays the cold buffer-cache
+ * cost. Against vitest's 5s default the test that happens to warm the cache
+ * flakes — observed alternating between the single-product drain and the
+ * second-drain case on an otherwise idle machine. This is the real cost of the
+ * operation, so budget for it explicitly rather than leaving a coin-flip in CI.
+ */
+const DRAIN_TEST_TIMEOUT_MS = 30_000;
+
 describe.runIf(hasTestDatabase())("semanticIndex integration", () => {
   afterAll(async () => {
     await closePool();
@@ -66,7 +78,7 @@ describe.runIf(hasTestDatabase())("semanticIndex integration", () => {
       [row.id],
     );
     expect(dirty.rowCount).toBe(0);
-  });
+  }, DRAIN_TEST_TIMEOUT_MS);
 
   it("skips unchanged rows on second drain (hash match)", async () => {
     const result = await drainSemanticIndex({
@@ -85,7 +97,7 @@ describe.runIf(hasTestDatabase())("semanticIndex integration", () => {
     });
     expect(again.failed).toBe(0);
     expect(result.model).toBe("test-hasher-v1");
-  });
+  }, DRAIN_TEST_TIMEOUT_MS);
 
   it("rebuilds profiles for dirty rows even when product text hash is unchanged", async () => {
     const pool = getPool();
@@ -133,5 +145,5 @@ describe.runIf(hasTestDatabase())("semanticIndex integration", () => {
       row.id,
     ]);
     expect(dirty.rowCount).toBe(0);
-  });
+  }, DRAIN_TEST_TIMEOUT_MS);
 });

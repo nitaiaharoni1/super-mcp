@@ -85,7 +85,34 @@ Ingest drains `semantic_index_dirty` before reporting success; failures mark the
 
 Free-text basket lines resolve with **deterministic evidence first** (exact name/phrase, form/class gates); embeddings run only when lexical recall is weak. The API warms the query embedder on boot (fire-and-forget) to cut cold latency on the first basket call.
 
-**Agent / MCP flow (required):** call `optimize_basket` once with the full shopping list and `location` (or `city` / `near`). Default `resolution_mode=fast` returns a compact best-effort `complete` result in one call — assumptions are intentional. For exact product control, set `resolution_mode=strict`; then if `status` is `needs_confirmation`, answer every required `question` and call again with only `{continuation, answers}` — do not reconstruct items. When `status` is `complete`, use `bestSingleStore` / `cheapestCompleteStore` / `multiStore`.
+**Agent / MCP flow (required):** call `optimize_basket` once with the full shopping list and `location` (or `city` / `near`). Default `resolution_mode=fast` returns a compact best-effort `complete` result in one call — assumptions are intentional. For exact product control, set `resolution_mode=strict`; then if `status` is `needs_confirmation`, answer every required `question` and call again with only `{continuation, answers}` — do not reconstruct items. When `status` is `complete`, use `bestSingleStore` / `cheapestCompleteStore` / `closestStore` / `multiStore`.
+
+#### Comparing stores: use `comparableTotal`, not `total`
+
+`total` is the money spent **at that store**, and it only covers the lines that store prices. Ranking on it is wrong: the store missing the most expensive item looks cheapest. A live Herzliya basket recommended a store at ₪92.86 over a ₪171.42 rival purely because it did not stock a ₪71.60 tuna line.
+
+Every plan therefore also carries `comparableTotal` — the same basket at every store: what it charges for what it stocks, plus the **median market price** across the compared stores for each resolvable line it does not. `imputedLines` / `imputedTotal` say how much of the figure is estimated, and ranking additionally charges a fixed surcharge when a store leaves lines unpriced, because finishing the list elsewhere is a second trip.
+
+Lines also carry `normalizedUnitPrice` (₪ per 100g / 100ml / piece) so a smaller pack cannot win on shelf price alone, and `clubOnly`, which is true when the price needs the chain's loyalty card. Plans report `clubOnlyLines`.
+
+#### Response size
+
+`response_detail=summary` (the default) is tuned for an agent context: it keeps the full line breakdown for one plan only, drops per-line diagnostics (`substitutionReason`, `listingId`, `itemCode`, `originalProductId`) and the prose in `assumptions[].message`, and caps that plan at 25 lines with `linesTruncated: true` when it bites. `pricedLines` always reports the true count, and `standard` / `debug` return everything.
+
+Measured on a Herzliya basket: 12 items ≈ 12KB, 18 items ≈ 16KB, 30 items ≈ 26KB, 50 items (the schema maximum) ≈ 32KB. Response size grows with the number of priced products, so split very large lists if your client has a tight context budget.
+
+#### Travel vs price: `preference`
+
+Shoppers say this out loud, so it is one input rather than three numbers to derive:
+
+| `preference` | Meaning | Distance penalty |
+| `cheapest` | "I don't mind driving" — distance ignored entirely | 0 ₪/km |
+| `balanced` (default) | Weigh both | 3 ₪/km |
+| `closest` | "Price isn't a big factor" — nearest store that still covers enough | 60 ₪/km |
+
+Pair `cheapest` with a larger `radius_km` to search further afield. `distance_penalty_per_km` remains as an advanced override. `multiStore` is distance-aware too: an extra stop must beat both a flat "worth another stop" floor and its own round-trip driving cost, and the plan reports per-stop `distanceKm`, `maxDistanceKm` and `estimatedTravelKm`.
+
+Distances are labelled, never faked. Each store carries `distanceAccuracy`: `branch` (geocoded from the branch address), `city` (a city centroid stood in, so the figure is city-accurate) or `unknown`. Stores placed only at city level are ranked with an uncertainty margin rather than excluded — excluding them previously removed ~45% of the catalog, including entire discount chains.
 
 #### Default one-call example
 
@@ -121,6 +148,8 @@ Free-text basket lines resolve with **deterministic evidence first** (exact name
 ```
 
 Fast mode may pick representative commodity peers and fall back to a city centroid when precise geocoding is unavailable; assumptions and `coverage` make that explicit. Use `resolution_mode=strict` when the shopper needs exact SKUs instead of best-effort completion.
+
+A free-text `location` is scoped by **radius**, not by city name. The city embedded in the text only qualifies geocoding — applying it as a store filter restricted every address-based basket to same-city branches and hid cheaper stores a few km across a municipal border (in Gush Dan, most of the competition). On a geocode cache miss, fast mode answers immediately from the city centroid and resolves the real address in the background, so the next call for that place is address-precise at no extra latency.
 
 #### Migration
 
@@ -229,6 +258,22 @@ Speed: adapters run in parallel; price files within each adapter use `SUPER_MCP_
 
 Raw feeds archive to `data/raw/` (local stand-in for GCS).
 
+#### Store identity and delisting
+
+Several chains publish no `<City>` and a placeholder `<Address>` ("unknown"), putting the locality in the **store name** instead ("חולון המרכבה", "רעננה", 'דיל פ"ת- אליעזר פרדימן'). Both geocode tiers key on `store.city`, so those branches used to be ungeocodable and invisible to every location-scoped query — all 52 Yohananof branches among them. Ingest now derives the city from the branch name when the feed omits it (`resolveStoreCity`), and a `--mode=city` geocode tier repairs existing rows:
+
+```bash
+pnpm --filter @super-mcp/db exec tsx src/scripts/geocodeStores.ts --mode=city      # name → city
+pnpm --filter @super-mcp/db exec tsx src/scripts/geocodeStores.ts --mode=centroid  # city → centroid (runs the city tier first)
+pnpm --filter @super-mcp/db exec tsx src/scripts/geocodeStores.ts --mode=address   # Nominatim branch-level upgrade (rate limited)
+```
+
+Feeds also publish online storefronts, pickup points and logistics warehouses as ordinary `<Store>` rows — and those hold the three deepest price catalogs in the data. `store.store_kind` (`branch` / `online` / `pickup` / `warehouse`) marks them so they are never recommended as somewhere to shop.
+
+`store_price` is reconciled against full snapshots: after a store's `PriceFull` file is ingested cleanly, rows the snapshot did not refresh are delisted. `last_seen_at` is the cutoff (always bumped on upsert, unlike the monotonically gated `source_ts`). Four safety gates bias towards keeping stale rows over deleting live ones: full files only (never a delta), no parse errors, a minimum snapshot size, and a refusal to delete more than 35% of a store's catalog in one pass. Counts surface as `pricesReconciled` on the run report.
+
+A configured chain that yields zero files or zero rows now marks the run `degraded` with the chain named, instead of reporting `success`.
+
 ### Create API key
 
 ```bash
@@ -267,9 +312,9 @@ See [docs/folder-conventions.md](./docs/folder-conventions.md) for target folder
 - `GET /v1/products/:id/prices` — compare nearby (default **10km**); `?sort=unit_price` for cheaper per 100g/ml
 - `GET /v1/products/:id/substitutes` — cheaper similar products by unit price
 - `GET /v1/products/:id/history`
-- `GET /v1/chains` · `GET /v1/stores` — returns `{ stores, location }` (not a bare array); `?near=` defaults to **10km** radius
+- `GET /v1/chains` · `GET /v1/stores` — returns `{ stores, location }` (not a bare array); `?near=` defaults to **10km** radius. Each store carries `storeKind` (`branch` / `online` / `pickup` / `warehouse`); only `branch` rows are used for basket recommendations
 - `GET /v1/promotions`
-- `POST /v1/basket/optimize` — one-call fast default: initial `{items, city|near|location}` returns compact `complete`; opt in with `resolution_mode=strict` for resumable `{continuation, answers}`; plans are `bestSingleStore` / `cheapestCompleteStore` / `multiStore`
+- `POST /v1/basket/optimize` — one-call fast default: initial `{items, city|near|location}` returns compact `complete`; opt in with `resolution_mode=strict` for resumable `{continuation, answers}`; plans are `bestSingleStore` / `cheapestCompleteStore` / `closestStore` / `multiStore`. Rank on `comparableTotal`; set `preference` to `cheapest` / `balanced` / `closest`
 - `GET /v1/usage`
 
 ## MCP tools

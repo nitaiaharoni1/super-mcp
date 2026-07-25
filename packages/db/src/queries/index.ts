@@ -13,6 +13,14 @@ export {
 } from "./listings.js";
 export { upsertStorePrice, type UpsertPriceInput } from "./prices.js";
 export {
+  reconcileStorePrices,
+  MAX_RECONCILE_DELETE_RATIO,
+  MIN_RECONCILE_SEEN_ROWS,
+  type ReconcileStorePricesInput,
+  type ReconcileStorePricesResult,
+  type ReconcileSkipReason,
+} from "./reconcile.js";
+export {
   bulkResolveProducts,
   bulkUpsertListings,
   bulkUpsertStorePrices,

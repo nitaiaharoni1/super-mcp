@@ -8,6 +8,7 @@ import { finishRun, reapStaleRuns, startRun } from "./persist.js";
 import { processFeedFile, type FileProcessStats } from "./processFile.js";
 import { classifyStatus, isAlertable } from "./status.js";
 import type { PipelineResult } from "./types.js";
+import { expectedChainIdsForSource } from "../expectedChains.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -17,10 +18,30 @@ function absorb(result: PipelineResult, stats: FileProcessStats): void {
   result.promoOtherRows += stats.promoOther ?? 0;
   result.unitUnparseableRows += stats.unitUnparseable ?? 0;
   result.regionFilteredStores += stats.regionFiltered ?? 0;
+  result.storeCityFromName += stats.storeCityFromName ?? 0;
+  result.pricesReconciled += stats.pricesReconciled ?? 0;
   if (stats.processed) result.filesProcessed++;
   if (stats.fatal) {
     result.errorSummary = (result.errorSummary ? result.errorSummary + "; " : "") + stats.fatal;
   }
+}
+
+/**
+ * Chains we expected data from that produced nothing. Split into "no files at
+ * all" (discovery yielded none) and "files but no usable rows" so the alert
+ * names the actual failure mode.
+ */
+function findEmptyChains(
+  sourceId: string,
+  discoveredChainIds: Set<string>,
+  rowsByChain: Map<string, number>,
+): { chainsWithNoFiles: string[]; chainsWithNoRows: string[] } {
+  const expected = expectedChainIdsForSource(sourceId);
+  const chainsWithNoFiles = expected.filter((id) => !discoveredChainIds.has(id));
+  const chainsWithNoRows = expected.filter(
+    (id) => discoveredChainIds.has(id) && (rowsByChain.get(id) ?? 0) === 0,
+  );
+  return { chainsWithNoFiles, chainsWithNoRows };
 }
 
 export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResult> {
@@ -42,6 +63,10 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
     promoOtherRows: 0,
     unitUnparseableRows: 0,
     regionFilteredStores: 0,
+    storeCityFromName: 0,
+    pricesReconciled: 0,
+    chainsWithNoFiles: [],
+    chainsWithNoRows: [],
   };
 
   try {
@@ -70,10 +95,19 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
       }),
     );
 
+    // Per-chain row tally so a chain that yields nothing can't hide behind the
+    // healthy chains' totals.
+    const rowsByChain = new Map<string, number>();
+    const noteChainRows = (chainId: string, rows: number): void => {
+      rowsByChain.set(chainId, (rowsByChain.get(chainId) ?? 0) + rows);
+    };
+    for (const file of files) if (!rowsByChain.has(file.chainId)) rowsByChain.set(file.chainId, 0);
+
     const failedStoreChains = new Set<string>();
     for (const file of storeFiles) {
       const stats = await processFeedFile(adapter, file, archiveRoot);
       if (stats.fatal) failedStoreChains.add(file.chainId);
+      noteChainRows(file.chainId, stats.ok);
       absorb(result, stats);
     }
 
@@ -106,10 +140,32 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
           error: stats.fatal ?? null,
         }),
       );
-      return stats;
+      return { file, stats };
     });
 
-    for (const stats of priceOutcomes) absorb(result, stats);
+    for (const { file, stats } of priceOutcomes) {
+      noteChainRows(file.chainId, stats.ok);
+      absorb(result, stats);
+    }
+
+    const empties = findEmptyChains(
+      adapter.sourceId,
+      new Set(files.map((f) => f.chainId)),
+      rowsByChain,
+    );
+    result.chainsWithNoFiles = empties.chainsWithNoFiles;
+    result.chainsWithNoRows = empties.chainsWithNoRows;
+    if (empties.chainsWithNoFiles.length > 0 || empties.chainsWithNoRows.length > 0) {
+      const parts: string[] = [];
+      if (empties.chainsWithNoFiles.length > 0) {
+        parts.push(`no files from chain(s) ${empties.chainsWithNoFiles.join(", ")}`);
+      }
+      if (empties.chainsWithNoRows.length > 0) {
+        parts.push(`no rows from chain(s) ${empties.chainsWithNoRows.join(", ")}`);
+      }
+      result.errorSummary =
+        (result.errorSummary ? result.errorSummary + "; " : "") + parts.join("; ");
+    }
 
     result.status = classifyStatus(result);
     console.log(
@@ -119,6 +175,10 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
         promoOtherRows: result.promoOtherRows,
         unitUnparseableRows: result.unitUnparseableRows,
         regionFilteredStores: result.regionFilteredStores,
+        storeCityFromName: result.storeCityFromName,
+        pricesReconciled: result.pricesReconciled,
+        chainsWithNoFiles: result.chainsWithNoFiles,
+        chainsWithNoRows: result.chainsWithNoRows,
       }),
     );
     if (result.status === "degraded" && result.priceFilesDiscovered === 0) {

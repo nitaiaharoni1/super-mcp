@@ -144,8 +144,16 @@ export function registerBasketTools(server: McpServer): void {
         "the same tool once more with only continuation and answers. " +
         "selectionEffect: representative→commodity peers, brand_family→same-brand compatible packs " +
         "(larger packs may appear as alternative_available), pin→exact SKU. " +
-        "When status is complete, plan totals (bestSingleStore / cheapestCompleteStore / multiStore) " +
-        "sum priced lines only — read totalScope; priced_lines_only is not the full basket total. " +
+        "When status is complete, read the plans: bestSingleStore (best one trip), " +
+        "cheapestCompleteStore (lowest total that covers the whole list, distance ignored), " +
+        "closestStore (nearest store still worth the trip), multiStore (split across stops, " +
+        "with per-stop distance and estimatedTravelKm). " +
+        "`total` sums priced lines only — read totalScope; priced_lines_only is not the full " +
+        "basket total. Compare stores on `comparableTotal`, which restates every store on the " +
+        "same basket by adding a market reference price for lines it does not stock " +
+        "(`imputedLines` says how many); raw `total` makes a store look cheap for not " +
+        "carrying the expensive item. " +
+        "Set `preference` from what the shopper says about travel vs price. " +
         "Never reconstruct items and do not call search_products per line. " +
         "Quantity: pack_qty alone for packs (e.g. pack_qty=3); amount+unit for weighed/natural counts " +
         "(amount=1.5, unit=kg). pack_qty with unit=unit/יח is accepted (unit ignored). " +
@@ -164,9 +172,37 @@ export function registerBasketTools(server: McpServer): void {
           .min(1)
           .optional()
           .describe("Answers to continuation questions (resume only)."),
-        include_club: z.boolean().optional(),
+        include_club: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include loyalty-club prices (default true). Lines priced with a club " +
+              "promo are flagged `clubOnly`, and plans report `clubOnlyLines`, so you " +
+              "can tell the shopper which savings need the chain's card. Set false " +
+              "for a total anyone can pay at the till.",
+          ),
         stores_limit: z.number().int().min(0).max(500).optional(),
-        distance_penalty_per_km: z.number().min(0).max(100).optional(),
+        preference: z
+          .enum(["cheapest", "balanced", "closest"])
+          .optional()
+          .describe(
+            "How the shopper trades travel against money. Use 'cheapest' when they " +
+              "say distance does not matter (distance is ignored entirely), 'closest' " +
+              "when they say price is not a big factor (nearest store that still " +
+              "covers enough of the list), 'balanced' otherwise (default). Pair " +
+              "'cheapest' with a larger radius_km to search further afield.",
+          ),
+        distance_penalty_per_km: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe(
+            "Advanced override: shekels of travel cost charged per km when ranking " +
+              "stores. Overrides `preference` (which sets 0 for cheapest, 3 for " +
+              "balanced, 60 for closest). Prefer `preference` unless you need a " +
+              "specific trade-off.",
+          ),
         verbose: z.boolean().optional(),
         resolution_mode: z
           .enum(["fast", "strict"])
@@ -180,7 +216,13 @@ export function registerBasketTools(server: McpServer): void {
         response_detail: z
           .enum(["summary", "standard", "debug"])
           .optional()
-          .describe("Controls response size. Use debug only for diagnostics."),
+          .describe(
+            "Controls response size. summary (default) is tuned for an agent context: " +
+              "one plan keeps its line breakdown, capped at 25 lines with linesTruncated=true " +
+              "when it bites (pricedLines still reports the true count). Response size grows " +
+              "with the number of priced products, so split very large lists. " +
+              "Use debug only for diagnostics.",
+          ),
       },
     },
     async (args) => {
@@ -242,6 +284,7 @@ export function registerBasketTools(server: McpServer): void {
           geocodeMs: loc.geocodeMs,
           includeClub: args.include_club,
           storesLimit: args.stores_limit,
+          preference: args.preference,
           distancePenaltyPerKm: args.distance_penalty_per_km,
           verbose: args.verbose,
           resolutionMode,

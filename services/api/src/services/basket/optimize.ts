@@ -22,6 +22,7 @@ import {
   encodeBasketContinuation,
 } from "./continuation.js";
 import { DEFAULT_STORES_LIMIT } from "./constants.js";
+import { selectSignalStores } from "./signalStores.js";
 import { loadBasketPricingData, loadCandidateAvailability } from "./loadPricingData.js";
 import { priceStoreBasket } from "./priceStoreBasket.js";
 import { getResolution, putResolution } from "./resolutionCache.js";
@@ -29,11 +30,16 @@ import { applyFastResolutionPolicy } from "./resolutionPolicy.js";
 import {
   DEFAULT_QUESTION_OPTIONS_LIMIT,
   buildBasketQuestions,
-  collectQuestionOptionProductIds,
+  collectAvailabilityProductIds,
   selectQuestionCandidateShortlist,
 } from "./questionAvailability.js";
 import { buildRecommendationPlans } from "./recommendationPlans.js";
-import { DEFAULT_DISTANCE_PENALTY_PER_KM } from "./recommendStores.js";
+import {
+  DEFAULT_BASKET_PREFERENCE,
+  distancePenaltyForPreference,
+  effectiveCost,
+  type RecommendationOptions,
+} from "./recommendStores.js";
 import { resolveItems } from "./resolve.js";
 import { applyStorePlanSubstitutions } from "./substitutions.js";
 import type {
@@ -60,7 +66,13 @@ export interface ResolvedBasketLines {
   resolvedItems: ResolvedItem[];
   itemStatuses: BasketItemStatus[];
   candidateStores: StoreSummary[];
+  /** Every eligible store — the pricing scope. */
   storeIds: string[];
+  /**
+   * Nearest-N subset used for resolution signals (search scope, availability,
+   * coverage). See RESOLUTION_SIGNAL_STORE_SAMPLE.
+   */
+  signalStoreIds: string[];
   location: StoreLocationMetadata;
 }
 
@@ -112,6 +124,10 @@ export async function resolveBasketLines(
     city: input.city,
     near: input.near,
     radiusKm,
+    // Online / pickup / warehouse rows hold the three deepest price catalogs in
+    // the feed. They are not places to shop, so they must never enter pricing —
+    // keeping them out here also keeps `storesCompared` honest.
+    shoppableOnly: true,
   });
   const location = applyLocationOriginHonesty(
     locationResult.location,
@@ -119,6 +135,10 @@ export async function resolveBasketLines(
   );
   const candidateStores = locationResult.stores;
   const storeIds = candidateStores.map((s) => s.id);
+  // Chain-diverse, nearest-first. A plain nearest-N slice silently dropped whole
+  // chains from the coverage-peer query, which made every branch of those chains
+  // report not_carried_by_chain. See selectSignalStores.
+  const signalStoreIds = selectSignalStores(candidateStores);
 
   const resolvedItems = await resolveItems(
     input.items,
@@ -126,7 +146,7 @@ export async function resolveBasketLines(
       city: input.city,
       near: input.near,
       radiusKm,
-      storeIds: storeIds.length > 0 ? storeIds : undefined,
+      storeIds: signalStoreIds.length > 0 ? signalStoreIds : undefined,
     }),
     reuse,
   );
@@ -136,6 +156,7 @@ export async function resolveBasketLines(
     itemStatuses: buildItemStatuses(resolvedItems),
     candidateStores,
     storeIds,
+    signalStoreIds,
     location,
   };
 }
@@ -317,14 +338,16 @@ async function optimizeInitialOrResumedBasket(
   };
 
   const searchStarted = Date.now();
-  const { resolvedItems, itemStatuses, candidateStores, storeIds, location } =
+  const { resolvedItems, itemStatuses, candidateStores, storeIds, signalStoreIds, location } =
     await resolveBasketLines(input, reuse);
   timings.searchMs = Date.now() - searchStarted;
 
   const availabilityStarted = Date.now();
+  // Full candidate space, not just questioned lines: the fast policy uses this
+  // map to catch a line that resolved onto a SKU almost no nearby store stocks.
   const availability = await loadCandidateAvailability(
-    collectQuestionOptionProductIds(itemStatuses),
-    storeIds,
+    collectAvailabilityProductIds(itemStatuses),
+    signalStoreIds,
   );
   timings.availabilityMs = Date.now() - availabilityStarted;
   const questions = buildBasketQuestions(
@@ -401,7 +424,7 @@ async function optimizeInitialOrResumedBasket(
     .length;
 
   const equivalenceStarted = Date.now();
-  await enrichCommodityCoverage(input.items, pricingItems, storeIds);
+  await enrichCommodityCoverage(input.items, pricingItems, signalStoreIds);
   timings.equivalenceMs = Date.now() - equivalenceStarted;
 
   const productIds = collectProductIdsForPricing(pricingItems);
@@ -411,6 +434,7 @@ async function optimizeInitialOrResumedBasket(
         status: "complete",
         bestSingleStore: null,
         cheapestCompleteStore: null,
+        closestStore: null,
         multiStore: null,
         items: pricedStatuses,
         stores: [],
@@ -465,32 +489,52 @@ async function optimizeInitialOrResumedBasket(
     return a.total - b.total;
   });
 
+  const preference = input.preference ?? DEFAULT_BASKET_PREFERENCE;
+  const recommendationOptions: RecommendationOptions = {
+    distancePenaltyPerKm: distancePenaltyForPreference(
+      preference,
+      input.distancePenaltyPerKm,
+    ),
+    distanceReliable: location.distanceReliable,
+    preference,
+  };
   const plans = buildRecommendationPlans(
     storeResults,
     pricingItems,
-    {
-      distancePenaltyPerKm: input.distancePenaltyPerKm ?? DEFAULT_DISTANCE_PENALTY_PER_KM,
-      distanceReliable: location.distanceReliable,
-    },
+    recommendationOptions,
     input.items.length,
     {
       location,
       storesById: new Map(candidateStores.map((store) => [store.id, store])),
     },
   );
+  const rankingOptions: RecommendationOptions = {
+    ...recommendationOptions,
+    comparableCosts: plans.comparableCosts,
+  };
   timings.pricingMs = Date.now() - pricingStarted;
 
   if (plans.bestSingleStoreResult) {
     applyStorePlanSubstitutions(pricedStatuses, plans.bestSingleStoreResult);
   }
 
-  const { stores, storesTruncated } = limitStoreResults(storeResults, input.storesLimit);
+  // Order the returned sample by the SAME criterion the recommendation used, so
+  // a `stores_limit` cut keeps the stores that actually competed. Sorting by raw
+  // total put the least-stocked stores at the top of the list.
+  const rankedStoreResults = [...storeResults].sort(
+    (a, b) =>
+      effectiveCost(a, rankingOptions) - effectiveCost(b, rankingOptions) ||
+      b.lines.length - a.lines.length ||
+      a.storeId.localeCompare(b.storeId),
+  );
+  const { stores, storesTruncated } = limitStoreResults(rankedStoreResults, input.storesLimit);
 
   return finalizeBasketResult({
     result: {
       status: "complete",
       bestSingleStore: plans.bestSingleStore,
       cheapestCompleteStore: plans.cheapestCompleteStore,
+      closestStore: plans.closestStore,
       multiStore: plans.multiStore,
       items: pricedStatuses,
       stores,

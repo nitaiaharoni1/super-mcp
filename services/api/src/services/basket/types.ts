@@ -1,7 +1,28 @@
+import type { StoreKind } from "@super-mcp/shared";
 import type { Freshness } from "../products/types.js";
 import type { SearchProductHit } from "../search/types.js";
 import type { GeoPoint } from "../../lib/geo.js";
 import type { StoreLocationMetadata } from "../../lib/resolveStoreLocation.js";
+
+/**
+ * How much the shopper cares about travel versus money.
+ *
+ * Shoppers say this out loud ("I don't mind driving if it's cheaper", "just the
+ * closest place that has most of it"), so it has to be one input rather than
+ * three numbers the caller has to derive. Each preference sets the distance
+ * penalty, how far coverage may be traded for proximity, and the multi-store
+ * appetite together; an explicit `distancePenaltyPerKm` still overrides.
+ */
+export type BasketPreference = "cheapest" | "balanced" | "closest";
+
+/**
+ * Confidence in a store's `distanceKm`.
+ * - branch  — geocoded from the branch address / feed coordinates
+ * - city    — city centroid stood in for the branch, so the figure is roughly
+ *             city-accurate (a few km) rather than wrong
+ * - unknown — no usable coordinates at all
+ */
+export type DistanceAccuracy = "branch" | "city" | "unknown";
 
 /**
  * How a confirmation answer should resume pricing identity:
@@ -72,6 +93,8 @@ export interface BasketAssumption {
   reason:
     | "commodity_best_effort"
     | "generic_variant_default"
+    /** Swapped onto a materially better-stocked same-class peer. */
+    | "availability_upgrade"
     | "location_city_fallback"
     | "unsafe_line_omitted";
   message: string;
@@ -82,7 +105,12 @@ export interface BasketInitialInput extends BasketLocationInput {
   includeClub?: boolean;
   /** Max store breakdowns to return (default 5). Use 0 for all. */
   storesLimit?: number;
-  /** Shekels of "cost" per km when ranking bestSingleStore (default 3). */
+  /**
+   * Travel-vs-price appetite (default "balanced"). Sets the distance penalty and
+   * the coverage/proximity trade-off; `distancePenaltyPerKm` overrides its penalty.
+   */
+  preference?: BasketPreference;
+  /** Shekels of "cost" per km when ranking bestSingleStore. Overrides `preference`. */
   distancePenaltyPerKm?: number;
   /**
    * When false (default), per-store `lines` are dropped from every store except
@@ -232,8 +260,21 @@ export interface BasketLine {
   itemCode: string;
   unitPrice: number;
   lineTotal: number;
+  /** Pack size of the SKU actually priced — lets callers compare ₪ per 100g/ml. */
+  sizeQty: number | null;
+  sizeUnit: string | null;
+  /** ₪ per 100 g / 100 ml / piece for the priced SKU; null when size is unknown. */
+  normalizedUnitPrice: number | null;
+  /** Basis of `normalizedUnitPrice`: per_100g | per_100ml | per_piece | null. */
+  normalizedUnitBasis: "per_100g" | "per_100ml" | "per_piece" | null;
   promoApplied: boolean;
   promoDescription: string | null;
+  /**
+   * True when the applied promo requires chain loyalty-club membership. The
+   * shopper cannot get `lineTotal` at the till without the card, so this must be
+   * visible rather than silently folded into the total.
+   */
+  clubOnly: boolean;
   /** True when a lower-ranked candidate was used because the primary SKU wasn't stocked. */
   substituted: boolean;
   substitutionReason: string | null;
@@ -268,12 +309,38 @@ export interface BasketStoreResult {
   city: string | null;
   address: string | null;
   distanceKm: number | null;
+  /** How much to trust `distanceKm` (branch coords vs city centroid vs none). */
+  distanceAccuracy: DistanceAccuracy;
+  /** Fulfilment kind; only `branch` is a place a shopper can walk into. */
+  storeKind: StoreKind | null;
   currency: string;
   total: number;
   itemsFound: number;
   itemsRequested: number;
   lines: BasketLine[];
   missingItems: BasketMissingItem[];
+}
+
+/**
+ * Why a raw `total` cannot rank stores: each store prices a different subset of
+ * the basket, so the store missing the most expensive line looks cheapest. In a
+ * live Herzliya run the recommended store showed ₪92.86 against ₪171.42 purely
+ * because it did not price a ₪71.60 tuna line.
+ *
+ * `comparableTotal` restates every store on the SAME basket: what it charges for
+ * the lines it stocks, plus the market reference price for the lines it does not
+ * (the shopper still has to buy those somewhere). Ranking uses this; `total`
+ * keeps its existing meaning of "money spent at this store".
+ */
+export interface ComparableCost {
+  /** total + imputedTotal — the figure stores are ranked on. */
+  comparableTotal: number;
+  /** Reference cost of resolvable lines this store does not price. */
+  imputedTotal: number;
+  /** How many lines were imputed (0 means the total is fully observed). */
+  imputedLines: number;
+  /** Lines whose price is only reachable with a loyalty card. */
+  clubOnlyLines: number;
 }
 
 export interface BasketCoverage {
@@ -286,17 +353,25 @@ export interface BasketCoverage {
 /** Whether `total` covers every requested line or only the priced subset. */
 export type BasketTotalScope = "complete_basket" | "priced_lines_only";
 
-export interface BasketStorePlan extends BasketCoverage {
+export interface BasketStorePlan extends BasketCoverage, ComparableCost {
   storeId: string;
   storeName: string;
   chainId: string;
   chainName: string;
+  /** Money spent AT this store. Covers only `pricedLines` — read `totalScope`. */
   total: number;
   /** complete_basket when coverageRatio === 1; otherwise priced_lines_only. */
   totalScope: BasketTotalScope;
   currency: string;
   distanceKm: number | null;
+  distanceAccuracy: DistanceAccuracy;
   lines: BasketLine[];
+  /**
+   * True when `lines` was shortened for payload size (summary detail only).
+   * `pricedLines` always reports the real count and `response_detail=standard`
+   * returns the full breakdown. Absent means the array is complete.
+   */
+  linesTruncated?: boolean;
   missingItems: BasketMissingItem[];
 }
 
@@ -309,12 +384,28 @@ export interface MultiStoreLine {
   storeName: string;
   chainName: string;
   address: string | null;
+  /** Distance from the shopper to the store this line is bought at. */
+  distanceKm: number | null;
   lineTotal: number;
   unitPrice: number;
   promoApplied: boolean;
   promoDescription: string | null;
+  clubOnly: boolean;
   /** Storefront link to open this product on the chain's site. Null if the chain has no online store. */
   link: string | null;
+}
+
+/** One stop on a multi-store plan, so the caller can judge the trip. */
+export interface MultiStoreStop {
+  storeId: string;
+  storeName: string;
+  chainName: string;
+  address: string | null;
+  distanceKm: number | null;
+  /** Money spent at this stop. */
+  subtotal: number;
+  /** How many basket lines are bought here. */
+  lines: number;
 }
 
 export interface BasketMultiStorePlan extends BasketCoverage {
@@ -323,6 +414,19 @@ export interface BasketMultiStorePlan extends BasketCoverage {
   totalScope: BasketTotalScope;
   currency: string;
   storeCount: number;
+  /** Every stop with its distance and subtotal — a plan is only useful if drivable. */
+  stops: MultiStoreStop[];
+  /** Distance to the furthest stop; null when no stop has usable coordinates. */
+  maxDistanceKm: number | null;
+  /**
+   * Round-trip driving estimate for visiting every stop from the shopper's
+   * origin and back. Approximated as a hub-and-spoke trip (2 x sum of stop
+   * distances) because we do not have a routing engine — it is an upper bound on
+   * a sensibly ordered route, and stated as such rather than presented as exact.
+   */
+  estimatedTravelKm: number | null;
+  /** Lines whose price needs a loyalty card. */
+  clubOnlyLines: number;
   lines: MultiStoreLine[];
   missingItemIndexes: number[];
 }
@@ -412,8 +516,12 @@ export interface BasketNeedsConfirmationResult {
 
 export interface BasketCompleteResult {
   status: "complete";
+  /** Best overall single trip under the requested `preference`. */
   bestSingleStore: BasketStorePlan | null;
+  /** Lowest total among stores that price the whole list, distance ignored. */
   cheapestCompleteStore: BasketStorePlan | null;
+  /** Nearest store that still covers enough of the list to be worth the trip. */
+  closestStore: BasketStorePlan | null;
   multiStore: BasketMultiStorePlan | null;
   items: Array<BasketItemStatus | BasketSummaryItem>;
   /** Omitted from summary; present on standard/debug. */

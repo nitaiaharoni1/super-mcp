@@ -83,11 +83,13 @@ export async function getProductPrices(
     let effectivePrice = listPrice;
     let promoApplied = false;
     let promoDescription: string | null = null;
+    let clubOnly = false;
 
     if (promo) {
       effectivePrice = Math.round(promo.effectiveTotal * 100) / 100;
       promoApplied = true;
       promoDescription = promo.candidate.description;
+      clubOnly = promo.candidate.clubOnly;
     }
 
     return {
@@ -109,6 +111,7 @@ export async function getProductPrices(
       effectivePrice,
       promoApplied,
       promoDescription,
+      clubOnly,
       link: buildProductLink({ chainId: r.chain_id, gtin: r.gtin, name: r.listing_name }).url,
       freshness: { sourceTs: r.source_ts, ingestedAt: r.ingested_at },
     };

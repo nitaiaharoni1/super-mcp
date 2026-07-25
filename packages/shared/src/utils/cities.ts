@@ -4,6 +4,7 @@
  * "Herzliya"). This module canonicalizes on write and expands query aliases on
  * read so one city filter matches both forms without an extra round-trip.
  */
+import { NEIGHBORHOOD_TO_CITY } from "./neighborhoods.js";
 import { scrubNullChars } from "./text.js";
 
 /** CBS locality code → canonical Hebrew display name. */
@@ -90,7 +91,99 @@ export const LOCALITY_CODE_TO_CITY: Record<string, string> = {
   "7200": "נס ציונה",
   "1304": "שוהם",
   "3780": "ביתר עילית",
+  // Long tail: every remaining code that appears in `store.city`. Each was
+  // resolved by cross-checking the CBS code against the naming and street
+  // address of the very rows that carry it (e.g. 2550 → both stores are named
+  // "אקספרס גדרה"), so the mapping is evidence-backed rather than recalled.
+  // Adding a code here widens display/geocoding only: the ingest region filter
+  // reads the separate explicit IN_REGION_LOCALITY_CODES set below.
+  "26": "ראש פינה",
+  "28": "מזכרת בתיה",
+  "47": "כפר תבור",
+  "50": "גבעת עדה",
+  "53": "עתלית",
+  "96": "יגור",
+  "99": "מצפה רמון",
+  "104": "מזרע",
+  "139": "עין שמר",
+  "155": "באר טוביה",
+  "166": "גן יבנה",
+  "171": "פרדסיה",
+  "194": "משמר השרון",
+  "276": "צור משה",
+  "285": "אלונים",
+  "316": "כפר נטר",
+  "346": "גליל ים",
+  "386": "בני דרור",
+  "469": "קריית עקרון",
+  "494": "דלית אל כרמל",
+  "502": "ירכא",
+  "587": "סביון",
+  "654": "כפר קרע",
+  "666": "עומר",
+  "831": "ירוחם",
+  "877": "בית חירות",
+  "922": "רכסים",
+  // Kastina junction: the code is not a CBS locality we can pin, but both rows
+  // give "א.ת באר טוביה" as the address, so the regional council seat is used.
+  "1034": "באר טוביה",
+  "1050": "בית חשמונאי",
+  "1063": "מעלות תרשיחא",
+  "1161": "רהט",
+  "1165": "שילת",
+  "1167": "קיסריה",
+  "1263": "כפר ורדים",
+  "1268": "מיתר",
+  "1271": "להבים",
+  "1306": "צור יגאל",
+  "1315": "מתן",
+  "1319": "בת חפר",
+  "1345": "צור יצחק",
+  "2006": "כנות",
+  "2034": "חצור הגלילית",
+  "2200": "דימונה",
+  "2550": "גדרה",
+  "2720": "טירה",
+  "2730": "טייבה",
+  "3797": "מודיעין עילית",
+  "4100": "קצרין",
+  "7500": "סחנין",
+  "8800": "שפרעם",
+  "8900": "טמרה",
+  "9800": "בנימינה",
+  // Chain-internal codes above 10000 are not CBS localities; these three are
+  // resolved purely from the branch name/address they appear on.
+  "10018": "עמק חפר",
+  "10044": "אפרת",
+  "10098": "דלית אל כרמל",
 };
+
+/**
+ * Canonical localities that no feed emits as a CBS code, but that DO appear in
+ * branch names we recover cities from ("אשדות יעקב", "צומת מגדל", "גוש עציון").
+ * Kept out of LOCALITY_CODE_TO_CITY so `cityMatchKeys` never emits a synthetic
+ * code into a SQL `city = ANY(...)` filter; enumerated alongside it everywhere
+ * a canonical-name list is needed.
+ */
+const EXTRA_CANONICAL_CITIES: readonly string[] = [
+  "אשדות יעקב",
+  "מבקיעים",
+  "מגדל",
+  "נצרת",
+  "עין המפרץ",
+  "גוש עציון",
+  "שער בנימין",
+  "איירפורט סיטי",
+];
+
+/**
+ * Every canonical Hebrew locality name this module knows. Exported so the
+ * gazetteer/centroid tables can be asserted in step: a locality with no
+ * centroid still yields no coordinates, which is the bug this expansion fixes.
+ */
+export function allCanonicalCities(): string[] {
+  return [...Object.values(LOCALITY_CODE_TO_CITY), ...EXTRA_CANONICAL_CITIES];
+}
 
 /** Extra aliases (normalized key) → canonical Hebrew. Codes are handled separately. */
 const CITY_ALIASES: Record<string, string> = {
@@ -153,6 +246,44 @@ const CITY_ALIASES: Record<string, string> = {
   "beit shemesh": "בית שמש",
   "mevaseret zion": "מבשרת ציון",
   "מבשרת-ציון": "מבשרת ציון",
+  // Feeds write "קרית" (one yud) as often as the canonical "קריית".
+  "קרית שמונה": "קריית שמונה",
+  "קרית עקרון": "קריית עקרון",
+  עקרון: "קריית עקרון",
+  "קרית אתא": "קריית אתא",
+  "קרית ביאליק": "קריית ביאליק",
+  "קרית ים": "קריית ים",
+  "קרית מוצקין": "קריית מוצקין",
+  "קרית גת": "קריית גת",
+  "קרית טבעון": "קריית טבעון",
+  // Spelling / short forms seen in store names and addresses.
+  מעלות: "מעלות תרשיחא",
+  "מעלות-תרשיחא": "מעלות תרשיחא",
+  תרשיחא: "מעלות תרשיחא",
+  "דליית אל כרמל": "דלית אל כרמל",
+  "דלית אל-כרמל": "דלית אל כרמל",
+  "דאלית אל כרמל": "דלית אל כרמל",
+  "מודיעין עלית": "מודיעין עילית",
+  // Bare "מודיעין" means Modiin-Maccabim-Reut; the Illit spellings above are
+  // longer, so longest-first phrase matching keeps them distinct.
+  מודיעין: "מודיעין מכבים רעות",
+  "מודיעין מכבים": "מודיעין מכבים רעות",
+  סכנין: "סחנין",
+  יוקנעם: "יקנעם עילית",
+  יקנעם: "יקנעם עילית",
+  "יוקנעם עילית": "יקנעם עילית",
+  "יקנעם עלית": "יקנעם עילית",
+  "ראש-פינה": "ראש פינה",
+  "גן-יבנה": "גן יבנה",
+  "בנימינה-גבעת עדה": "בנימינה",
+  // Mishor Adumim is the industrial zone abutting Ma'ale Adumim (~2km), which is
+  // inside city-centroid error, so it resolves to the town rather than a new point.
+  "מישור אדומים": "מעלה אדומים",
+  // Nazareth Illit was renamed Nof HaGalil; keep both pointing at the current name
+  // and make sure the two-word form outranks the bare "נצרת" locality.
+  "נצרת עילית": "נוף הגליל",
+  "נצרת עלית": "נוף הגליל",
+  איירפורט: "איירפורט סיטי",
 };
 
 /**
@@ -192,7 +323,7 @@ export function canonicalizeCity(city: string | null | undefined): string | unde
   const key = normalizeCityKey(scrubbed);
   if (CITY_ALIASES[key]) return CITY_ALIASES[key];
   // Already canonical Hebrew (exact) — keep as-is if it is a known target.
-  for (const he of Object.values(LOCALITY_CODE_TO_CITY)) {
+  for (const he of allCanonicalCities()) {
     if (normalizeCityKey(he) === key) return he;
   }
   return scrubbed;
@@ -209,26 +340,37 @@ type LocationCityCandidate = { alias: string; canonical: string };
  * Longest-first alias/canonical phrases for embedded-city extraction from
  * free-text addresses. Built once from LOCALITY_CODE_TO_CITY + CITY_ALIASES.
  */
-const LOCATION_CITY_CANDIDATES: readonly LocationCityCandidate[] = (() => {
+function buildPhraseCandidates(
+  entries: Iterable<readonly [string, string]>,
+): readonly LocationCityCandidate[] {
   const seen = new Set<string>();
   const out: LocationCityCandidate[] = [];
-  const add = (alias: string, canonical: string) => {
+  for (const [alias, canonical] of entries) {
     const normalizedAlias = normalizeCityKey(alias);
-    if (!normalizedAlias || seen.has(normalizedAlias)) return;
+    if (!normalizedAlias || seen.has(normalizedAlias)) continue;
     seen.add(normalizedAlias);
     out.push({ alias: normalizedAlias, canonical });
-  };
-  for (const he of Object.values(LOCALITY_CODE_TO_CITY)) {
-    add(he, he);
-  }
-  for (const [alias, canonical] of Object.entries(CITY_ALIASES)) {
-    add(alias, canonical);
   }
   out.sort(
     (a, b) => b.alias.length - a.alias.length || a.alias.localeCompare(b.alias, "he"),
   );
   return out;
-})();
+}
+
+const LOCATION_CITY_CANDIDATES: readonly LocationCityCandidate[] = buildPhraseCandidates([
+  ...allCanonicalCities().map((he) => [he, he] as const),
+  ...Object.entries(CITY_ALIASES).map(([alias, canonical]) => [alias, canonical] as const),
+]);
+
+/**
+ * Neighborhood phrases, indexed exactly like localities but searched only after
+ * every locality pass has missed (see `extractCityFromLocation`).
+ */
+const NEIGHBORHOOD_CANDIDATES: readonly LocationCityCandidate[] = buildPhraseCandidates(
+  Object.entries(NEIGHBORHOOD_TO_CITY).map(
+    ([neighborhood, city]) => [neighborhood, city] as const,
+  ),
+);
 
 /** True when `phrase` appears in `haystack` as a whole-token sequence. */
 function containsCityPhrase(haystack: string, phrase: string): boolean {
@@ -239,9 +381,29 @@ function containsCityPhrase(haystack: string, phrase: string): boolean {
 }
 
 /**
+ * Parent locality for a neighborhood / landmark phrase, or null when the text
+ * carries none. Longest whole-token match, same matcher the locality pass uses.
+ */
+export function cityForNeighborhood(text: string): string | null {
+  const normalized = normalizeCityKey(text);
+  if (!normalized) return null;
+  for (const candidate of NEIGHBORHOOD_CANDIDATES) {
+    if (containsCityPhrase(normalized, candidate.alias)) return candidate.canonical;
+  }
+  return null;
+}
+
+/**
  * Extract a known Israeli city from free-text location (address/neighborhood).
  * Uses longest word-boundary match over canonical names and aliases.
  * Returns null when no known city is embedded.
+ *
+ * Two passes, localities first: a neighborhood must never outrank a real
+ * locality named in the same string. "רחוב הרצל, חיפה" has to resolve to חיפה
+ * even though a longer neighborhood phrase elsewhere in the table might also
+ * match, so the neighborhood table is consulted only when no locality hit at
+ * all. That also lets a bare "נווה עמל" resolve to הרצליה, which is what makes
+ * city-less branch names geocodable.
  */
 export function extractCityFromLocation(location: string): string | null {
   const normalized = normalizeCityKey(location);
@@ -249,7 +411,7 @@ export function extractCityFromLocation(location: string): string | null {
   for (const candidate of LOCATION_CITY_CANDIDATES) {
     if (containsCityPhrase(normalized, candidate.alias)) return candidate.canonical;
   }
-  return null;
+  return cityForNeighborhood(normalized);
 }
 
 /**

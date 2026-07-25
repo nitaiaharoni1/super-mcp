@@ -1,4 +1,9 @@
-import { cityMatchKeys, hasValidStoreCoordinates, type GeoPoint } from "@super-mcp/shared";
+import {
+  cityMatchKeys,
+  hasValidStoreCoordinates,
+  isShoppableStoreKind,
+  type GeoPoint,
+} from "@super-mcp/shared";
 import {
   listStores,
   type ListStoresParams,
@@ -12,7 +17,27 @@ export type StoreLocationPrecision = "none" | "city" | "radius";
 const COORD_EPSILON = 1e-5;
 
 const CENTROID_WARNING =
-  "Distance ranking suppressed: store coordinates are city-level centroids, not branch addresses.";
+  "Distance ranking suppressed: every matching store shares one city-level coordinate, so branches cannot be told apart by distance.";
+
+const APPROXIMATE_DISTANCE_WARNING =
+  "Distances are approximate: measured from a city-level origin or to a city-level store coordinate.";
+
+/**
+ * The radius is applied strictly, in SQL, to the recorded distance.
+ *
+ * An earlier version added a few km of slack here for city-placed stores, on the
+ * theory that a centroid-derived distance near the boundary should get grace. It
+ * was dead code: `storeLocationSql` already cuts `distance <= radiusKm` before
+ * these rows are ever loaded, so nothing outside the radius reached the check.
+ * Rather than widen the shared SQL filter (which also serves compare_prices), the
+ * radius stays the shopper's stated constraint. Positional uncertainty is instead
+ * priced into RANKING via CITY_ACCURACY_UNCERTAINTY_KM in recommendStores, which
+ * is where it changes an outcome rather than silently widening the search.
+ *
+ * The bug that mattered — city-placed stores excluded from recommendations
+ * ENTIRELY, which hid whole discount chains — is fixed by
+ * `isEligibleForDistanceRecommendation` no longer requiring branch-level coords.
+ */
 
 /** Provenance of the user origin — mirrors LocationOriginMeta without importing it. */
 export interface StoreLocationOriginMeta {
@@ -30,12 +55,20 @@ export interface StoreLocationMetadata {
   fallbackApplied: boolean;
   warning: string | null;
   /**
-   * False when a near-scope query only has city_centroid (or identically shared)
-   * coordinates — distance ranking must not treat those as branch addresses.
-   * True when near was not requested, or at least one store has address/feed geo.
-   * Also false when the user origin was only city-precision (geocoded location).
+   * False only when distance cannot order the candidates at all — every matching
+   * store collapses onto one shared coordinate, so "nearest" is meaningless.
+   *
+   * A city-level ORIGIN no longer clears this flag. Measuring from a city centroid
+   * instead of the exact doorstep shifts every store by a few km but preserves
+   * their order, and suppressing distance in that case is what silently reduced a
+   * 131-store radius comparison to 16 same-city stores.
    */
   distanceReliable: boolean;
+  /**
+   * True when distances are usable but coarse — a city-level origin, or stores
+   * placed by city centroid. Callers should present them as approximate.
+   */
+  distanceApproximate: boolean;
   requested: {
     city: string | null;
     near: GeoPoint | null;
@@ -62,6 +95,7 @@ function requestedMetadata(params: ListStoresParams): StoreLocationMetadata {
     warning: null,
     // Near not requested → distance is irrelevant / reliable by default.
     distanceReliable: !params.near,
+    distanceApproximate: false,
     requested: {
       city: params.city ?? null,
       near: params.near ?? null,
@@ -94,13 +128,21 @@ function storeMatchesRequestedCity(store: StoreSummary, city: string): boolean {
  * True when a store may appear in distance-scoped recommendations
  * (bestSingleStore / cheapestCompleteStore / multiStore).
  *
- * Reliable near scope: require branch-level coordinates and distanceKm <= radius.
- * City-level / unreliable distance: city membership only (distance ranking suppressed).
+ * Rules, in order:
+ *  - never recommend a non-branch endpoint (online / pickup / warehouse): those
+ *    rows carry the deepest price catalogs in the feed but are not places to shop
+ *  - no point requested: city membership when a city was given, else everything
+ *  - degenerate distance (all stores share one coordinate): fall back to city
+ *    membership if a city was given, otherwise keep them — a comparison ranked on
+ *    price alone is still useful, and returning nothing is not
+ *  - otherwise: inside the radius, allowing city-placed stores a small slack
  */
 export function isEligibleForDistanceRecommendation(
   store: StoreSummary,
   location: StoreLocationMetadata,
 ): boolean {
+  if (!isShoppableStoreKind(store.storeKind)) return false;
+
   const near = location.requested.near;
   const city = location.requested.city;
 
@@ -109,16 +151,16 @@ export function isEligibleForDistanceRecommendation(
     return true;
   }
 
-  if (!location.distanceReliable || location.precision === "city") {
+  if (!location.distanceReliable) {
     if (city) return storeMatchesRequestedCity(store, city);
-    // Near with city-level honesty and no city filter — cannot honestly recommend.
-    return false;
+    // Distance cannot order these, but they are still real priced stores in the
+    // requested scope. Rank them on price rather than recommending nothing.
+    return true;
   }
 
   const radiusKm = resolveRadiusKm(near, location.requested.radiusKm ?? undefined);
-  if (radiusKm == null) return isBranchGeoSource(store.geoSource) && store.distanceKm != null;
-  if (!isBranchGeoSource(store.geoSource)) return false;
   if (store.distanceKm == null) return false;
+  if (radiusKm == null) return true;
   return store.distanceKm <= radiusKm;
 }
 
@@ -132,7 +174,7 @@ function rejectKnownOutOfRadiusStores(
   location: StoreLocationMetadata,
 ): StoreSummary[] {
   const near = location.requested.near;
-  if (!near || !location.distanceReliable || location.precision === "city") {
+  if (!near || !location.distanceReliable) {
     return stores;
   }
   const radiusKm = resolveRadiusKm(near, location.requested.radiusKm ?? undefined);
@@ -158,29 +200,32 @@ function applyNearDistanceHonesty(
 ): StoreLocationMetadata {
   if (!location.requested.near) return location;
 
-  const hasReliable = stores.some((s) => isReliableGeoSource(s.geoSource));
-  if (hasReliable) {
-    return { ...location, distanceReliable: true };
-  }
-
   const withCoords = stores.filter(hasValidStoreCoordinates);
-  const allCityCentroid =
-    withCoords.length > 0 && withCoords.every((s) => s.geoSource === "city_centroid");
-  const allSharedCentroid =
+
+  // Distance can only fail to order stores when they all sit on the same point.
+  const allSharedCoordinate =
     withCoords.length > 1 &&
     withCoords.every((s) => isCentroidOrUnknown(s.geoSource) && coordsMatch(s, withCoords[0]!));
 
-  if (allCityCentroid || allSharedCentroid) {
+  if (allSharedCoordinate) {
     return {
       ...location,
       distanceReliable: false,
-      // City-level points aren't branch-radius precision.
+      distanceApproximate: true,
+      // One shared city point is not branch-radius precision.
       precision: "city",
       warning: location.warning ?? CENTROID_WARNING,
     };
   }
 
-  return { ...location, distanceReliable: false };
+  const anyCityPlaced = withCoords.some((s) => !isReliableGeoSource(s.geoSource));
+  return {
+    ...location,
+    distanceReliable: withCoords.length > 0,
+    distanceApproximate: location.distanceApproximate || anyCityPlaced,
+    warning:
+      location.warning ?? (anyCityPlaced ? APPROXIMATE_DISTANCE_WARNING : null),
+  };
 }
 
 /**
@@ -200,6 +245,7 @@ async function resolveCityByShortening(
       chain: params.chain,
       city,
       storeIds: params.storeIds,
+      shoppableOnly: params.shoppableOnly,
     });
     if (shortenedStores.length > 0) return { city, stores: shortenedStores };
   }
@@ -232,6 +278,10 @@ export async function resolveStoreLocation(
       chain: params.chain,
       city: params.city,
       storeIds: params.storeIds,
+      // Must survive the fallback: dropping it let online / warehouse rows back
+      // into a basket comparison, inflating storesCompared with endpoints the
+      // recommendation layer then has to filter out again.
+      shoppableOnly: params.shoppableOnly,
     };
     const cityStores = await loadStores(cityParams);
     if (cityStores.length > 0 && !cityStores.some(hasValidStoreCoordinates)) {
@@ -275,6 +325,7 @@ export async function resolveStoreLocation(
     const reloadParams: ListStoresParams = {
       chain: params.chain,
       storeIds: params.storeIds,
+      shoppableOnly: params.shoppableOnly,
     };
     const candidates = await loadStores(reloadParams);
     const anyGeocoded = candidates.some(hasValidStoreCoordinates);

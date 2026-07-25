@@ -163,6 +163,77 @@ function buildQueryText(location: string, city?: string | null): string {
   return `${loc}, ${cityCanon}`;
 }
 
+/**
+ * How many background warm-ups may be outstanding at once.
+ *
+ * Nominatim's usage policy caps us at ~1 request/second and the client
+ * serializes on a process-wide queue, so an unbounded warm-up per uncached
+ * request would build a queue that never drains and would look like abuse.
+ * One at a time means popular locations get upgraded over the course of normal
+ * traffic without ever exceeding the budget the precise path already uses.
+ */
+const MAX_INFLIGHT_GEOCODE_WARMUPS = 1;
+let inflightWarmups = 0;
+
+/** Visible for tests that need a clean warm-up budget. */
+export function _resetGeocodeWarmupsForTests(): void {
+  inflightWarmups = 0;
+}
+
+/**
+ * Resolve and persist a free-text location in the background.
+ *
+ * Fire-and-forget: the caller has already answered from a city centroid, so this
+ * exists only so the NEXT request for the same place gets address precision from
+ * cache at zero latency. Failures are swallowed on purpose — a warm-up that does
+ * not happen must never surface as a request error, and a genuine miss is
+ * negative-cached by the same path `precise` uses.
+ */
+async function warmGeocodeCache(
+  location: string,
+  cityHint: string | null,
+  queryKey: string,
+): Promise<void> {
+  if (inflightWarmups >= MAX_INFLIGHT_GEOCODE_WARMUPS) return;
+  inflightWarmups += 1;
+  try {
+    const outcome = await nominatimSearchFreeText(buildQueryText(location, cityHint), {
+      dedupeKey: queryKey,
+    });
+    if (outcome.kind === "hit") {
+      await putGeocodeCache({
+        queryKey,
+        displayName: outcome.hit.displayName,
+        point: outcome.hit.point,
+        precision: outcome.hit.precision,
+        provider: "nominatim",
+        status: "hit",
+      });
+      return;
+    }
+    if (outcome.kind === "empty") {
+      const fallback = cityCentroidFallback(cityHint);
+      await putGeocodeCache(
+        fallback
+          ? {
+              queryKey,
+              displayName: fallback.displayName,
+              point: fallback.point,
+              precision: "city",
+              provider: "city_centroid",
+              status: "hit",
+            }
+          : { queryKey, provider: "nominatim", status: "miss" },
+      );
+    }
+    // "unavailable" is transient — never cached, so a later call retries.
+  } catch {
+    // Background best effort only.
+  } finally {
+    inflightWarmups -= 1;
+  }
+}
+
 function resolveStrategy(strategy: GeocodeStrategy | undefined): GeocodeStrategy {
   const value = strategy ?? "precise";
   switch (value) {
@@ -262,8 +333,13 @@ export async function resolveGeocodeQuery(
   if (strategy === "fast") {
     const fallback = cityCentroidFallback(cityHint);
     if (fallback) {
-      // Do not persist fast city-centroid as a positive hit — precise must still
-      // be able to reach Nominatim later for the same query key.
+      // Warm the cache for next time WITHOUT paying for it now. Nominatim is
+      // rate-limited to ~1 req/s process-wide, so awaiting it here would blow the
+      // one-call latency budget; but returning a centroid forever meant a user's
+      // real address was never used, which switched distance ranking off in the
+      // default path. Detaching gives the same latency plus address precision on
+      // every subsequent call for the same place.
+      void warmGeocodeCache(location, cityHint, queryKey);
       return {
         status: "ok",
         point: fallback.point,
@@ -276,17 +352,7 @@ export async function resolveGeocodeQuery(
         warning: FAST_CITY_CENTROID_WARNING,
       };
     }
-    return {
-      status: "not_found",
-      point: null,
-      precision: null,
-      provider: null,
-      cached: false,
-      fallbackApplied: false,
-      displayName: null,
-      attribution: null,
-      warning: "location not found",
-    };
+    // No centroid to fall back to — Nominatim is the only option, so await it.
   }
 
   const queryText = buildQueryText(location, cityHint);

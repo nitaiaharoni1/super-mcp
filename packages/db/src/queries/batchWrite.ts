@@ -265,18 +265,28 @@ export async function bulkUpsertStorePrices(
      ),
      ups AS (
        INSERT INTO store_price (
-         listing_id, store_id, price, unit_price, currency, allow_discount, source_ts, ingested_at
+         listing_id, store_id, price, unit_price, currency, allow_discount, source_ts,
+         ingested_at, last_seen_at
        )
-       SELECT listing_id, store_id, price, unit_price, currency, allow_discount, source_ts, now()
+       SELECT listing_id, store_id, price, unit_price, currency, allow_discount, source_ts,
+              now(), now()
        FROM input
+       -- Per-column monotonic gate, mirroring upsertStorePrice: last_seen_at must
+       -- advance even when the feed republishes an OLDER PriceUpdateDate, or a
+       -- still-stocked item would look delisted to reconciliation.
        ON CONFLICT (listing_id, store_id) DO UPDATE SET
-         price = EXCLUDED.price,
-         unit_price = EXCLUDED.unit_price,
-         currency = EXCLUDED.currency,
-         allow_discount = EXCLUDED.allow_discount,
-         source_ts = EXCLUDED.source_ts,
-         ingested_at = now()
-       WHERE store_price.source_ts <= EXCLUDED.source_ts
+         price = CASE WHEN store_price.source_ts <= EXCLUDED.source_ts
+                      THEN EXCLUDED.price ELSE store_price.price END,
+         unit_price = CASE WHEN store_price.source_ts <= EXCLUDED.source_ts
+                           THEN EXCLUDED.unit_price ELSE store_price.unit_price END,
+         currency = CASE WHEN store_price.source_ts <= EXCLUDED.source_ts
+                         THEN EXCLUDED.currency ELSE store_price.currency END,
+         allow_discount = CASE WHEN store_price.source_ts <= EXCLUDED.source_ts
+                               THEN EXCLUDED.allow_discount ELSE store_price.allow_discount END,
+         source_ts = GREATEST(store_price.source_ts, EXCLUDED.source_ts),
+         ingested_at = CASE WHEN store_price.source_ts <= EXCLUDED.source_ts
+                            THEN now() ELSE store_price.ingested_at END,
+         last_seen_at = now()
        RETURNING listing_id, store_id, price, unit_price, currency, source_ts
      )
      INSERT INTO price_point (listing_id, store_id, price, unit_price, currency, source_ts)

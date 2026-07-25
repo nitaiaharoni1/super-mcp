@@ -70,12 +70,22 @@ export const basketInitialRequestSchema = {
       maximum: 500,
       description: "Max store breakdowns (default 5). 0 = all.",
     },
+    preference: {
+      type: "string",
+      enum: ["cheapest", "balanced", "closest"],
+      default: "balanced",
+      description:
+        "Travel-vs-price appetite. cheapest ignores distance; closest returns the " +
+        "nearest store that still covers enough of the list; balanced is the default. " +
+        "Sets distance_penalty_per_km to 0 / 3 / 60 respectively.",
+    },
     distance_penalty_per_km: {
       type: "number",
       minimum: 0,
       maximum: 100,
-      default: 3,
-      description: "Shekels of cost per km when ranking bestSingleStore (default 3).",
+      description:
+        "Advanced override for the shekel cost charged per km when ranking stores. " +
+        "Overrides `preference`.",
     },
     verbose: {
       type: "boolean",
@@ -158,8 +168,28 @@ const basketLineSchema = {
     itemCode: { type: "string" },
     unitPrice: { type: "number" },
     lineTotal: { type: "number" },
+    sizeQty: { type: "number", nullable: true },
+    sizeUnit: { type: "string", nullable: true },
+    normalizedUnitPrice: {
+      type: "number",
+      nullable: true,
+      description:
+        "Shelf price per 100 g / 100 ml / piece for the priced SKU. Use this to compare " +
+        "two stores whose equivalents differ in pack size.",
+    },
+    normalizedUnitBasis: {
+      type: "string",
+      nullable: true,
+      enum: ["per_100g", "per_100ml", "per_piece"],
+    },
     promoApplied: { type: "boolean" },
     promoDescription: { type: "string", nullable: true },
+    clubOnly: {
+      type: "boolean",
+      description:
+        "True when lineTotal relies on a loyalty-club promo, so the shopper needs the " +
+        "chain's card to pay it.",
+    },
     substituted: { type: "boolean" },
     substitutionReason: { type: "string", nullable: true },
     originalProductId: { type: "string", format: "uuid", nullable: true },
@@ -191,6 +221,11 @@ const basketStorePlanSchema = {
         "currency",
         "lines",
         "missingItems",
+        "comparableTotal",
+        "imputedTotal",
+        "imputedLines",
+        "clubOnlyLines",
+        "distanceAccuracy",
       ],
       properties: {
         storeId: { type: "string", format: "uuid" },
@@ -205,11 +240,86 @@ const basketStorePlanSchema = {
         totalScope: basketTotalScopeSchema,
         currency: { type: "string" },
         distanceKm: { type: "number", nullable: true },
+        distanceAccuracy: {
+          type: "string",
+          enum: ["branch", "city", "unknown"],
+          description:
+            "branch = geocoded from the branch address; city = city centroid stood in, so " +
+            "the figure is city-accurate rather than exact; unknown = no usable coordinates.",
+        },
+        comparableTotal: {
+          type: "number",
+          description:
+            "total plus a market reference price for each resolvable line this store does " +
+            "not stock. Rank stores on this: raw total makes a store look cheap purely for " +
+            "not carrying the expensive item.",
+        },
+        imputedTotal: {
+          type: "number",
+          description: "Reference cost of the lines this store does not price.",
+        },
+        imputedLines: {
+          type: "integer",
+          description: "How many lines were imputed. 0 means comparableTotal is fully observed.",
+        },
+        clubOnlyLines: {
+          type: "integer",
+          description: "Priced lines whose price needs the chain's loyalty card.",
+        },
         lines: { type: "array", items: basketLineSchema },
+        linesTruncated: {
+          type: "boolean",
+          description:
+            "Present and true only in summary detail when `lines` was shortened for " +
+            "payload size. `pricedLines` always reports the real count; request " +
+            "response_detail=standard for the full breakdown.",
+        },
         missingItems: { type: "array", items: { type: "object" } },
       },
     },
   ],
+};
+
+/**
+ * One store in the `stores` comparison array. Previously declared as an untyped
+ * object, which left agents no way to learn that a distance may be city-accurate.
+ */
+const basketStoreResultSchema = {
+  type: "object",
+  required: ["storeId", "storeName", "chainId", "chainName", "total", "itemsFound", "lines"],
+  properties: {
+    storeId: { type: "string", format: "uuid" },
+    storeName: { type: "string" },
+    chainId: { type: "string" },
+    chainName: { type: "string" },
+    city: { type: "string", nullable: true },
+    address: { type: "string", nullable: true },
+    distanceKm: { type: "number", nullable: true },
+    distanceAccuracy: {
+      type: "string",
+      enum: ["branch", "city", "unknown"],
+      description:
+        "branch = geocoded from the branch address; city = a city centroid stood in, so " +
+        "the figure is city-accurate rather than exact; unknown = no usable coordinates.",
+    },
+    storeKind: {
+      type: "string",
+      nullable: true,
+      enum: ["branch", "online", "pickup", "warehouse"],
+      description: "Only 'branch' rows are eligible to be recommended as a place to shop.",
+    },
+    currency: { type: "string" },
+    total: {
+      type: "number",
+      description:
+        "Money spent at this store, covering only the lines it prices. Rank stores on the " +
+        "plans' comparableTotal instead — a raw total makes the least-stocked store look cheapest.",
+    },
+    itemsFound: { type: "integer" },
+    itemsRequested: { type: "integer" },
+    lines: { type: "array", items: basketLineSchema },
+    missingItems: { type: "array", items: { type: "object" } },
+  },
 };
 
 const basketQuestionSchema = {
@@ -326,6 +436,7 @@ const basketAssumptionSchema = {
         "generic_variant_default",
         "location_city_fallback",
         "unsafe_line_omitted",
+        "availability_upgrade",
       ],
     },
     message: { type: "string" },
@@ -338,6 +449,7 @@ export const basketCompleteResponseSchema = {
     "status",
     "bestSingleStore",
     "cheapestCompleteStore",
+    "closestStore",
     "multiStore",
     "items",
     "location",
@@ -346,6 +458,12 @@ export const basketCompleteResponseSchema = {
   properties: {
     status: { type: "string", enum: ["complete"] },
     bestSingleStore: { oneOf: [basketStorePlanSchema, { type: "null" }] },
+    closestStore: {
+      oneOf: [basketStorePlanSchema, { type: "null" }],
+      description:
+        "Nearest store that still covers enough of the list to be worth the trip. Null when " +
+        "it would name the same store as another plan.",
+    },
     cheapestCompleteStore: { oneOf: [basketStorePlanSchema, { type: "null" }] },
     multiStore: {
       oneOf: [
@@ -364,6 +482,33 @@ export const basketCompleteResponseSchema = {
                 totalScope: basketTotalScopeSchema,
                 currency: { type: "string" },
                 storeCount: { type: "integer" },
+                stops: {
+                  type: "array",
+                  description:
+                    "Every stop with its distance and subtotal, nearest first. A split basket " +
+                    "is only a real option if the shopper can see how far it spreads.",
+                  items: {
+                    type: "object",
+                    properties: {
+                      storeId: { type: "string", format: "uuid" },
+                      storeName: { type: "string" },
+                      chainName: { type: "string" },
+                      address: { type: "string", nullable: true },
+                      distanceKm: { type: "number", nullable: true },
+                      subtotal: { type: "number" },
+                      lines: { type: "integer" },
+                    },
+                  },
+                },
+                maxDistanceKm: { type: "number", nullable: true },
+                estimatedTravelKm: {
+                  type: "number",
+                  nullable: true,
+                  description:
+                    "Approximate round-trip driving distance for all stops (hub-and-spoke " +
+                    "upper bound, not a routed distance). Null when any stop lacks coordinates.",
+                },
+                clubOnlyLines: { type: "integer" },
                 lines: { type: "array", items: { type: "object" } },
                 missingItemIndexes: { type: "array", items: { type: "integer" } },
               },
@@ -381,8 +526,10 @@ export const basketCompleteResponseSchema = {
     },
     stores: {
       type: "array",
-      items: { type: "object" },
-      description: "Omitted from summary. standard keeps recommended-store lines; debug keeps all.",
+      items: basketStoreResultSchema,
+      description:
+        "Stores compared, ordered by the same effective cost used to pick the plans. " +
+        "Omitted from summary; standard keeps lines only for the recommended stores; debug keeps all.",
     },
     storesCompared: { type: "integer" },
     storesTruncated: { type: "boolean" },

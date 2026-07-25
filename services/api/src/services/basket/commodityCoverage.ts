@@ -11,7 +11,14 @@ import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { resolveCoverageClassScope, type CoverageClassScope } from "./coverageScope.js";
 import { diversifyByChain } from "./diversifyByChain.js";
-import { queryHeadAnchored } from "./equivalence.js";
+import {
+  DEFAULT_PACK_TOLERANCE,
+  hasUnrequestedPreservedForm,
+  pieceCountsConflict,
+  queryHeadAnchored,
+} from "./equivalence.js";
+import { hasUnrequestedDerivedForm } from "./derivedForm.js";
+import { rejectPercentMismatch } from "./percentAttribute.js";
 import { buildBasketIntentProfile } from "./intentProfile.js";
 import { brandMatches, riskTokens } from "./lineRisk.js";
 import { packageFormsCompatible } from "./packageForm.js";
@@ -248,6 +255,7 @@ export function filterClassPeers(
       classL2: primary.classL2,
       productClass: primary.productClass,
     });
+  const queryTokenSet = new Set(queryTokens);
   const seen = new Set<string>();
   const compatible: CarriedProductRow[] = [];
   for (const row of rows) {
@@ -257,11 +265,43 @@ export function filterClassPeers(
     if (requireQueryTokens && !queryHeadAnchored(queryText, row.name)) continue;
     if (rejectUnsafeChickenName(queryText, row.name)) continue;
     if (rejectUnsafePlainMilkName(queryText, row.name)) continue;
+    // The SAME form / percentage / pack gates the resolution path applies.
+    //
+    // These were missing here, so anything resolution rejected as the wrong form
+    // could still be substituted at PRICING time as a "chain equivalent". That is
+    // how a correctly resolved 32-roll toilet paper was billed as moist wipes:
+    // resolution rejected the wipes, coverage peers let them straight back in.
+    if (hasUnrequestedPreservedForm(queryTokenSet, row.name)) continue;
+    if (hasUnrequestedDerivedForm(queryText, row.name)) continue;
+    if (rejectPercentMismatch(queryText, row.name)) continue;
+    // Pack COUNT equality: without this a 6-egg pack peers with a 12-egg request,
+    // because a "1 unit" size stub makes every pack look compatible.
+    if (
+      pieceCountsConflict(
+        {
+          pieceCount: primary.pieceCount,
+          sizeQty: primary.sizeQty,
+          sizeUnit: primary.sizeUnit,
+          name: primary.name,
+        },
+        {
+          pieceCount: row.piece_count ?? null,
+          sizeQty: row.size_qty,
+          sizeUnit: row.size_unit,
+          name: row.name,
+        },
+      )
+    ) {
+      continue;
+    }
     if (
       !packSizesCompatible(
         { sizeQty: primary.sizeQty, sizeUnit: primary.sizeUnit, name: primary.name },
         { sizeQty: row.size_qty, sizeUnit: row.size_unit, name: row.name },
-        { allowCountToWeight },
+        // Must match the resolution path's tolerance. Omitting it fell back to the
+        // shared default of 0.5, so the ±50% window that lets the smaller pack win
+        // every line survived here even after resolution tightened to 0.15.
+        { allowCountToWeight, packTolerance: DEFAULT_PACK_TOLERANCE },
       ).compatible
     ) {
       continue;

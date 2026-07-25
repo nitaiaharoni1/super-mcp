@@ -1,9 +1,11 @@
+import { rankingDistanceKm } from "./recommendStores.js";
 import type {
   BasketCandidate,
   BasketItemStatus,
   BasketLine,
   BasketStoreResult,
   MultiStoreLine,
+  MultiStoreStop,
   ResolvedItem,
 } from "./types.js";
 
@@ -14,6 +16,10 @@ export interface MultiStorePlanDraft {
   storeCount: number;
   lines: MultiStoreLine[];
   missingItemIndexes: number[];
+  stops: MultiStoreStop[];
+  maxDistanceKm: number | null;
+  estimatedTravelKm: number | null;
+  clubOnlyLines: number;
 }
 
 export function isLineSubstituted(
@@ -121,6 +127,26 @@ export interface MultiStorePlanOptions {
   minMarginalSavings?: number;
   /** Cap on total stores (coverage still takes precedence over this cap). */
   maxStores?: number;
+  /**
+   * Shekels of "cost" per km. An extra stop has to beat its own driving cost, not
+   * just a flat threshold — the plan previously ignored distance entirely and
+   * would happily send a shopper 9km across town to save ₪21.
+   */
+  distancePenaltyPerKm?: number;
+  /** When false, distance cannot order the stores, so it is left out of the maths. */
+  distanceReliable?: boolean;
+}
+
+/** Driving cost charged for adding a stop, on top of the flat savings floor. */
+function stopTravelCost(
+  store: BasketStoreResult,
+  opts: MultiStorePlanOptions,
+): number {
+  if (opts.distanceReliable === false) return 0;
+  const perKm = opts.distancePenaltyPerKm ?? 0;
+  if (perKm <= 0) return 0;
+  // Round trip: the shopper drives out and back for this extra stop.
+  return rankingDistanceKm(store.distanceKm, store.distanceAccuracy) * perKm * 2;
 }
 
 /**
@@ -185,6 +211,8 @@ export function buildMultiStorePlan(
   const selected = new Set<string>();
 
   // Phase 1 — greedy set cover: fewest stores that cover every coverable line.
+  // Among stores adding equal coverage, prefer the one whose basket-plus-driving
+  // cost is lowest, so a nearer store wins ties instead of an arbitrary cheaper one.
   const uncovered = new Set(pricing.map((p) => p.itemIndex));
   while (uncovered.size > 0) {
     let bestStore: string | null = null;
@@ -192,6 +220,8 @@ export function buildMultiStorePlan(
     let bestAddedCost = Number.POSITIVE_INFINITY;
     for (const sid of orderedStoreIds) {
       if (selected.has(sid)) continue;
+      const store = storeById.get(sid);
+      if (!store) continue;
       let newCover = 0;
       let addedCost = 0;
       for (const p of pricing) {
@@ -203,13 +233,16 @@ export function buildMultiStorePlan(
         }
       }
       if (newCover === 0) continue;
+      // The first store is the anchor trip, which the shopper makes regardless.
+      const effectiveAddedCost =
+        addedCost + (selected.size === 0 ? 0 : stopTravelCost(store, opts));
       if (
         newCover > bestNewCover ||
-        (newCover === bestNewCover && addedCost < bestAddedCost)
+        (newCover === bestNewCover && effectiveAddedCost < bestAddedCost)
       ) {
         bestStore = sid;
         bestNewCover = newCover;
-        bestAddedCost = addedCost;
+        bestAddedCost = effectiveAddedCost;
       }
     }
     if (!bestStore) break; // remaining items unpriceable anywhere
@@ -221,22 +254,27 @@ export function buildMultiStorePlan(
     }
   }
 
-  // Phase 2 — add a cost-only store only when it clears the marginal threshold.
+  // Phase 2 — add a cost-only store only when its savings beat BOTH the flat
+  // "worth another stop" floor and the driving cost of getting there.
   while (selected.size < maxStores) {
     const currentTotal = planTotalFor(selected);
     let bestStore: string | null = null;
-    let bestSavings = 0;
+    let bestNetSavings = 0;
     for (const sid of orderedStoreIds) {
       if (selected.has(sid)) continue;
+      const store = storeById.get(sid);
+      if (!store) continue;
       const trial = new Set(selected);
       trial.add(sid);
       const savings = currentTotal - planTotalFor(trial);
-      if (savings > bestSavings) {
+      if (savings < minSavings) continue;
+      const netSavings = savings - stopTravelCost(store, opts);
+      if (netSavings > bestNetSavings) {
         bestStore = sid;
-        bestSavings = savings;
+        bestNetSavings = netSavings;
       }
     }
-    if (!bestStore || bestSavings < minSavings) break;
+    if (!bestStore || bestNetSavings <= 0) break;
     selected.add(bestStore);
   }
 
@@ -264,10 +302,12 @@ export function buildMultiStorePlan(
       storeName: best.store.storeName,
       chainName: best.store.chainName,
       address: best.store.address,
+      distanceKm: best.store.distanceKm,
       lineTotal: best.line.lineTotal,
       unitPrice: best.line.unitPrice,
       promoApplied: best.line.promoApplied,
       promoDescription: best.line.promoDescription,
+      clubOnly: best.line.clubOnly,
       link: best.line.link,
     });
   }
@@ -276,15 +316,49 @@ export function buildMultiStorePlan(
   lines.sort((a, b) => a.itemIndex - b.itemIndex);
   missingItemIndexes.sort((a, b) => a - b);
 
-  const storeCount = new Set(lines.map((l) => l.storeId)).size;
+  const usedStoreIds = [...new Set(lines.map((l) => l.storeId))];
   const total = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
+
+  // Report the trip, not just the price: a 3-stop plan is only a real option if
+  // the shopper can see how far it spreads.
+  const stops: MultiStoreStop[] = usedStoreIds.map((sid) => {
+    const store = storeById.get(sid)!;
+    const storeLines = lines.filter((l) => l.storeId === sid);
+    return {
+      storeId: sid,
+      storeName: store.storeName,
+      chainName: store.chainName,
+      address: store.address,
+      distanceKm: store.distanceKm,
+      subtotal: Math.round(storeLines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100,
+      lines: storeLines.length,
+    };
+  });
+  stops.sort(
+    (a, b) =>
+      (a.distanceKm ?? Number.POSITIVE_INFINITY) - (b.distanceKm ?? Number.POSITIVE_INFINITY) ||
+      a.storeId.localeCompare(b.storeId),
+  );
+  const knownDistances = stops
+    .map((s) => s.distanceKm)
+    .filter((km): km is number => km != null);
+  const maxDistanceKm =
+    knownDistances.length > 0 ? Math.max(...knownDistances) : null;
+  const estimatedTravelKm =
+    knownDistances.length === stops.length && stops.length > 0
+      ? Math.round(knownDistances.reduce((s, km) => s + km, 0) * 2 * 10) / 10
+      : null;
 
   return {
     total,
     currency: storeResults[0]?.currency ?? "ILS",
-    storeCount,
+    storeCount: usedStoreIds.length,
     lines,
     missingItemIndexes,
+    stops,
+    maxDistanceKm,
+    estimatedTravelKm,
+    clubOnlyLines: lines.reduce((n, l) => n + (l.clubOnly ? 1 : 0), 0),
   };
 }
 
