@@ -74,6 +74,25 @@ So the order is fixed:
 Reverting the code without reverting the migration is safe. Reverting the
 migration while the new code is live is not.
 
+### ANALYZE after any bulk classification or backfill
+
+A large write to `product_class_map` or `product` leaves the planner's statistics
+stale, and the request path degrades badly rather than failing visibly. Measured
+right after classifying 10,624 names: the fixture-basket median went from 992ms to
+**11,211ms**, an 11x regression that showed up only as a perf-test failure. One
+`VACUUM ANALYZE` restored it.
+
+So after `classifyProducts.ts`, `backfillPackMetadata.ts`, or any bulk import:
+
+```bash
+psql "$DATABASE_URL" -c 'VACUUM ANALYZE product_class_map;'
+psql "$DATABASE_URL" -c 'VACUUM ANALYZE product;'
+psql "$DATABASE_URL" -c 'ANALYZE listing;'
+```
+
+Run them as separate statements: VACUUM cannot run inside a transaction block, so a
+multi-statement `-c` fails.
+
 ### Cloud Run note
 
 Fast-mode geocoding answers from a city centroid and resolves the real address in

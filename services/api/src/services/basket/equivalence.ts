@@ -10,7 +10,7 @@ import {
 } from "@super-mcp/shared";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
-import { hasUnrequestedDerivedForm } from "./derivedForm.js";
+import { hasUnrequestedDerivedForm, queryNamesDerivedForm } from "./derivedForm.js";
 import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { percentConflict, rejectPercentMismatch } from "./percentAttribute.js";
 import { resolveCoverageClassScope, scopedClassesConflict } from "./coverageScope.js";
@@ -52,6 +52,45 @@ function classesConflict(
  */
 export function variantConflict(a: BasketCandidate, b: BasketCandidate): boolean {
   return Boolean(a.variant && b.variant && a.variant !== b.variant);
+}
+
+/**
+ * The two are different KINDS of thing: the staple versus something made from it or
+ * a dish built around it (migration 025 `preparation`).
+ *
+ * This is the labelled replacement for guessing from names. `class_l3` was supposed
+ * to separate these and is absent for most of the catalog, so a plain `אורז` line
+ * could price rice PAPER and rice NOODLES, and a plain `יוגורט` line a
+ * chocolate-cornflake dessert. `hasUnrequestedDerivedForm` still guards the
+ * unlabelled remainder, but a token deny-list is a hazard (one iteration of the
+ * roll-count guard mislabelled 196 of 255 matches), so a real label takes precedence
+ * wherever one exists.
+ *
+ * Unknown on either side is NOT a conflict, exactly like `variantConflict`, so
+ * behaviour degrades to the previous name-based logic at partial coverage instead of
+ * rejecting everything.
+ */
+/**
+ * Coarse grouping: what KIND of thing is this, rather than which flavour?
+ *
+ * `plain` and `flavoured` are the same food to a shopping list (strawberry yogurt is
+ * still yogurt); flavour is what `variant` exists to separate. Only a dish built
+ * around the staple, or an ingredient derived from it, is a different kind.
+ *
+ * Learned by measurement: treating `flavoured` as a conflict shrank equivalence sets
+ * and dropped the accuracy benchmark from 78.0% to 71.4% with coverage 91% to 89.3%,
+ * because lines fell back to a thinly-stocked primary instead of a stocked peer.
+ */
+function preparationKind(preparation: string | null | undefined): string | null {
+  if (!preparation) return null;
+  if (preparation === "plain" || preparation === "flavoured") return "staple";
+  return preparation;
+}
+
+export function preparationConflict(a: BasketCandidate, b: BasketCandidate): boolean {
+  const ka = preparationKind(a.preparation);
+  const kb = preparationKind(b.preparation);
+  return Boolean(ka && kb && ka !== kb);
 }
 
 // Utensil / container / device / toy nouns. When one of these LEADS a product
@@ -413,9 +452,26 @@ export function isStapleIncompatible(
   if (hasUnrequestedPreservedForm(queryTokens, candidate.name)) return true;
   if (hasUnrequestedPersonalCare(queryTokens, candidate.name)) return true;
   // A product MADE FROM the staple is not the staple (rice paper / rice noodles /
-  // bread crumbs / butter-flavoured margarine). class_l3 would separate these but
-  // is populated for under a fifth of the catalog.
-  if (hasUnrequestedDerivedForm(queryText, candidate.name)) return true;
+  // bread crumbs / butter-flavoured margarine).
+  //
+  // The labelled `preparation` axis (migration 025) is authoritative when present;
+  // this name-based guard covers only the unlabelled remainder. Skipping it for
+  // labelled candidates matters because a token deny-list mislabels: one iteration
+  // of the roll-count guard got 196 of 255 catalog matches wrong. `plain` and
+  // `flavoured` are both the staple as far as a generic query is concerned.
+  if (candidate.preparation) {
+    // Labelled: the label decides. Strictly stronger than the token guard, which
+    // only fires when a MARKER WORD appears in the candidate name — so it never
+    // caught "יוגורט עם קורנפלקס מצופה שוקולד" (a dessert with no marker token)
+    // being priced for a plain יוגורט line. Kept unless the shopper's own wording
+    // asks for that form.
+    const isDerivedKind =
+      candidate.preparation === "derived_ingredient" ||
+      candidate.preparation === "prepared_meal";
+    if (isDerivedKind && !queryNamesDerivedForm(queryText)) return true;
+  } else if (hasUnrequestedDerivedForm(queryText, candidate.name)) {
+    return true;
+  }
   // An explicitly requested percentage is a hard constraint the shopper stated:
   // "קוטג׳ תנובה 5%" must not resolve to 1%.
   if (rejectPercentMismatch(queryText, candidate.name)) return true;
@@ -598,6 +654,7 @@ export function buildCommodityEquivalents(
     if (c.productClass !== top.productClass) continue;
     if (classesConflict(top, c, queryText)) continue; // different L3 (onion≠scallion); bare יין allows color peers
     if (variantConflict(top, c)) continue; // regular≠cherry/zero/organic
+    if (preparationConflict(top, c)) continue; // staple ≠ derived/prepared
     // Fat/content percentage is written into the name, never labelled as a
     // variant, so 1% and 9% cottage both read as "regular" without this.
     if (percentConflict(top, c)) continue;
@@ -686,6 +743,7 @@ export function buildAvailabilityEquivalents(
     if (primary.productClass && c.productClass && primary.productClass !== c.productClass) continue;
     if (classesConflict(primary, c)) continue;
     if (variantConflict(primary, c)) continue;
+    if (preparationConflict(primary, c)) continue;
     if (percentConflict(primary, c)) continue;
     out.push(c);
   }

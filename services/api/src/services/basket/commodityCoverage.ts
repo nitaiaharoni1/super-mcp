@@ -50,6 +50,10 @@ interface CarriedProductRow {
   min_price?: number | string | null;
   /** Catalog brand_extracted for brand-family equality checks. */
   brand_extracted?: string | null;
+  /** plain | flavoured | prepared_meal | derived_ingredient (migration 025); NULL = unclassified. */
+  preparation?: string | null;
+  /** single | multipack (migration 025); NULL = unclassified. */
+  pack_form?: string | null;
 }
 
 export interface BrandFamilyPeerSets {
@@ -85,12 +89,32 @@ async function fetchCarriedClassPeers(
   // whose name implies שרי/דיאט/אורגני would otherwise group into a generic line.
   conds.push(`m.variant = $${params.length + 1}`);
   params.push(primary.variant ?? "regular");
+  // Same axis, one level more fundamental: a peer must share the primary's
+  // PREPARATION. This is what stops a plain "אורז" line pricing rice paper or rice
+  // noodles, and a plain "יוגורט" line pricing a chocolate-cornflake dessert. Only
+  // applied when the primary is itself labelled; an unlabelled peer (NULL) is
+  // unknown, not disqualified, so the name-based guard stays the fallback and
+  // coverage never drops because classification is incomplete.
+  if (primary.preparation) {
+    // Same coarse grouping as preparationConflict: plain and flavoured are the same
+    // food to a shopping list, so they are interchangeable peers. Only a prepared
+    // dish or a derived ingredient is a different kind of thing.
+    const sameKind =
+      primary.preparation === "plain" || primary.preparation === "flavoured"
+        ? ["plain", "flavoured"]
+        : [primary.preparation];
+    conds.push(
+      `(m.preparation IS NULL OR m.preparation = ANY($${params.length + 1}::text[]))`,
+    );
+    params.push(sameKind);
+  }
   // Cap per chain first so large classes (produce/bakery) don't fill a global
   // LIMIT with one chain's SKUs before diversifyByChain can help.
   const res = await query<CarriedProductRow>(
     `WITH priced AS (
        SELECT DISTINCT ON (l.product_id) l.product_id, p.name, p.size_qty, p.size_unit,
-              p.piece_count, l.chain_id, sp.price, m.brand_extracted
+              p.piece_count, l.chain_id, sp.price, m.brand_extracted,
+              m.preparation, m.pack_form
          FROM product p
          JOIN product_class_map m ON m.product_id = p.id AND m.input_name = p.name
          JOIN listing l ON l.product_id = p.id
@@ -100,11 +124,12 @@ async function fetchCarriedClassPeers(
      ),
      ranked AS (
        SELECT product_id, name, size_qty, size_unit, piece_count, chain_id, price AS min_price,
-              brand_extracted,
+              brand_extracted, preparation, pack_form,
               row_number() OVER (PARTITION BY chain_id ORDER BY price ASC, product_id) AS rn
          FROM priced
      )
-     SELECT product_id, name, size_qty, size_unit, piece_count, chain_id, min_price, brand_extracted
+     SELECT product_id, name, size_qty, size_unit, piece_count, chain_id, min_price,
+            brand_extracted, preparation, pack_form
        FROM ranked
       WHERE rn <= 40
       LIMIT 400`,
@@ -202,6 +227,8 @@ function candidateFromPeerRow(
     classL3: scope.classL3 ?? null,
     variant: primary.variant,
     brandExtracted: row.brand_extracted ?? primary.brandExtracted,
+    preparation: row.preparation ?? null,
+    packForm: row.pack_form ?? null,
     intentTier: primary.intentTier,
   };
 }
@@ -348,12 +375,25 @@ export function isCoverageTarget(r: ResolvedItem, items: BasketItemInput[]): boo
   }
 }
 
-function applyClassInfo(primary: BasketCandidate, info: { l1: string; l2: string | null; l3: string | null; variant: string | null; brand: string | null }): void {
+function applyClassInfo(
+  primary: BasketCandidate,
+  info: {
+    l1: string;
+    l2: string | null;
+    l3: string | null;
+    variant: string | null;
+    brand: string | null;
+    preparation?: string | null;
+    packForm?: string | null;
+  },
+): void {
   primary.classL1 = info.l1;
   primary.classL2 = info.l2;
   primary.classL3 = info.l3;
   primary.variant = info.variant;
   primary.brandExtracted = info.brand;
+  primary.preparation = info.preparation ?? null;
+  primary.packForm = info.packForm ?? null;
   if (!primary.productClass) primary.productClass = info.l1;
 }
 

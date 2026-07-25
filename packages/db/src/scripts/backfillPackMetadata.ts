@@ -1,4 +1,4 @@
-import { cityMatchKeys, inferPackSizeFromName, normalizeMeasure } from "@super-mcp/shared";
+import { cityMatchKeys, inferPackCountFromName } from "@super-mcp/shared";
 import { closePool, getPool } from "../client/index.js";
 
 /**
@@ -6,7 +6,12 @@ import { closePool, getPool } from "../client/index.js";
  *
  * Heuristics (conservative — prefer leaving NULL over inventing facts):
  *   piece_count / sale_basis:
- *     - Derive only via inferPackSizeFromName when it yields a unit pack.
+ *     - Derive via inferPackCountFromName, which answers "how many units in this
+ *       pack" directly. inferPackSizeFromName cannot: for a multipack it returns
+ *       TOTAL CONTENTS ("4*160 גר" -> 640g) because the shelf price covers the whole
+ *       pack, so it never yields a count for exactly the packs that need one. That
+ *       gap is why canned_fish had piece_count on 3% of products and a 4-tin pack
+ *       could be priced against a single tin.
  *     - sale_basis = per_pack when piece_count > 1, else per_piece.
  *     - measure_source = name_inferred, confidence = 0.7.
  *   is_weighted:
@@ -69,11 +74,7 @@ function qtyAround1000(qty: number | null): boolean {
 }
 
 function inferUnitPieceCount(name: string): number | null {
-  const inferred = inferPackSizeFromName(name);
-  if (!inferred) return null;
-  const m = normalizeMeasure(inferred.quantity, inferred.unit);
-  if (m.unparseable || m.unit !== "unit" || m.quantity <= 0) return null;
-  return m.quantity;
+  return inferPackCountFromName(name);
 }
 
 async function main(): Promise<void> {
@@ -95,11 +96,17 @@ async function main(): Promise<void> {
 
   const limitSql = args.limit ? `LIMIT ${Math.floor(args.limit)}` : "";
 
-  const res = await pool.query<ListingRow & { class_l1: string | null }>(
+  const res = await pool.query<
+    ListingRow & {
+      class_l1: string | null;
+      product_name: string | null;
+      product_piece_count: number | null;
+    }
+  >(
     `SELECT DISTINCT ON (l.id)
        l.id, l.product_id, l.name, l.canonical_qty, l.canonical_unit,
        l.is_weighted, l.sale_basis, l.piece_count, l.measure_source, l.measure_confidence,
-       m.class_l1
+       m.class_l1, p.name AS product_name, p.piece_count AS product_piece_count
      FROM listing l
      LEFT JOIN product p ON p.id = l.product_id
      LEFT JOIN product_class_map m ON m.product_id = p.id AND m.input_name = p.name
@@ -211,6 +218,33 @@ async function main(): Promise<void> {
     }
   }
 
+  // Second pass: feed names are truncated per chain, so a LISTING name can lose the
+  // count its PRODUCT name still carries ("נייר טואלט גליל כפול" vs
+  // "נייר טואלט גליל כפול 16 רמילוי"). The rollup above only fires when the listing
+  // yielded a count, so those products stayed NULL. Read the count from the product
+  // name directly for them.
+  let productNameOnly = 0;
+  const seenProducts = new Set<string>();
+  for (const row of res.rows) {
+    if (!row.product_id || seenProducts.has(row.product_id)) continue;
+    if (row.product_piece_count != null) continue;
+    if (inferUnitPieceCount(row.name) != null) continue;
+    const fromProductName = row.product_name ? inferUnitPieceCount(row.product_name) : null;
+    if (fromProductName == null) continue;
+    seenProducts.add(row.product_id);
+    productNameOnly++;
+    if (!args.dryRun) {
+      await pool.query(
+        `UPDATE product SET
+           piece_count = COALESCE(piece_count, $2),
+           pack_metadata_source = COALESCE(pack_metadata_source, 'product_name_inferred'),
+           updated_at = now()
+         WHERE id = $1 AND piece_count IS NULL`,
+        [row.product_id, fromProductName],
+      );
+    }
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -222,6 +256,7 @@ async function main(): Promise<void> {
         weightedSet,
         saleBasisSet,
         productsUpdated,
+        productNameOnly,
         skipped,
       },
       null,

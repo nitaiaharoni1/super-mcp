@@ -26,6 +26,12 @@ export function hitToCandidate(
     classL2: classInfo?.l2 ?? null,
     classL3: classInfo?.l3 ?? null,
     variant: classInfo?.variant ?? null,
+    // The axis that separates a staple from things made out of it (migration 025).
+    // This is the ONLY stamping path for query-resolved candidates, so omitting it
+    // left `preparation` undefined on every shortlist entry and made the whole gate
+    // inert on the main flow.
+    preparation: classInfo?.preparation ?? null,
+    packForm: classInfo?.packForm ?? null,
     // Prefer offline brand_extracted; fall back to catalog brand when present.
     brandExtracted: classInfo?.brand ?? hit.brand ?? null,
     intentTier: hit.intentTier,

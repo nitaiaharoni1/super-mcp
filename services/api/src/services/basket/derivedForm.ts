@@ -134,6 +134,24 @@ function queryStems(queryText: string): { head: string | null; all: Set<string> 
  * ask for, in the construct position — i.e. it is a product MADE FROM the staple
  * rather than the staple.
  */
+/**
+ * Does the shopper's own query name a derived form?
+ *
+ * Used to decide whether a labelled `derived_ingredient` / `prepared_meal` candidate
+ * was actually asked for. "רסק עגבניות" and "דפי אורז" name their own derivation and
+ * must keep matching; a bare "עגבניות" or "אורז" does not.
+ *
+ * Deliberately looser than `hasUnrequestedDerivedForm`: any marker anywhere in the
+ * query counts as intent, because we are asking about the SHOPPER's wording, not
+ * comparing two names.
+ */
+export function queryNamesDerivedForm(queryText: string): boolean {
+  for (const token of tokenizeNormalized(normalizeEmbedInput(queryText))) {
+    if (DERIVED_FORM_STEMS.has(stemHebrewToken(token))) return true;
+  }
+  return false;
+}
+
 export function hasUnrequestedDerivedForm(queryText: string, candidateName: string): boolean {
   if (!queryText.trim() || !candidateName.trim()) return false;
   const { head, all: requested } = queryStems(queryText);

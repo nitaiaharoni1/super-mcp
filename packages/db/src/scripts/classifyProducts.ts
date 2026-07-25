@@ -4,6 +4,8 @@ import {
   ALL_L2,
   ALL_L3,
   L3_NONE,
+  PACK_FORMS,
+  PREPARATIONS,
   TAXONOMY_L1,
   TAXONOMY_L2,
   TAXONOMY_L3,
@@ -45,6 +47,10 @@ interface Args {
   project: string;
   batchSize: number;
   concurrency: number;
+  /** Restrict to products already classified into these class_l2 buckets. */
+  l2: string[];
+  /** Only names whose existing rows lack `preparation` (resumable top-up). */
+  missingPreparation: boolean;
   limit: number | null;
   onlyMissing: boolean;
   dryRun: boolean;
@@ -61,6 +67,8 @@ function parseArgs(argv: string[]): Args {
     project: process.env.GOOGLE_CLOUD_PROJECT?.trim() ?? "",
     batchSize: 50,
     concurrency: 12,
+    l2: [],
+    missingPreparation: false,
     limit: null,
     onlyMissing: true,
     dryRun: false,
@@ -76,6 +84,9 @@ function parseArgs(argv: string[]): Args {
     else if (arg.startsWith("--region=")) a.region = arg.slice(9);
     else if (arg.startsWith("--account=")) a.account = arg.slice(10);
     else if (arg.startsWith("--project=")) a.project = arg.slice(10);
+    else if (arg.startsWith("--l2="))
+      a.l2 = arg.slice(5).split(",").map((v) => v.trim()).filter(Boolean);
+    else if (arg === "--missing-preparation") a.missingPreparation = true;
     else if (arg.startsWith("--batch-size=")) a.batchSize = Number(arg.slice(13));
     else if (arg.startsWith("--concurrency=")) a.concurrency = Number(arg.slice(14));
     else if (arg.startsWith("--limit=")) a.limit = Number(arg.slice(8));
@@ -142,6 +153,25 @@ Rules:
   baby_mini (בייבי/מיני), cherry_grape (שרי/מיני tomatoes/ענבניות), sliced_prepared
   (פרוס/קצוץ/מגורד/מרוסק ready-cut), whole_wheat (מלא/כוסמין), lactose_free (ללא לקטוז),
   spicy (חריף/פיקנטי). A plain product with none of these -> "regular".
+- preparation: is this the PLAIN staple, or something made from it? This is the axis
+  that decides whether two products are the same shopping-list line.
+  * plain: the staple itself. אורז לבן, חלב 3%, יוגורט לבן, טונה בשמן, לחם אחיד,
+    עגבניות, נייר טואלט.
+  * flavoured: same food with a flavour or additive, still eaten as that food.
+    יוגורט תות, חלב שוקו, טונה בשמן זית עם צ'ילי, לחם עם זרעים, קוטג' עם ירקות.
+  * prepared_meal: a DISH built around the staple, eaten as a meal.
+    טונה עם פסטה, ארוחת אורז ועדשים, סלט טונה מוכן, יוגורט עם קורנפלקס מצופה שוקולד,
+    ריו מרה אינסלטיסימי.
+  * derived_ingredient: made FROM the staple and no longer that food.
+    דפי אורז (rice paper), מקלוני אורז / אטריות אורז (rice noodles), קמח אורז,
+    רסק/רוטב עגבניות, פירורי לחם, אבקת חלב, שוקולד חלב, פריכיות אורז.
+  A plain product with nothing added -> "plain". When torn between flavoured and
+  prepared_meal, ask whether someone eats it AS the staple (flavoured) or as a dish
+  (prepared_meal).
+- pack_form: "multipack" when the name says several units are bundled
+  (4*160, 3*80 גרם, מארז רביעייה, שלישיית, שישייה, זוג, 32 גלילים, 12 יח,
+  תבנית 12). "single" for one unit. Judge only from the NAME; if it does not say,
+  answer "single".
 - brand: the manufacturer/brand as it appears in the NAME (e.g. "קפה נמס טסטרס צ'ויס"
   -> "טסטרס צ'ויס"; "קוקה קולה" -> "קוקה קולה"; "עגבניות" -> ""). Empty string if no
   brand is present (loose produce, generic items). Do NOT invent a brand.
@@ -154,6 +184,8 @@ interface ClassResult {
   l2: string;
   l3: string;
   variant: string;
+  preparation: string;
+  packForm: string;
   brand: string;
   confidence: string;
 }
@@ -177,10 +209,22 @@ function buildRequestBody(names: string[]): unknown {
             l2: { type: "STRING", enum: [...ALL_L2, L3_NONE] },
             l3: { type: "STRING", enum: [...ALL_L3, L3_NONE] },
             variant: { type: "STRING", enum: [...VARIANTS] },
+            preparation: { type: "STRING", enum: [...PREPARATIONS] },
+            packForm: { type: "STRING", enum: [...PACK_FORMS] },
             brand: { type: "STRING" },
             confidence: { type: "STRING", enum: ["high", "medium", "low"] },
           },
-          required: ["i", "l1", "l2", "l3", "variant", "brand", "confidence"],
+          required: [
+            "i",
+            "l1",
+            "l2",
+            "l3",
+            "variant",
+            "preparation",
+            "packForm",
+            "brand",
+            "confidence",
+          ],
         },
       },
     },
@@ -242,13 +286,32 @@ async function selectDistinctNames(args: Args): Promise<NameRow[]> {
   const missingFilter = args.onlyMissing
     ? `AND NOT EXISTS (SELECT 1 FROM product_class_map m WHERE m.product_id = p.id AND m.input_name = p.name)`
     : "";
+  // Bucket scoping: target only the class_l2 families where the plain-vs-derived
+  // distinction actually decides a basket answer, instead of reclassifying 96k rows.
+  const params: unknown[] = [];
+  let l2Filter = "";
+  if (args.l2.length > 0) {
+    params.push(args.l2);
+    l2Filter = `AND EXISTS (
+      SELECT 1 FROM product_class_map m2
+       WHERE m2.product_id = p.id AND m2.class_l2 = ANY($${params.length}::text[])
+    )`;
+  }
+  // Resumable top-up: a row can already carry l1/l2/l3 and still lack the new axes.
+  const preparationFilter = args.missingPreparation
+    ? `AND EXISTS (
+         SELECT 1 FROM product_class_map m3
+          WHERE m3.product_id = p.id AND m3.preparation IS NULL
+       )`
+    : "";
   const { rows } = await pool.query<{ name: string; ids: string[] }>(
     `SELECT p.name, array_agg(DISTINCT p.id) AS ids
      FROM product p
      ${scopeJoin}
-     WHERE p.name IS NOT NULL AND p.name <> '' ${missingFilter}
+     WHERE p.name IS NOT NULL AND p.name <> '' ${missingFilter} ${l2Filter} ${preparationFilter}
      GROUP BY p.name
      ORDER BY p.name`,
+    params,
   );
   const out = rows.map((r) => ({ name: r.name, productIds: r.ids }));
   return args.limit != null ? out.slice(0, args.limit) : out;
@@ -267,8 +330,13 @@ async function upsertBatch(
     const l3 = row.r.l3 === L3_NONE ? null : row.r.l3;
     const variant = row.r.variant && row.r.variant.trim() ? row.r.variant : VARIANT_DEFAULT;
     const brand = row.r.brand && row.r.brand.trim() ? row.r.brand.trim() : null;
+    // Only accept enum members. An off-menu value must land as NULL (= unclassified)
+    // rather than be coerced to a default, because consumers treat NULL as unknown
+    // and a wrong label is worse than a missing one.
+    const preparation = PREPARATIONS.includes(row.r.preparation) ? row.r.preparation : null;
+    const packForm = PACK_FORMS.includes(row.r.packForm) ? row.r.packForm : null;
     values.push(
-      `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, 'llm', $${p++}, $${p++}, now())`,
+      `($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, 'llm', $${p++}, $${p++}, now())`,
     );
     params.push(
       row.productId,
@@ -276,6 +344,8 @@ async function upsertBatch(
       l2,
       l3,
       variant,
+      preparation,
+      packForm,
       brand,
       CONF_MAP[row.r.confidence] ?? 0.5,
       row.model,
@@ -284,11 +354,13 @@ async function upsertBatch(
   }
   await pool.query(
     `INSERT INTO product_class_map
-       (product_id, class_l1, class_l2, class_l3, variant, brand_extracted, confidence, source, model, input_name, classified_at)
+       (product_id, class_l1, class_l2, class_l3, variant, preparation, pack_form,
+        brand_extracted, confidence, source, model, input_name, classified_at)
      VALUES ${values.join(", ")}
      ON CONFLICT (product_id) DO UPDATE SET
        class_l1 = EXCLUDED.class_l1, class_l2 = EXCLUDED.class_l2, class_l3 = EXCLUDED.class_l3,
-       variant = EXCLUDED.variant, brand_extracted = EXCLUDED.brand_extracted,
+       variant = EXCLUDED.variant, preparation = EXCLUDED.preparation,
+       pack_form = EXCLUDED.pack_form, brand_extracted = EXCLUDED.brand_extracted,
        confidence = EXCLUDED.confidence, source = EXCLUDED.source, model = EXCLUDED.model,
        input_name = EXCLUDED.input_name, classified_at = now()`,
     params,
@@ -302,7 +374,7 @@ async function main(): Promise<void> {
 
   const names = await selectDistinctNames(args);
   console.log(`[classify] ${names.length} distinct names to classify`);
-  if (args.out) writeFileSync(args.out, "name,l1,l2,l3,variant,brand,confidence\n");
+  if (args.out) writeFileSync(args.out, "name,l1,l2,l3,variant,preparation,pack_form,brand,confidence\n");
 
   const batches: NameRow[][] = [];
   for (let i = 0; i < names.length; i += args.batchSize) {
@@ -311,6 +383,8 @@ async function main(): Promise<void> {
 
   let done = 0;
   let misfits = 0;
+  let degradedL3 = 0;
+  let degradedL2 = 0;
   let promptTokens = 0;
   let outputTokens = 0;
   const dist = new Map<string, number>();
@@ -326,19 +400,42 @@ async function main(): Promise<void> {
         misfits++;
         continue;
       }
-      const l2 = r.l2 === L3_NONE ? null : r.l2;
-      const l3 = r.l3 === L3_NONE ? null : r.l3;
+      let l2 = r.l2 === L3_NONE ? null : r.l2;
+      let l3 = r.l3 === L3_NONE ? null : r.l3;
+      // Salvage rather than discard. Dropping the whole row on a bad hierarchy also
+      // threw away a perfectly good `preparation` / `pack_form`, which are
+      // independent axes — and it did so systematically for whole families: every
+      // canned-fish name misfit on l3, so the tuna products this work exists to fix
+      // would have received no label at all. Degrade the deepest failing level and
+      // keep the rest; only a genuinely unknown l1 is a misfit.
       if (!isValidClassPath(r.l1, l2, l3)) {
-        misfits++;
-        continue;
+        l3 = null;
+        if (!isValidClassPath(r.l1, l2, l3)) {
+          l2 = null;
+          if (!isValidClassPath(r.l1, l2, l3)) {
+            misfits++;
+            continue;
+          }
+          degradedL2++;
+        } else {
+          degradedL3++;
+        }
       }
       dist.set(r.l1, (dist.get(r.l1) ?? 0) + 1);
       if (args.out) {
         const q = (s: string) => `"${String(s ?? "").replace(/"/g, '""')}"`;
-        csvLines.push(`${q(batch[j]!.name)},${r.l1},${r.l2},${r.l3},${r.variant},${q(r.brand)},${r.confidence}`);
+        csvLines.push(
+          `${q(batch[j]!.name)},${r.l1},${l2 ?? L3_NONE},${l3 ?? L3_NONE},${r.variant},${r.preparation},${r.packForm},${q(r.brand)},${r.confidence}`,
+        );
       }
       for (const productId of batch[j]!.productIds) {
-        upserts.push({ productId, name: batch[j]!.name, r, model: args.model });
+        // Persist the degraded path, not the model's rejected one.
+        upserts.push({
+          productId,
+          name: batch[j]!.name,
+          r: { ...r, l2: l2 ?? L3_NONE, l3: l3 ?? L3_NONE },
+          model: args.model,
+        });
       }
     }
     if (args.out && csvLines.length) appendFileSync(args.out, csvLines.join("\n") + "\n");
@@ -347,7 +444,7 @@ async function main(): Promise<void> {
     if (done % 500 < args.batchSize) console.log(`[classify] ${done}/${names.length} names`);
   });
 
-  console.log(`[classify] done. names=${names.length} misfits=${misfits}`);
+  console.log(`[classify] done. names=${names.length} misfits=${misfits} degradedL3=${degradedL3} degradedL2=${degradedL2}`);
   console.log(`[classify] L1 distribution: ${JSON.stringify(Object.fromEntries([...dist.entries()].sort((a, b) => b[1] - a[1])))}`);
   await closePool();
 }

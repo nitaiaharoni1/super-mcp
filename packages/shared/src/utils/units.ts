@@ -140,6 +140,152 @@ export function normalizeMeasure(
  * Infer package size from common Hebrew/English name patterns when size fields are missing.
  * Examples: "פיתות 10יח", "מארז 10 פיתות", "6 * 1.5 ליטר", "750 גרם".
  */
+/**
+ * Hebrew collective count words. The feeds use these constantly instead of a
+ * digit ("שישיית מים", "מארז שמיניית דנונה"), and each spelling variant appears:
+ * שלישיה / שלישייה / שלישית / שלישיית are all "a set of three".
+ */
+const HEBREW_COUNT_WORDS: ReadonlyArray<readonly [RegExp, number]> = [
+  [/(?<![א-ת])זוגי?(?![א-ת])/, 2],
+  [/(?<![א-ת])שלישיי?[הת](?![א-ת])/, 3],
+  [/(?<![א-ת])רביעיי?[הת](?![א-ת])/, 4],
+  [/(?<![א-ת])חמישיי?[הת](?![א-ת])/, 5],
+  [/(?<![א-ת])שישיי?[הת](?![א-ת])/, 6],
+  [/(?<![א-ת])שביעיי?[הת](?![א-ת])/, 7],
+  [/(?<![א-ת])שמיניי?[הת](?![א-ת])/, 8],
+  [/(?<![א-ת])תשיעיי?[הת](?![א-ת])/, 9],
+  [/(?<![א-ת])עשיריי?[הת](?![א-ת])/, 10],
+];
+
+/**
+ * Product families whose packs are counted in ROLLS, so a bare "גליל" in the name
+ * means a roll rather than the Galilee region or the "פרי גליל" brand.
+ */
+const ROLL_PRODUCT_CONTEXT = /נייר|טואלט|מגבות|מגבוני|מטבח|סופג/;
+
+/**
+ * Plausible bounds for a retail pack count.
+ *
+ * An explicitly stated count ("140 יח") gets a generous ceiling because the name
+ * is telling us outright. The ambiguous `N x size` form gets a tight one, because
+ * there the bound is doing real work: it is what rejects the reversed
+ * `size x count` spelling ("טונה 80*3 גרם" is three 80g tins, not eighty).
+ */
+const MIN_PACK_COUNT = 2;
+const MAX_STATED_COUNT = 1000;
+const MAX_INFERRED_COUNT = 60;
+
+/**
+ * How many units are in this pack, from the name alone. Null when the name does
+ * not state a count.
+ *
+ * Deliberately separate from `inferPackSizeFromName`, which answers a different
+ * question: for a multipack it returns TOTAL CONTENTS ("4*160 גר" -> 640g) because
+ * the shelf price covers the whole pack and `resolvePurchaseQty` needs the total.
+ * That means it can never yield a piece COUNT for a multipack, which is why 96% of
+ * canned_fish and 94% of paper_goods had no `piece_count` and a 4-tin pack could be
+ * priced against a single tin.
+ *
+ * Every branch is bounded by MIN/MAX_PACK_COUNT, and each pattern was measured
+ * against the full 122k-name catalog before being included:
+ *
+ *  - `N x size unit` keeps 499 names, and the bound rejects 13 that are the
+ *    REVERSED `size x count` form ("טונה 80*3 גרם" is three 80g tins, not 80).
+ *    Those become misses rather than wrong counts, which is the safe direction;
+ *    most also carry a count word ("שלישיות") that catches them anyway.
+ *  - `תבנית N` REQUIRES egg context. Without it, 12 of 18 matches were baking
+ *    trays where the number is cavities or centimetres ("תבנית 12 שקעים מאפינס",
+ *    "תבנית 19*28 סמ").
+ *  - `N גלילים` matched 35 names, all genuine roll packs, no false positives.
+ *  - Count words matched 2169 names; the household/personal-care concentration is
+ *    real multipacks (socks, bulbs, filters), and in food classes `זוג` is always
+ *    a literal pair ("זוג פיצות", "המבורגר זוג 226 גרם").
+ */
+export function inferPackCountFromName(name: string | null | undefined): number | null {
+  if (!name) return null;
+  const n = name.replace(/\s+/g, " ").trim();
+
+  const bounded = (value: number, max: number): number | null => {
+    if (!Number.isFinite(value)) return null;
+    const rounded = Math.round(value);
+    if (rounded < MIN_PACK_COUNT || rounded > max) return null;
+    return rounded;
+  };
+
+  const countWord = HEBREW_COUNT_WORDS.find(([re]) => re.test(n));
+
+  // Most explicit first: an outright unit count.
+  // `מארז` is "pack" but also "gift box", so the number after it is often a SIZE:
+  // "קוניאק נולין VSOP מארז 700 מ\"ל" is a boxed 700ml bottle, not 700 units, and
+  // "רוקט מארז 100 גרם" is 100 grams. Require that no mass/volume/length unit
+  // follows, otherwise the figure is a measurement and the count is unknown.
+  const explicit =
+    n.match(
+      // The `(?!\d)` is load-bearing: without it the digit group backtracks, so
+      // "מארז 700 מ\"ל" matched just "70", the lookahead saw a harmless "0", and it
+      // returned 70. Anchor the number before testing what follows it.
+      /מארז\s*(\d+(?:\.\d+)?)(?!\d)(?!\s*(?:גרם|גר['׳]?|ג(?![א-ת])|ק["״]?ג|kg|מ["״]?ל|ml|ליטר|ל(?![א-ת])|l(?![a-z])|ס["״]?מ|מטר))/i,
+    ) ||
+    n.match(/(\d+(?:\.\d+)?)\s*(?:יחידות|יח['׳]?|units?|pcs)(?=$|[\s,.\-_/])/i);
+
+  // Pack-of-packs: the name states BOTH an inner unit count and a collective word
+  // ("פדים קוסמטיקה 70 יח שלישייה" is three packs of seventy). The only correct
+  // answer is the product, 210, and neither number alone is it, so report unknown
+  // rather than a figure that would either merge a triple-pack with a single or
+  // split two identical singles. 12 names catalog-wide.
+  if (explicit?.[1] && countWord) return null;
+
+  if (explicit?.[1]) {
+    const q = bounded(Number(explicit[1]), MAX_STATED_COUNT);
+    if (q != null) return q;
+  }
+
+  // Egg trays: only when the name is actually about eggs.
+  if (/ביצ/.test(n)) {
+    const tray = n.match(/תבנית\s*(\d{1,3})(?!\d)/) || n.match(/(?:^|[^\d])(\d{1,3})\s*ביצ/);
+    if (tray?.[1]) {
+      const q = bounded(Number(tray[1]), MAX_INFERRED_COUNT);
+      if (q != null) return q;
+    }
+  }
+
+  // Roll packs (toilet paper, kitchen towel, tape), count before the noun.
+  const rolls = n.match(/(\d{1,3})\s*גלילים?(?![א-ת])/);
+  if (rolls?.[1]) {
+    const q = bounded(Number(rolls[1]), MAX_STATED_COUNT);
+    if (q != null) return q;
+  }
+
+  // Count AFTER the roll noun ("גליל כפול 16"), which the feeds also use and which
+  // the pattern above cannot see. Gated on roll context because a bare "גליל" is
+  // also the Galilee region and the "פרי גליל" brand: ungated this matched 27 names
+  // of which 24 were wrong ("יין אלה הרי גליל 750 מל" -> 750,
+  // "טונה פרי גליל 160גרם" -> 160). Gated it matches 3, all genuine roll packs.
+  if (ROLL_PRODUCT_CONTEXT.test(n)) {
+    const rollsAfter = n.match(
+      /(?<![א-ת])גליל(?:ים)?\s*(?:כפול(?:ים)?|רגיל(?:ים)?|דו\s*שכבתי)?\s*(\d{1,3})(?!\d)/,
+    );
+    if (rollsAfter?.[1]) {
+      const q = bounded(Number(rollsAfter[1]), MAX_STATED_COUNT);
+      if (q != null) return q;
+    }
+  }
+
+  // Hebrew collective count words.
+  if (countWord) return countWord[1];
+
+  // "N x size unit" multipack: the left operand is the count.
+  const multipack = n.match(
+    /(?<![\d.])(\d{1,2})\s*[xX*×]\s*\d+(?:\.\d+)?\s*(?:גרם|גר['׳]?|g\b|ק["״]?ג|kg|מ["״]?ל|ml\b|ליטר|ל\b|l\b)/i,
+  );
+  if (multipack?.[1]) {
+    const q = bounded(Number(multipack[1]), MAX_INFERRED_COUNT);
+    if (q != null) return q;
+  }
+
+  return null;
+}
+
 export function inferPackSizeFromName(
   name: string | null | undefined,
 ): { quantity: number; unit: string } | null {

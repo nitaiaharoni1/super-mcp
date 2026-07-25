@@ -7,6 +7,14 @@ export interface ProductClassInfo extends ClassPath {
   variant: string | null;
   /** Brand pulled from the name when product.brand was NULL (migration 018). */
   brand: string | null;
+  /**
+   * plain | flavoured | prepared_meal | derived_ingredient (migration 025).
+   * NULL means unclassified: callers must treat it as unknown and fall back to the
+   * name-based guard, never as `plain`.
+   */
+  preparation: string | null;
+  /** single | multipack (migration 025). NULL = unclassified. */
+  packForm: string | null;
 }
 
 /**
@@ -30,8 +38,11 @@ export async function loadProductClasses(
     class_l3: string | null;
     variant: string | null;
     brand_extracted: string | null;
+    preparation: string | null;
+    pack_form: string | null;
   }>(
-    `SELECT m.product_id, m.class_l1, m.class_l2, m.class_l3, m.variant, m.brand_extracted
+    `SELECT m.product_id, m.class_l1, m.class_l2, m.class_l3, m.variant, m.brand_extracted,
+            m.preparation, m.pack_form
        FROM product_class_map m
        JOIN product p ON p.id = m.product_id
       WHERE m.product_id = ANY($1::uuid[])
@@ -45,6 +56,8 @@ export async function loadProductClasses(
       l3: r.class_l3,
       variant: r.variant,
       brand: r.brand_extracted,
+      preparation: r.preparation,
+      packForm: r.pack_form,
     });
   }
   return map;

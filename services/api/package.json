@@ -16,7 +16,8 @@
     "benchmark:fast-basket": "tsx src/scripts/benchmarkFastBasket.ts",
     "test": "vitest run --passWithNoTests",
     "test:live": "vitest run tests/integration",
-    "test:perf": "vitest run tests/performance"
+    "test:perf": "vitest run tests/performance",
+    "accuracy": "tsx src/scripts/accuracy/cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.1",

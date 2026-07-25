@@ -110,6 +110,8 @@ function stampCandidateClass(candidate: BasketCandidate, info: ProductClassInfo)
   candidate.classL3 = info.l3;
   candidate.variant = info.variant;
   candidate.brandExtracted = info.brand;
+  candidate.preparation = info.preparation;
+  candidate.packForm = info.packForm;
   if (!candidate.productClass) candidate.productClass = info.l1;
 }
 

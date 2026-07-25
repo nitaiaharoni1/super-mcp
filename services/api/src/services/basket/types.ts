@@ -186,6 +186,14 @@ export interface BasketCandidate {
   variant?: string | null;
   /** Brand pulled from the name when product.brand was NULL (migration 018). */
   brandExtracted?: string | null;
+  /**
+   * plain | flavoured | prepared_meal | derived_ingredient (migration 025). The axis
+   * that separates a staple from things made out of it. NULL = unclassified, which
+   * must fall back to the name-based guard rather than be assumed plain.
+   */
+  preparation?: string | null;
+  /** single | multipack (migration 025). NULL = unclassified. */
+  packForm?: string | null;
   intentTier?: 1 | 2 | 3 | 0;
 }
 

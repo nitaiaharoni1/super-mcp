@@ -4,6 +4,7 @@ import {
   buildCommodityEquivalents,
   packUnitCount,
   pieceCountsConflict,
+  preparationConflict,
   preferQueryHeadAnchored,
   queryHeadAnchored,
   queryTokensSatisfied,
@@ -526,5 +527,55 @@ describe("packUnitCount roll-count idioms", () => {
   it("does not mistake a volume or mass size for a pack count", () => {
     expect(count("שמן זית כתית מעולה 750 מל", 750, "ml")).toBeNull();
     expect(count("חמאה תנובה 200 גרם מהדרין", 200, "g")).toBeNull();
+  });
+});
+
+/**
+ * The labelled replacement for guessing a staple from its name (migration 025).
+ * Grouping matters: treating `flavoured` as a different kind shrank equivalence sets
+ * and dropped the accuracy benchmark's coverage from 92% to 89%, because lines fell
+ * back to a thinly-stocked primary instead of a stocked peer.
+ */
+describe("preparationConflict", () => {
+  const cand = (name: string, preparation: string | null): BasketCandidate =>
+    ({
+      productId: name,
+      name,
+      score: 1,
+      matchedVia: "lexical",
+      sizeQty: null,
+      sizeUnit: null,
+      pieceCount: null,
+      hasPrice: true,
+      hasLocalPrice: true,
+      productClass: null,
+      preparation,
+    }) as unknown as BasketCandidate;
+
+  it("separates the staple from things made out of it", () => {
+    expect(preparationConflict(cand("אורז לבן", "plain"), cand("דפי אורז", "derived_ingredient"))).toBe(true);
+    expect(preparationConflict(cand("אורז לבן", "plain"), cand("מקלוני אורז", "derived_ingredient"))).toBe(true);
+  });
+
+  it("separates the staple from a dish built around it", () => {
+    expect(
+      preparationConflict(cand("יוגורט לבן", "plain"), cand("יוגורט עם קורנפלקס", "prepared_meal")),
+    ).toBe(true);
+    expect(preparationConflict(cand("טונה בשמן", "plain"), cand("טונה עם פסטה", "prepared_meal"))).toBe(true);
+  });
+
+  it("treats plain and flavoured as the same food (flavour is variant's job)", () => {
+    expect(preparationConflict(cand("יוגורט לבן", "plain"), cand("יוגורט תות", "flavoured"))).toBe(false);
+  });
+
+  it("keeps an explicitly-asked-for derived form matching its own kind", () => {
+    expect(
+      preparationConflict(cand("רסק עגבניות", "derived_ingredient"), cand("רסק אחר", "derived_ingredient")),
+    ).toBe(false);
+  });
+
+  it("treats an unlabelled candidate as unknown, never as a conflict", () => {
+    expect(preparationConflict(cand("אורז", "plain"), cand("אורז אחר", null))).toBe(false);
+    expect(preparationConflict(cand("אורז", null), cand("דפי אורז", "derived_ingredient"))).toBe(false);
   });
 });

@@ -160,6 +160,50 @@ export const VARIANTS: readonly string[] = [
 ];
 export const VARIANT_DEFAULT = "regular";
 
+/**
+ * Cross-cutting PREPARATION — is this the plain staple, or something made from it?
+ *
+ * The axis that actually produces wrong basket answers, and the one L3 was supposed
+ * to cover but does not: 95,974 of 118,156 stocked products have no L3 at all. So a
+ * plain `אורז` query resolved to rice PAPER and rice NOODLES, and `יוגורט` to a
+ * chocolate-cornflake snack pot, because every candidate shares the staple's token
+ * and its L1/L2.
+ *
+ * Today those are blocked by hand-tuned Hebrew token deny-lists (derivedForm.ts).
+ * Those lists are a standing false-positive hazard: one iteration of the roll-count
+ * guard gave a challah a pack count of 650, and 196 of its 255 catalog matches were
+ * wrong. A labelled attribute replaces guessing from names with a fact.
+ *
+ *  - plain              the staple itself: אורז לבן, חלב 3%, יוגורט לבן
+ *  - flavoured          same food, flavour/additive: יוגורט תות, חלב שוקו
+ *  - prepared_meal      a dish built around it: טונה עם פסטה, ארוחת אורז ועדשים
+ *  - derived_ingredient made FROM it, different product: דפי אורז, קמח אורז,
+ *                       רסק עגבניות, פירורי לחם
+ *
+ * A generic query wants `plain`. An explicit one ("רסק עגבניות") asks for its own
+ * preparation and must still match.
+ */
+export const PREPARATIONS: readonly string[] = [
+  "plain",
+  "flavoured",
+  "prepared_meal",
+  "derived_ingredient",
+];
+
+export const PREPARATION_DEFAULT = "plain";
+
+/**
+ * Cross-cutting PACK FORM — one unit, or several bundled?
+ *
+ * Pack count decides price comparability and `piece_count` is populated for 1.5% of
+ * the catalog (paper_goods 5.6%, canned_fish 3.3%), so a 4-pack of tuna and a single
+ * tin were compared as the same line until name regexes caught it. `multipack` is
+ * the fact those regexes were trying to infer.
+ */
+export const PACK_FORMS: readonly string[] = ["single", "multipack"];
+
+export const PACK_FORM_DEFAULT = "single";
+
 const L2_TO_L1 = new Map<string, string>();
 for (const [l1, l2s] of Object.entries(TAXONOMY_L2)) for (const l2 of l2s) L2_TO_L1.set(l2, l1);
 const L3_TO_L2 = new Map<string, string>();
