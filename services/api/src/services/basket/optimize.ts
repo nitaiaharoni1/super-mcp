@@ -53,6 +53,7 @@ import type {
   BasketOptimizeRequest,
   BasketOptimizeResult,
   BasketPhaseTimings,
+  BasketPreference,
   BasketResolutionMode,
   BasketResponseDetail,
   BasketResumeInput,
@@ -208,6 +209,18 @@ function emitBasketOptimizeTelemetry(fields: {
   resolutionMode: BasketResolutionMode;
   responseDetail: BasketResponseDetail;
   responseBytes: number;
+  /** Which travel-vs-price trade-off the caller asked for. */
+  preference: BasketPreference;
+  /**
+   * Same-basket total of the recommended store, and how much of it was imputed.
+   * Without these we cannot tell in production whether a cheap-looking answer is
+   * observed or estimated.
+   */
+  bestComparableTotal: number | null;
+  bestImputedLines: number | null;
+  /** Conditional-price exposure of the recommended store. */
+  bestClubOnlyLines: number | null;
+  bestCouponOnlyLines: number | null;
 }): void {
   // Benchmarks/canaries may set SUPER_MCP_BASKET_TELEMETRY=0 for clean stdout JSON.
   if (process.env.SUPER_MCP_BASKET_TELEMETRY === "0") return;
@@ -232,6 +245,11 @@ function emitBasketOptimizeTelemetry(fields: {
       geocodeStrategy: fields.geocodeStrategy,
       resolutionMode: fields.resolutionMode,
       responseDetail: fields.responseDetail,
+      preference: fields.preference,
+      bestComparableTotal: fields.bestComparableTotal,
+      bestImputedLines: fields.bestImputedLines,
+      bestClubOnlyLines: fields.bestClubOnlyLines,
+      bestCouponOnlyLines: fields.bestCouponOnlyLines,
       responseBytes: fields.responseBytes,
       dbQueryCount: null,
       totalMs: fields.totalMs,
@@ -259,6 +277,13 @@ function finalizeBasketResult(args: {
   geocodeMs: number;
   geocodeStrategy: GeocodeTelemetryStrategy;
   resolutionMode: BasketResolutionMode;
+  preference: BasketPreference;
+  bestPlan?: {
+    comparableTotal: number;
+    imputedLines: number;
+    clubOnlyLines: number;
+    couponOnlyLines: number;
+  } | null;
 }): BasketOptimizeResult {
   const projected = projectBasketResult(args.result, args.responseDetail);
   const responseBytes = Buffer.byteLength(JSON.stringify(projected), "utf8");
@@ -280,6 +305,11 @@ function finalizeBasketResult(args: {
     resolutionMode: args.resolutionMode,
     responseDetail: args.responseDetail,
     responseBytes,
+    preference: args.preference,
+    bestComparableTotal: args.bestPlan?.comparableTotal ?? null,
+    bestImputedLines: args.bestPlan?.imputedLines ?? null,
+    bestClubOnlyLines: args.bestPlan?.clubOnlyLines ?? null,
+    bestCouponOnlyLines: args.bestPlan?.couponOnlyLines ?? null,
   });
   return projected;
 }
@@ -359,6 +389,8 @@ async function optimizeInitialOrResumedBasket(
 
   // Public default is fast; treat missing mode as fast so one-call callers complete.
   const resolutionMode = input.resolutionMode ?? "fast";
+  // Hoisted so every exit path, including the strict early return, reports it.
+  const preference = input.preference ?? DEFAULT_BASKET_PREFERENCE;
 
   const responseDetail = resolveResponseDetail(input.responseDetail, input.verbose);
   const geocodeMs = input.geocodeMs ?? 0;
@@ -402,6 +434,7 @@ async function optimizeInitialOrResumedBasket(
       geocodeMs,
       geocodeStrategy,
       resolutionMode,
+      preference,
     });
   }
 
@@ -460,6 +493,8 @@ async function optimizeInitialOrResumedBasket(
       geocodeMs,
       geocodeStrategy,
       resolutionMode,
+      preference,
+      bestPlan: null,
     });
   }
 
@@ -491,7 +526,6 @@ async function optimizeInitialOrResumedBasket(
     return a.total - b.total;
   });
 
-  const preference = input.preference ?? DEFAULT_BASKET_PREFERENCE;
   const recommendationOptions: RecommendationOptions = {
     distancePenaltyPerKm: distancePenaltyForPreference(
       preference,
@@ -562,6 +596,15 @@ async function optimizeInitialOrResumedBasket(
     geocodeMs,
     geocodeStrategy,
     resolutionMode,
+    preference,
+    bestPlan: plans.bestSingleStore
+      ? {
+          comparableTotal: plans.bestSingleStore.comparableTotal,
+          imputedLines: plans.bestSingleStore.imputedLines,
+          clubOnlyLines: plans.bestSingleStore.clubOnlyLines,
+          couponOnlyLines: plans.bestSingleStore.couponOnlyLines,
+        }
+      : null,
   });
 }
 
