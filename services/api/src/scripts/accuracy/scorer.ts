@@ -161,7 +161,13 @@ function ratio(numerator: number, denominator: number): number {
 
 export function aggregate(baskets: BasketScore[]): BenchmarkMetrics {
   const scored = baskets.filter((b) => !b.error);
-  const requested = scored.reduce((n, b) => n + b.requestedLines, 0);
+  const errored = baskets.filter((b) => b.error);
+  // The denominator is EVERY requested line, including those in baskets that failed.
+  // Dropping a failed basket from both sides made a crash look free: one erroring
+  // 9-line basket silently took the denominator from 100 to 91, which made two runs
+  // look 4 points apart when they differed by a single line. A benchmark must never
+  // reward the system for being unable to answer.
+  const requested = baskets.reduce((n, b) => n + b.requestedLines, 0);
   const accepted = scored.reduce((n, b) => n + b.acceptedLines, 0);
   const priced = scored.reduce((n, b) => n + b.pricedLines, 0);
   const conditional = scored.reduce(
@@ -174,6 +180,10 @@ export function aggregate(baskets: BasketScore[]): BenchmarkMetrics {
     coverage: ratio(priced, requested),
     conditionalExposure: ratio(conditional, priced),
     imputedShare: ratio(imputed, priced),
+    // Surfaced so a run whose score moved because a basket failed is never mistaken
+    // for a run whose accuracy moved.
+    requestedLines: requested,
+    erroredBaskets: errored.length,
   };
 }
 

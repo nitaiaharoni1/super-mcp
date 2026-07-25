@@ -159,9 +159,11 @@ const HEBREW_COUNT_WORDS: ReadonlyArray<readonly [RegExp, number]> = [
 
 /**
  * Product families whose packs are counted in ROLLS, so a bare "גליל" in the name
- * means a roll rather than the Galilee region or the "פרי גליל" brand.
+ * means a roll rather than the Galilee region or the "פרי גליל" brand. Exported so
+ * the basket's own roll-count inference uses the same definition instead of a copy
+ * that can drift.
  */
-const ROLL_PRODUCT_CONTEXT = /נייר|טואלט|מגבות|מגבוני|מטבח|סופג/;
+export const ROLL_PRODUCT_CONTEXT = /נייר|טואלט|מגבות|מגבוני|מטבח|סופג/;
 
 /**
  * Plausible bounds for a retail pack count.

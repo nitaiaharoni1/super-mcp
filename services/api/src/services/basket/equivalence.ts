@@ -1,4 +1,5 @@
 import {
+  ROLL_PRODUCT_CONTEXT,
   compareClassPaths,
   inferPackSizeFromName,
   isCountUnit,
@@ -564,12 +565,6 @@ function queryTokensHasPersonalCare(queryTokens: Set<string>): boolean {
   }
   return false;
 }
-
-/**
- * Product families whose packs are counted in ROLLS, so a bare "גליל" in the name
- * means a roll rather than the Galilee region or the "פרי גליל" brand.
- */
-const ROLL_PRODUCT_CONTEXT = /נייר|טואלט|מגבות|מגבוני|מטבח|סופג/;
 
 function inferPieceCountFromName(name: string): number | null {
   const n = name.replace(/\s+/g, " ").trim();

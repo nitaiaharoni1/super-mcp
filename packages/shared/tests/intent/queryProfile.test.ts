@@ -34,6 +34,23 @@ describe("buildQueryProfile", () => {
     expect(profileFor("תפוחי אדמה", 2, "kg").attributes.form).toBe("fresh");
   });
 
+  it("does not infer fresh when the query names a product derived from produce", () => {
+    // רסק עגבניות (tomato paste) was unresolvable: עגבניות implied form=fresh and
+    // the fresh gate then rejected every paste in the shortlist.
+    expect(profileFor("רסק עגבניות", null, null).attributes.form).not.toBe("fresh");
+    expect(profileFor("רוטב עגבניות", null, null).attributes.form).not.toBe("fresh");
+    expect(profileFor("מיץ לימון", null, null).attributes.form).not.toBe("fresh");
+    expect(profileFor("ממרח חצילים", null, null).attributes.form).not.toBe("fresh");
+  });
+
+  it("still infers fresh for the produce itself, derived-noun list notwithstanding", () => {
+    // The guard above must not leak onto plain produce, which is the common case.
+    expect(profileFor("עגבניות", 1, "kg").attributes.form).toBe("fresh");
+    expect(profileFor("עגבניות שרי", 1, "kg").attributes.form).toBe("fresh");
+    expect(profileFor("לימונים", 1, "kg").attributes.form).toBe("fresh");
+    expect(profileFor("חציל", 1, "kg").attributes.form).toBe("fresh");
+  });
+
   it("does not infer fresh for preserved or flour produce queries even with kg", () => {
     expect(profileFor("עגבניות מרוסקות 1 ק״ג", 1, "kg").attributes.form).not.toBe("fresh");
     expect(profileFor("קמח תפוחי אדמה 1 ק״ג", 1, "kg").attributes.form).not.toBe("fresh");

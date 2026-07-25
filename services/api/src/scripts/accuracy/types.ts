@@ -133,6 +133,16 @@ export interface BenchmarkMetrics {
   conditionalExposure: number;
   /** imputedLines / pricedLines: how much of the headline total is estimated. */
   imputedShare: number;
+  /**
+   * Every requested line across ALL baskets, failed ones included. This is the
+   * denominator, so two runs are only comparable when it matches.
+   */
+  requestedLines: number;
+  /**
+   * Baskets that threw. Their lines count against `resolutionAccuracy` and
+   * `coverage`, so a crash lowers the score instead of shrinking the denominator.
+   */
+  erroredBaskets: number;
 }
 
 export interface BenchmarkReport {

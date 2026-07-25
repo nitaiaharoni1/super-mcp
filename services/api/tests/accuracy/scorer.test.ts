@@ -13,7 +13,7 @@ import {
   LABELS_BY_ID,
   STAPLE_LABELS,
 } from "../../src/scripts/accuracy/labels/staples.js";
-import type { StapleLabel } from "../../src/scripts/accuracy/types.js";
+import type { BasketScore, StapleLabel } from "../../src/scripts/accuracy/types.js";
 
 /**
  * Tests the SCORER, not the system's accuracy. A benchmark whose own scorer is
@@ -275,5 +275,46 @@ describe("label set integrity", () => {
         expect(l.accept.forbidTokens ?? [], `${l.id} forbids its own required token`).not.toContain(req);
       }
     }
+  });
+});
+
+/**
+ * A crash must lower the score, never shrink the denominator. Dropping failed
+ * baskets from both sides once made two runs look 4 points apart when they differed
+ * by a single line, because one 9-line basket had errored.
+ */
+describe("aggregate counts failed baskets against the score", () => {
+  const ok = (id: string, requested: number, accepted: number, priced: number): BasketScore =>
+    ({
+      basketId: id,
+      name: id,
+      requestedLines: requested,
+      acceptedLines: accepted,
+      pricedLines: priced,
+      clubOnlyLines: 0,
+      couponOnlyLines: 0,
+      imputedLines: 0,
+      comparableTotal: 100,
+      storeName: "s",
+      elapsedMs: 1,
+      lines: [],
+    }) as unknown as BasketScore;
+
+  it("keeps a failed basket's lines in the denominator", () => {
+    const healthy = ok("a", 10, 10, 10);
+    const broken = { ...ok("b", 10, 0, 0), error: "boom" } as unknown as BasketScore;
+    const m = aggregate([healthy, broken]);
+    expect(m.requestedLines).toBe(20);
+    expect(m.erroredBaskets).toBe(1);
+    // 10 accepted of 20 requested, not 10 of 10.
+    expect(m.resolutionAccuracy).toBe(0.5);
+    expect(m.coverage).toBe(0.5);
+  });
+
+  it("reports a clean run at full marks with no errors", () => {
+    const m = aggregate([ok("a", 10, 10, 10), ok("b", 5, 5, 5)]);
+    expect(m.requestedLines).toBe(15);
+    expect(m.erroredBaskets).toBe(0);
+    expect(m.resolutionAccuracy).toBe(1);
   });
 });

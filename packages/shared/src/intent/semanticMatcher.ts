@@ -75,9 +75,50 @@ export function detectNonFreshForm(text: string): string | null {
   return null;
 }
 
+/**
+ * Head nouns that name a product *made from* produce rather than the produce.
+ *
+ * These are the goods themselves, not adjectives describing a state, which is
+ * why they cannot live in NON_FRESH_FORM_CUES: that list asserts a positive
+ * `form` on the profile, and claiming `רסק עגבניות` is "canned" is a stronger
+ * statement than the query supports (it is sold in cartons and jars too). All
+ * that is needed is to stop the produce token from implying fresh.
+ *
+ * Measured: `רסק עגבניות` (tomato paste, a staple) was unresolvable. The word
+ * `עגבניות` is in PRODUCE_QUERY_PHRASES, so the profile came back form=fresh
+ * and the fresh gate then rejected every paste in the shortlist. Same failure
+ * for `רוטב עגבניות`.
+ */
+const DERIVED_PRODUCT_HEAD_TOKENS: ReadonlySet<string> = new Set([
+  "רסק",
+  "רסקים",
+  "רוטב",
+  "רטבים",
+  "מחית",
+  "פירה",
+  "ממרח",
+  "מרוכז",
+  "מרוכזת",
+  "מיץ",
+  "משקה",
+  "אבקת",
+  "מרק",
+  "ריבה",
+  "קטשופ",
+]);
+
+/**
+ * True when the query names a product derived from produce (paste, sauce, juice)
+ * rather than the produce itself.
+ */
+function queryNamesDerivedProduct(text: string): boolean {
+  const tokens = tokenizeNormalized(normalizeEmbedInput(text));
+  return tokens.some((t) => DERIVED_PRODUCT_HEAD_TOKENS.has(t));
+}
+
 /** True when the query explicitly asks for a preserved/prepared/flour form. */
 export function queryBlocksFreshProduce(text: string): boolean {
-  return detectNonFreshForm(text) != null;
+  return detectNonFreshForm(text) != null || queryNamesDerivedProduct(text);
 }
 
 export function queryLooksLikeProduce(text: string): boolean {

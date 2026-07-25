@@ -77,6 +77,12 @@ function printSummary(report: BenchmarkReport): void {
   console.log(`  coverage             ${pct(m.coverage)}   requested lines priced at the recommended store`);
   console.log(`  conditionalExposure  ${pct(m.conditionalExposure)}   priced lines needing a club card or coupon`);
   console.log(`  imputedShare         ${pct(m.imputedShare)}   share of the headline total that is estimated`);
+  // Print the denominator and any failures: two runs are only comparable when the
+  // denominator matches, and an errored basket must never look like a clean run.
+  console.log(`  requestedLines       ${m.requestedLines}     denominator; runs are comparable only when equal`);
+  if (m.erroredBaskets > 0) {
+    console.log(`  erroredBaskets       ${m.erroredBaskets}     COUNTED AS FAILURES, scores above are depressed`);
+  }
   console.log("");
 
   const cats = Object.entries(report.byCategory).sort((a, b) => a[1].accuracy - b[1].accuracy);
