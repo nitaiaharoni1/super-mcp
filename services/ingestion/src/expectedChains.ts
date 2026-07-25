@@ -21,5 +21,9 @@ import { allChainsEnabled } from "./ingestCaps.js";
 export function expectedChainIdsForSource(sourceId: string): string[] {
   if (sourceId !== "il-cerberus") return [];
   const attempted = allChainsEnabled() ? CERBERUS_CHAINS : CERBERUS_CHAINS.slice(0, 2);
-  return attempted.map((chain) => chain.chainId);
+  // Chains known to publish nothing are still attempted, but expecting data from
+  // them would mark every run `degraded` and raise an ERROR alert nightly. An
+  // alert that always fires is one nobody reads, and a chain that genuinely goes
+  // dark would then be invisible.
+  return attempted.filter((chain) => !chain.knownInactive).map((chain) => chain.chainId);
 }

@@ -21,6 +21,17 @@ export interface CerberusChainConfig {
   name: string;
   /** Some Cerberus accounts require FTP over TLS. */
   secure?: boolean;
+  /**
+   * Account exists and authenticates but has never published a file. Still
+   * attempted, because a chain that starts publishing should be picked up
+   * automatically, but excluded from coverage expectations so it cannot mark
+   * every run `degraded`.
+   *
+   * A warning that fires on every single run is one people learn to ignore,
+   * which is exactly how the two-store cap went unnoticed for a week. `degraded`
+   * has to stay rare enough to mean something.
+   */
+  knownInactive?: boolean;
 }
 
 /**
@@ -32,7 +43,10 @@ export const CERBERUS_CHAINS: CerberusChainConfig[] = [
   { ftpUser: "yohananof", chainId: "7290803800003", name: "Yohananof" },
   { ftpUser: "osherad", chainId: "7290103152017", name: "Osher Ad" },
   { ftpUser: "TivTaam", chainId: "7290873255550", name: "Tiv Taam" },
-  { ftpUser: "HaziHinam", chainId: "7290700100008", name: "Hazi Hinam" },
+  // Verified 2026-07-25: authenticates, publishes zero files, and has no rows in
+  // the database. Left configured so it is picked up automatically if it ever
+  // starts publishing.
+  { ftpUser: "HaziHinam", chainId: "7290700100008", name: "Hazi Hinam", knownInactive: true },
   { ftpUser: "SalachD", chainId: "7290526500006", name: "Salach Dabach" },
   { ftpUser: "freshmarket", chainId: "7290876100000", name: "Fresh Market" },
   { ftpUser: "Stop_Market", chainId: "7290639000004", name: "Stop Market" },
