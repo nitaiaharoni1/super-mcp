@@ -7,9 +7,15 @@
  * its timeout before reaching them. Without a filter the only remedy is to
  * re-ingest everything ahead of them.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { CERBERUS_CHAINS } from "../src/sources/cerberus/adapter.js";
 import { selectCerberusChains } from "../src/sources/index.js";
+
+const prevNoCap = process.env.SUPER_MCP_NO_CAP;
+afterEach(() => {
+  if (prevNoCap === undefined) delete process.env.SUPER_MCP_NO_CAP;
+  else process.env.SUPER_MCP_NO_CAP = prevNoCap;
+});
 
 const TIV_TAAM_ID = "7290873255550";
 
@@ -48,5 +54,25 @@ describe("selectCerberusChains", () => {
 
   it("names the valid options in the error, so the fix is obvious", () => {
     expect(() => selectCerberusChains(["nope"])).toThrow(/RamiLevi/);
+  });
+});
+
+describe("expectedChainIds tracks what the run actually attempts", () => {
+  it("expects only the chains a --chains run selected", async () => {
+    // Regression: a targeted run reported every chain it had deliberately
+    // skipped as missing coverage, so it went degraded and raised an alert
+    // naming chains nobody asked it to touch.
+    process.env.SUPER_MCP_NO_CAP = "1";
+    const { createCerberusAdapter } = await import("../src/sources/cerberus/adapter.js");
+    const adapter = createCerberusAdapter(selectCerberusChains(["freshmarket", "Keshet"]));
+    expect(adapter.expectedChainIds).toEqual(["7290876100000", "7290785400000"]);
+  });
+
+  it("never expects a knownInactive chain", async () => {
+    process.env.SUPER_MCP_NO_CAP = "1";
+    const { createCerberusAdapter } = await import("../src/sources/cerberus/adapter.js");
+    const adapter = createCerberusAdapter();
+    expect(adapter.expectedChainIds).not.toContain("7290700100008");
+    expect(adapter.expectedChainIds).toContain("7290058140886");
   });
 });

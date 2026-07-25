@@ -94,6 +94,16 @@ export type RawRecord = RawStoreRecord | RawPriceRecord | RawPromoRecord;
 export interface SourceAdapter {
   sourceId: string;
   market: MarketCode;
+  /**
+   * Chains this run should produce data for, when the adapter can say. A chain
+   * listed here that yields nothing is real lost coverage and degrades the run.
+   *
+   * The adapter has to own this because only it knows what the run actually
+   * attempted after caps, chain filters and known-inactive accounts are applied.
+   * Inferring it centrally meant a targeted run reported every chain it had
+   * deliberately skipped as missing.
+   */
+  expectedChainIds?: string[];
   discover(): Promise<FeedFile[]>;
   fetch(file: FeedFile): Promise<RawBlob>;
   parse(blob: RawBlob): AsyncIterable<RawRecord>;

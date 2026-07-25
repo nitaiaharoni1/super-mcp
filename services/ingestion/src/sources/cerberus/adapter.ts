@@ -87,6 +87,8 @@ export function createCerberusAdapter(
   const host = process.env.CERBERUS_FTP_HOST ?? "url.retail.publishedprices.co.il";
   const maxStores = storeCountCap(50);
   const useAllChains = allChainsEnabled();
+  /** What this run actually attempts, after caps and any --chains filter. */
+  const attempted = useAllChains ? chains : chains.slice(0, 2);
   /** Reused FTP logins per chain — avoids connect/auth on every PriceFull file. */
   const pools = new Map<string, FtpPool>();
 
@@ -104,9 +106,14 @@ export function createCerberusAdapter(
     sourceId: "il-cerberus",
     market: "IL",
 
+    // Only the adapter knows what this run attempted once caps, the --chains
+    // filter and known-inactive accounts are applied. Chains deliberately not
+    // attempted must not be reported as missing coverage.
+    expectedChainIds: attempted.filter((c) => !c.knownInactive).map((c) => c.chainId),
+
     async discover(): Promise<FeedFile[]> {
       const errors: string[] = [];
-      const selected = useAllChains ? chains : chains.slice(0, 2);
+      const selected = attempted;
 
       // Discover chains in parallel — each has its own FTP login.
       const perChain = await mapPool(selected, Math.min(selected.length, 4), async (chain) => {

@@ -55,11 +55,13 @@ function absorb(result: PipelineResult, stats: FileProcessStats): void {
  * names the actual failure mode.
  */
 function findEmptyChains(
-  sourceId: string,
+  adapter: SourceAdapter,
   discoveredChainIds: Set<string>,
   rowsByChain: Map<string, number>,
 ): { chainsWithNoFiles: string[]; chainsWithNoRows: string[] } {
-  const expected = expectedChainIdsForSource(sourceId);
+  // The adapter is authoritative when it can say what it attempted; the
+  // per-source fallback covers adapters that cannot.
+  const expected = adapter.expectedChainIds ?? expectedChainIdsForSource(adapter.sourceId);
   const chainsWithNoFiles = expected.filter((id) => !discoveredChainIds.has(id));
   const chainsWithNoRows = expected.filter(
     (id) => discoveredChainIds.has(id) && (rowsByChain.get(id) ?? 0) === 0,
@@ -193,7 +195,7 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
     }
 
     const empties = findEmptyChains(
-      adapter.sourceId,
+      adapter,
       new Set(files.map((f) => f.chainId)),
       rowsByChain,
     );
