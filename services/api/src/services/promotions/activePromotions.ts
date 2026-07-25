@@ -1,5 +1,10 @@
 import { query, sqlNormalizeGtin } from "@super-mcp/db";
-import { applyPromoToUnitPrice, type PromoMechanicType, type RawPromoRecord } from "@super-mcp/shared";
+import {
+  applyPromoToUnitPrice,
+  promoRequiresCoupon,
+  type PromoMechanicType,
+  type RawPromoRecord,
+} from "@super-mcp/shared";
 
 export interface PromoCandidate {
   listingId: string;
@@ -14,6 +19,12 @@ export interface PromoCandidate {
    * it has to travel with the candidate and end up on the priced line.
    */
   clubOnly: boolean;
+  /**
+   * True when the promo text says it needs a coupon. Same problem as `clubOnly`:
+   * the price is real but conditional, so it must not be presented as the price
+   * anyone pays.
+   */
+  couponOnly: boolean;
   mechanic: RawPromoRecord["mechanic"];
 }
 
@@ -21,6 +32,12 @@ export interface PromoCandidate {
 export async function getActivePromotionsForListings(
   listingIds: string[],
   includeClub: boolean,
+  /**
+   * Include promos that need a clipped coupon (default true). Filtered in TS
+   * rather than SQL so `promoRequiresCoupon` stays the single source of truth —
+   * duplicating the Hebrew match into the query would let the two drift.
+   */
+  includeCoupon = true,
 ): Promise<Map<string, PromoCandidate[]>> {
   const map = new Map<string, PromoCandidate[]>();
   if (listingIds.length === 0) return map;
@@ -72,6 +89,7 @@ export async function getActivePromotionsForListings(
   );
 
   for (const row of res.rows) {
+    if (!includeCoupon && promoRequiresCoupon(row.description)) continue;
     const candidate: PromoCandidate = {
       listingId: row.listing_id,
       storeId: row.store_id,
@@ -79,6 +97,7 @@ export async function getActivePromotionsForListings(
       promoCode: row.promo_code,
       description: row.description,
       clubOnly: row.club_only === true,
+      couponOnly: promoRequiresCoupon(row.description),
       mechanic: {
         type: row.mechanic_type,
         params: row.mechanic_params as RawPromoRecord["mechanic"]["params"],

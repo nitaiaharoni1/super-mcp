@@ -1116,3 +1116,67 @@ describe("priceStoreBasket pricing metadata", () => {
     expect(none).toMatchObject({ distanceKm: null, distanceAccuracy: "unknown" });
   });
 });
+
+describe("coupon-gated pricing", () => {
+  const couponPromo = (clubOnly: boolean) =>
+    new Map([
+      [
+        "L",
+        [
+          {
+            listingId: "L",
+            storeId: "store",
+            chainId: "chain",
+            promoCode: "CPN1",
+            description: "קופון קוטג 5% ב 1 שח",
+            clubOnly,
+            couponOnly: true,
+            mechanic: { type: "simple_discount" as const, params: { discountedPrice: 1 } },
+          },
+        ],
+      ],
+    ]);
+
+  /**
+   * The feed publishes ~54k active coupon promos and only ~250 of them are marked
+   * club_only, so they were applied silently as the price anyone pays. A real case:
+   * "קופון קוטג 5% ב 1 שח" priced a ₪5.90 cottage at ₪1, which wins any
+   * cheapest-store comparison and then surprises the shopper at the till.
+   */
+  it("flags a coupon-gated price so it is not read as the shelf price", () => {
+    const result = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, couponPromo(false));
+    expect(result?.lines[0]).toMatchObject({
+      lineTotal: 1,
+      promoApplied: true,
+      couponOnly: true,
+      clubOnly: false,
+    });
+  });
+
+  it("keeps club and coupon conditions independent", () => {
+    const result = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, couponPromo(true));
+    expect(result?.lines[0]).toMatchObject({ clubOnly: true, couponOnly: true });
+  });
+
+  it("leaves couponOnly false for an ordinary promo", () => {
+    const promoMap = new Map([
+      [
+        "L",
+        [
+          {
+            listingId: "L",
+            storeId: "store",
+            chainId: "chain",
+            promoCode: "OPEN1",
+            description: "מבצע",
+            clubOnly: false,
+            couponOnly: false,
+            mechanic: { type: "simple_discount" as const, params: { discountedPrice: 8 } },
+          },
+        ],
+      ],
+    ]);
+    const result = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, promoMap);
+    expect(result?.lines[0]).toMatchObject({ lineTotal: 8, couponOnly: false });
+  });
+});

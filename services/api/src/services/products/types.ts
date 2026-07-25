@@ -81,6 +81,8 @@ export interface ProductPriceRow {
   promoDescription: string | null;
   /** True when the promo price needs the chain's loyalty card. */
   clubOnly: boolean;
+  /** True when the promo price needs a clipped coupon. */
+  couponOnly: boolean;
   /** Clickable link to open this product on the chain's storefront (search-by-barcode/name). Null if the chain has no online store. */
   link: string | null;
   freshness: Freshness;

@@ -465,10 +465,12 @@ async function optimizeInitialOrResumedBasket(
 
   const pricingStarted = Date.now();
   const includeClub = input.includeClub ?? true;
+  const includeCoupon = input.includeCoupon ?? true;
   const { listingByChainAndProduct, priceByListingAndStore, promoMap } = await loadBasketPricingData(
     productIds,
     storeIds,
     includeClub,
+    includeCoupon,
   );
 
   const storeResults: BasketStoreResult[] = [];

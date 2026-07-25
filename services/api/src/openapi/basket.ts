@@ -64,6 +64,13 @@ export const basketInitialRequestSchema = {
     items: { type: "array", items: basketItemInputSchema, minItems: 1, maxItems: 50 },
     ...basketLocationRequestProperties,
     include_club: { type: "boolean", default: true },
+    include_coupon: {
+      type: "boolean",
+      default: true,
+      description:
+        "Include coupon-gated promo prices. Set false for a total the shopper can pay " +
+        "without clipping a coupon. Coupon-priced lines are flagged couponOnly either way.",
+    },
     stores_limit: {
       type: "integer",
       minimum: 0,
@@ -190,6 +197,12 @@ const basketLineSchema = {
         "True when lineTotal relies on a loyalty-club promo, so the shopper needs the " +
         "chain's card to pay it.",
     },
+    couponOnly: {
+      type: "boolean",
+      description:
+        "True when lineTotal relies on a promo that needs a clipped coupon. Real but " +
+        "conditional: without the coupon the shopper pays the shelf price.",
+    },
     substituted: { type: "boolean" },
     substitutionReason: { type: "string", nullable: true },
     originalProductId: { type: "string", format: "uuid", nullable: true },
@@ -225,6 +238,7 @@ const basketStorePlanSchema = {
         "imputedTotal",
         "imputedLines",
         "clubOnlyLines",
+        "couponOnlyLines",
         "distanceAccuracy",
       ],
       properties: {
@@ -265,6 +279,10 @@ const basketStorePlanSchema = {
         clubOnlyLines: {
           type: "integer",
           description: "Priced lines whose price needs the chain's loyalty card.",
+        },
+        couponOnlyLines: {
+          type: "integer",
+          description: "Priced lines whose price needs a clipped coupon.",
         },
         lines: { type: "array", items: basketLineSchema },
         linesTruncated: {

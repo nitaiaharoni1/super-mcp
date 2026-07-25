@@ -176,10 +176,18 @@ export function registerBasketTools(server: McpServer): void {
           .boolean()
           .optional()
           .describe(
-            "Include loyalty-club prices (default true). Lines priced with a club " +
-              "promo are flagged `clubOnly`, and plans report `clubOnlyLines`, so you " +
-              "can tell the shopper which savings need the chain's card. Set false " +
-              "for a total anyone can pay at the till.",
+            "Include loyalty-club prices (default true). Conditional prices are always " +
+              "flagged: `clubOnly` needs the chain's card and `couponOnly` needs a clipped " +
+              "coupon; plans report `clubOnlyLines` and `couponOnlyLines`. Tell the shopper " +
+              "which savings are conditional, or set false for club-free pricing.",
+          ),
+        include_coupon: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include coupon-gated promo prices (default true). Set false for a total the " +
+              "shopper can pay without clipping a coupon. Either way, coupon-priced lines " +
+              "are flagged `couponOnly`.",
           ),
         stores_limit: z.number().int().min(0).max(500).optional(),
         preference: z
@@ -283,6 +291,7 @@ export function registerBasketTools(server: McpServer): void {
           locationOrigin: loc.locationOrigin,
           geocodeMs: loc.geocodeMs,
           includeClub: args.include_club,
+          includeCoupon: args.include_coupon,
           storesLimit: args.stores_limit,
           preference: args.preference,
           distancePenaltyPerKm: args.distance_penalty_per_km,

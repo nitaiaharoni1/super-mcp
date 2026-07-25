@@ -55,7 +55,7 @@ export async function getProductPrices(
   const res = await query<PriceQueryRow>(
     `SELECT
        st.id AS store_id, st.name AS store_name, st.chain_id, c.name_he AS chain_name,
-       st.city, st.address, st.lat, st.lng, ${distanceSelect},
+       st.city, st.address, st.lat, st.lng, st.store_kind, ${distanceSelect},
        l.id AS listing_id, l.item_code, l.name AS listing_name, p.gtin,
        sp.price, sp.unit_price, sp.currency, sp.source_ts, sp.ingested_at,
        p.size_unit
@@ -66,6 +66,12 @@ export async function getProductPrices(
      JOIN chain c ON c.id = st.chain_id
      WHERE l.product_id = $1
        AND sp.price > 0
+       -- Physical branches only. Online storefronts and the logistics warehouse
+       -- hold the three deepest price catalogs in the feed, so they were being
+       -- returned alongside real branches complete with a distanceKm, as if a
+       -- shopper could drive to them — and they undercut the real ones. NULL kind
+       -- is treated as a branch so an unclassified backlog never empties results.
+       AND (st.store_kind IS NULL OR st.store_kind = 'branch')
        ${whereClause}
      ORDER BY ${orderBy}
      LIMIT 500`,
@@ -84,12 +90,14 @@ export async function getProductPrices(
     let promoApplied = false;
     let promoDescription: string | null = null;
     let clubOnly = false;
+    let couponOnly = false;
 
     if (promo) {
       effectivePrice = Math.round(promo.effectiveTotal * 100) / 100;
       promoApplied = true;
       promoDescription = promo.candidate.description;
       clubOnly = promo.candidate.clubOnly;
+      couponOnly = promo.candidate.couponOnly;
     }
 
     return {
@@ -112,6 +120,7 @@ export async function getProductPrices(
       promoApplied,
       promoDescription,
       clubOnly,
+      couponOnly,
       link: buildProductLink({ chainId: r.chain_id, gtin: r.gtin, name: r.listing_name }).url,
       freshness: { sourceTs: r.source_ts, ingestedAt: r.ingested_at },
     };

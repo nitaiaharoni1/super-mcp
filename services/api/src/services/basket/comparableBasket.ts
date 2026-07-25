@@ -87,11 +87,16 @@ export function buildComparableCosts(
       (count, line) => count + (line.clubOnly ? 1 : 0),
       0,
     );
+    const couponOnlyLines = store.lines.reduce(
+      (count, line) => count + (line.couponOnly ? 1 : 0),
+      0,
+    );
     costs.set(store.storeId, {
       comparableTotal: round2(store.total + imputedTotal),
       imputedTotal: round2(imputedTotal),
       imputedLines,
       clubOnlyLines,
+      couponOnlyLines,
     });
   }
   return costs;
@@ -109,5 +114,6 @@ export function comparableCostFor(
     imputedTotal: 0,
     imputedLines: 0,
     clubOnlyLines: store.lines.reduce((count, line) => count + (line.clubOnly ? 1 : 0), 0),
+    couponOnlyLines: store.lines.reduce((count, line) => count + (line.couponOnly ? 1 : 0), 0),
   };
 }

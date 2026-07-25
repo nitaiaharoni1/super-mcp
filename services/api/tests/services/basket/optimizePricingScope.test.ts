@@ -151,7 +151,13 @@ describe("optimizeBasket pricing scope", () => {
 
     expect(result.status).toBe("complete");
     expect(loadBasketPricingData).toHaveBeenCalledOnce();
-    expect(loadBasketPricingData).toHaveBeenCalledWith([resolvedProductId], [STORE_ID], true);
+    // Trailing args are the promo-inclusion flags: club, then coupon.
+    expect(loadBasketPricingData).toHaveBeenCalledWith(
+      [resolvedProductId],
+      [STORE_ID],
+      true,
+      true,
+    );
   });
 
   it("rejects known far branches from a 3km near scope and multiStore recommendations", async () => {

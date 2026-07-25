@@ -14,6 +14,24 @@ export interface PromoFields {
 }
 
 /**
+ * Does this promo need a coupon the shopper must have clipped?
+ *
+ * The feeds carry no structured field for it, only the description: 53,911 active
+ * promotions say "קופון" and 53,662 of them are NOT marked club_only, so they were
+ * being applied silently as if anyone pays that price. 45k of those do reduce a
+ * line (average discounted price ₪6.69), which is exactly the shape that wins a
+ * cheapest-store comparison and then surprises the shopper at the till: a real
+ * example is "קופון קוטג 5% ב 1 שח" pricing a ₪5.90 cottage at ₪1.
+ *
+ * Kept as a description test because that is the only signal available, and
+ * "קופון" is unambiguous in Hebrew retail copy.
+ */
+export function promoRequiresCoupon(description: string | null | undefined): boolean {
+  if (!description) return false;
+  return /קופון|coupon/i.test(description);
+}
+
+/**
  * Normalize Israeli feed promo fields into typed mechanics.
  * Prefer structured fields; fall back to Hebrew/English description heuristics.
  */

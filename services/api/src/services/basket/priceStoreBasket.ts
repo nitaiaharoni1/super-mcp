@@ -233,12 +233,14 @@ export function priceStoreBasket(
     let promoApplied = false;
     let promoDescription: string | null = null;
     let clubOnly = false;
+    let couponOnly = false;
 
     if (promo) {
       lineTotal = Math.round(promo.effectiveTotal * 100) / 100;
       promoApplied = true;
       promoDescription = promo.candidate.description;
       clubOnly = promo.candidate.clubOnly;
+      couponOnly = promo.candidate.couponOnly;
     }
 
     // Line arithmetic invariant: never emit non-positive qty/total.
@@ -308,6 +310,7 @@ export function priceStoreBasket(
       promoApplied,
       promoDescription,
       clubOnly,
+      couponOnly,
       substituted,
       substitutionReason,
       originalProductId,

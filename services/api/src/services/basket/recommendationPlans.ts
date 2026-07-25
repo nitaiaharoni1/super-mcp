@@ -79,6 +79,7 @@ export function toMultiStorePlan(
     maxDistanceKm: plan.maxDistanceKm,
     estimatedTravelKm: plan.estimatedTravelKm,
     clubOnlyLines: plan.clubOnlyLines,
+    couponOnlyLines: plan.couponOnlyLines,
     lines: plan.lines,
     missingItemIndexes: plan.missingItemIndexes,
     ...cov,

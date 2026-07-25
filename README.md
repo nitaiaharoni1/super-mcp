@@ -93,7 +93,9 @@ Free-text basket lines resolve with **deterministic evidence first** (exact name
 
 Every plan therefore also carries `comparableTotal` — the same basket at every store: what it charges for what it stocks, plus the **median market price** across the compared stores for each resolvable line it does not. `imputedLines` / `imputedTotal` say how much of the figure is estimated, and ranking additionally charges a fixed surcharge when a store leaves lines unpriced, because finishing the list elsewhere is a second trip.
 
-Lines also carry `normalizedUnitPrice` (₪ per 100g / 100ml / piece) so a smaller pack cannot win on shelf price alone, and `clubOnly`, which is true when the price needs the chain's loyalty card. Plans report `clubOnlyLines`.
+Lines also carry `normalizedUnitPrice` (₪ per 100g / 100ml / piece) so a smaller pack cannot win on shelf price alone.
+
+**Conditional prices are always flagged.** `clubOnly` means the price needs the chain's loyalty card; `couponOnly` means it needs a clipped coupon. Plans report `clubOnlyLines` and `couponOnlyLines`. This matters: the feed carries ~54k active coupon promotions and only ~250 of them are marked as club prices, so they used to be applied silently. A real case priced a ₪5.90 cottage at ₪1 under "קופון קוטג 5% ב 1 שח", which wins any cheapest-store comparison and then surprises the shopper at the till. Set `include_club=false` or `include_coupon=false` for a total that needs neither; on a Herzliya basket that changes both the winning store and the price.
 
 #### Response size
 
@@ -309,7 +311,7 @@ See [docs/folder-conventions.md](./docs/folder-conventions.md) for target folder
 ## REST (v1)
 
 - `GET /v1/products` · `GET /v1/products/:id`
-- `GET /v1/products/:id/prices` — compare nearby (default **10km**); `?sort=unit_price` for cheaper per 100g/ml
+- `GET /v1/products/:id/prices` — compare nearby (default **10km**); `?sort=unit_price` for cheaper per 100g/ml. Physical branches only, and rows carry `clubOnly` / `couponOnly`
 - `GET /v1/products/:id/substitutes` — cheaper similar products by unit price
 - `GET /v1/products/:id/history`
 - `GET /v1/chains` · `GET /v1/stores` — returns `{ stores, location }` (not a bare array); `?near=` defaults to **10km** radius. Each store carries `storeKind` (`branch` / `online` / `pickup` / `warehouse`); only `branch` rows are used for basket recommendations

@@ -37,6 +37,7 @@ export const basketInitialBodySchema = z
     items: z.array(basketItemSchema).min(1).max(50),
     ...basketLocationBodyShape,
     include_club: z.boolean().optional().default(true),
+    include_coupon: z.boolean().optional().default(true),
     stores_limit: z.coerce.number().int().min(0).max(500).optional(),
     preference: z.enum(["cheapest", "balanced", "closest"]).optional(),
     distance_penalty_per_km: z.coerce.number().min(0).max(100).optional(),

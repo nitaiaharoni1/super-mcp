@@ -12,6 +12,7 @@ export async function loadBasketPricingData(
   productIds: string[],
   storeIds: string[],
   includeClub: boolean,
+  includeCoupon = true,
 ): Promise<BasketPricingContext> {
   const listingRes = await query<ListingRow>(
     `SELECT l.id, l.product_id, l.chain_id, l.item_code, l.name, p.gtin,
@@ -47,7 +48,7 @@ export async function loadBasketPricingData(
     priceByListingAndStore.set(`${row.listing_id}:${row.store_id}`, row);
   }
 
-  const promoMap = await getActivePromotionsForListings(listingIds, includeClub);
+  const promoMap = await getActivePromotionsForListings(listingIds, includeClub, includeCoupon);
 
   return { listingByChainAndProduct, priceByListingAndStore, promoMap };
 }

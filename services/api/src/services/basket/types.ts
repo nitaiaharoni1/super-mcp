@@ -103,6 +103,11 @@ export interface BasketAssumption {
 export interface BasketInitialInput extends BasketLocationInput {
   items: BasketItemInput[];
   includeClub?: boolean;
+  /**
+   * Include promos needing a clipped coupon (default true). Set false for a total
+   * the shopper can pay without clipping anything.
+   */
+  includeCoupon?: boolean;
   /** Max store breakdowns to return (default 5). Use 0 for all. */
   storesLimit?: number;
   /**
@@ -275,6 +280,12 @@ export interface BasketLine {
    * visible rather than silently folded into the total.
    */
   clubOnly: boolean;
+  /**
+   * True when `lineTotal` relies on a promo that needs a clipped coupon. Like
+   * `clubOnly`, the price is real but conditional and must not be read as what
+   * anyone pays at the till.
+   */
+  couponOnly: boolean;
   /** True when a lower-ranked candidate was used because the primary SKU wasn't stocked. */
   substituted: boolean;
   substitutionReason: string | null;
@@ -341,6 +352,8 @@ export interface ComparableCost {
   imputedLines: number;
   /** Lines whose price is only reachable with a loyalty card. */
   clubOnlyLines: number;
+  /** Lines whose price needs a clipped coupon. */
+  couponOnlyLines: number;
 }
 
 export interface BasketCoverage {
@@ -391,6 +404,7 @@ export interface MultiStoreLine {
   promoApplied: boolean;
   promoDescription: string | null;
   clubOnly: boolean;
+  couponOnly: boolean;
   /** Storefront link to open this product on the chain's site. Null if the chain has no online store. */
   link: string | null;
 }
@@ -427,6 +441,8 @@ export interface BasketMultiStorePlan extends BasketCoverage {
   estimatedTravelKm: number | null;
   /** Lines whose price needs a loyalty card. */
   clubOnlyLines: number;
+  /** Lines whose price needs a clipped coupon. */
+  couponOnlyLines: number;
   lines: MultiStoreLine[];
   missingItemIndexes: number[];
 }

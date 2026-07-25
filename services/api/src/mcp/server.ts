@@ -31,7 +31,9 @@ export function buildMcpServerInstructions(
     "market reference price for lines a store does not stock); raw total covers priced lines only, so " +
     "check totalScope. Set preference=cheapest when the shopper says distance does not matter, " +
     "preference=closest when they say price is not a big factor, else leave it balanced. " +
-    "Lines flagged clubOnly need the chain loyalty card; plans report clubOnlyLines. " +
+    "Conditional prices are flagged: clubOnly needs the chain loyalty card and couponOnly " +
+    "needs a clipped coupon (plans report clubOnlyLines / couponOnlyLines) — say so rather " +
+    "than quoting them as the price anyone pays. " +
     "Use search_products / resolve_products only for unresolved or missing lines. " +
     "Use pack_qty alone for pack counts (3 milk cartons: pack_qty=3). " +
     "Use amount+unit for natural counts and weighed goods " +

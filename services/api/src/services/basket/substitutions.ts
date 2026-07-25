@@ -20,6 +20,7 @@ export interface MultiStorePlanDraft {
   maxDistanceKm: number | null;
   estimatedTravelKm: number | null;
   clubOnlyLines: number;
+  couponOnlyLines: number;
 }
 
 export function isLineSubstituted(
@@ -308,6 +309,7 @@ export function buildMultiStorePlan(
       promoApplied: best.line.promoApplied,
       promoDescription: best.line.promoDescription,
       clubOnly: best.line.clubOnly,
+      couponOnly: best.line.couponOnly,
       link: best.line.link,
     });
   }
@@ -359,6 +361,7 @@ export function buildMultiStorePlan(
     maxDistanceKm,
     estimatedTravelKm,
     clubOnlyLines: lines.reduce((n, l) => n + (l.clubOnly ? 1 : 0), 0),
+    couponOnlyLines: lines.reduce((n, l) => n + (l.couponOnly ? 1 : 0), 0),
   };
 }
 
