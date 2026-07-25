@@ -1,17 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   API_KEY_PLACEHOLDER,
-  buildAccessMailto,
   buildMcpJsonSnippet,
   buildMcpServerConfig,
-  getAccessEmail,
+  getApiBaseUrl,
+  getMcpUrl,
 } from "@/lib/mcp";
 
 describe("mcp helpers", () => {
   const url = "https://api.example.com/mcp";
+  const previousMcpUrl = process.env.NEXT_PUBLIC_MCP_URL;
 
   afterEach(() => {
-    vi.unstubAllEnvs();
+    if (previousMcpUrl === undefined) delete process.env.NEXT_PUBLIC_MCP_URL;
+    else process.env.NEXT_PUBLIC_MCP_URL = previousMcpUrl;
   });
 
   it("builds authenticated url+headers server config", () => {
@@ -34,22 +36,14 @@ describe("mcp helpers", () => {
     expect(snippet).toContain(API_KEY_PLACEHOLDER);
   });
 
-  it("builds access mailto with encoded Hebrew subject and body", () => {
-    const href = buildAccessMailto("access@example.com");
-    expect(href.startsWith("mailto:access%40example.com?")).toBe(true);
-    expect(href).toContain("subject=");
-    expect(href).toContain("body=");
-    expect(decodeURIComponent(href)).toContain("בקשת גישה ל-Super MCP");
-    expect(decodeURIComponent(href)).toContain("אשמח לקבל גישת MCP/API");
+  it("defaults MCP url and derives API base by stripping /mcp", () => {
+    delete process.env.NEXT_PUBLIC_MCP_URL;
+    expect(getMcpUrl()).toBe("http://localhost:8787/mcp");
+    expect(getApiBaseUrl()).toBe("http://localhost:8787");
   });
 
-  it("returns null when NEXT_PUBLIC_ACCESS_EMAIL is missing", () => {
-    vi.stubEnv("NEXT_PUBLIC_ACCESS_EMAIL", "");
-    expect(getAccessEmail()).toBeNull();
-  });
-
-  it("returns trimmed access email when set", () => {
-    vi.stubEnv("NEXT_PUBLIC_ACCESS_EMAIL", "  keys@supermcp.example  ");
-    expect(getAccessEmail()).toBe("keys@supermcp.example");
+  it("strips a trailing /mcp/ suffix from a custom MCP url", () => {
+    process.env.NEXT_PUBLIC_MCP_URL = "https://api.example.com/mcp/";
+    expect(getApiBaseUrl()).toBe("https://api.example.com");
   });
 });

@@ -9,21 +9,14 @@ import { MotionReveal } from "@/components/shared/MotionReveal";
 import { Section } from "@/components/shared/Section";
 import { TrackedAnchor } from "@/components/shared/TrackedAnchor";
 import { Button } from "@/components/ui/button";
+import { AccessRequestForm } from "@/components/marketing/AccessRequestForm";
 import { he } from "@/content/he";
 import { AnalyticsEvent, capture } from "@/lib/analytics";
-import {
-  buildAccessMailto,
-  buildMcpJsonSnippet,
-  getAccessEmail,
-  getMcpUrl,
-} from "@/lib/mcp";
+import { buildMcpJsonSnippet, getMcpUrl } from "@/lib/mcp";
 
 export function AccessPanel() {
   const url = getMcpUrl();
   const json = buildMcpJsonSnippet(url);
-  const accessEmail = getAccessEmail();
-  const accessHref = accessEmail ? buildAccessMailto(accessEmail) : null;
-  const isDev = process.env.NODE_ENV === "development";
 
   return (
     <Section id={he.access.id} className="scroll-mt-20 py-16 md:py-24">
@@ -45,35 +38,12 @@ export function AccessPanel() {
                 <h2 className="font-[family-name:var(--font-secular)] text-[clamp(1.85rem,3.2vw,2.5rem)] leading-[1.12] tracking-[-0.02em]">
                   {he.access.title}
                 </h2>
-                <p className="mt-4 max-w-[36ch] text-[var(--color-ink-muted)] leading-7">
+                <p className="mt-4 max-w-[38ch] text-[var(--color-ink-muted)] leading-7">
                   {he.access.body}
                 </p>
 
-                <div className="mt-8">
-                  {accessHref ? (
-                    <Button asChild size="xl">
-                      <TrackedAnchor
-                        href={accessHref}
-                        event={AnalyticsEvent.MarketingCtaClicked}
-                        mailtoEvent={AnalyticsEvent.AccessMailtoClicked}
-                        eventProperties={{ cta_id: "request_access", location: "access_panel" }}
-                      >
-                        {he.access.primaryCta}
-                      </TrackedAnchor>
-                    </Button>
-                  ) : (
-                    <div
-                      role="alert"
-                      className="rounded-[var(--radius-lg)] border border-amber-700/30 bg-amber-50 px-4 py-3 text-sm text-amber-950"
-                    >
-                      <p className="font-medium">{he.access.primaryCta}</p>
-                      <p className="mt-1">
-                        {isDev
-                          ? he.access.emailMissing
-                          : "בקשת גישה אינה מוגדרת כרגע. פנו למפעילים דרך המאגר."}
-                      </p>
-                    </div>
-                  )}
+                <div className="mt-7">
+                  <AccessRequestForm />
                 </div>
 
                 <details
@@ -91,24 +61,28 @@ export function AccessPanel() {
                     <p className="text-sm leading-6 text-[var(--color-ink-muted)]">
                       {he.access.alreadyHaveKeyHint}
                     </p>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                      <CodeBlock code={url} className="min-w-0 flex-1 bg-[var(--color-olive-soft)]" />
-                      <CopyButton
-                        value={url}
-                        label={he.access.copyUrl}
-                        analyticsEvent={AnalyticsEvent.McpUrlCopied}
-                      />
+                    <div className="grid gap-2">
+                      <CodeBlock code={url} className="min-w-0 overflow-x-auto bg-[var(--color-olive-soft)]" />
+                      <div>
+                        <CopyButton
+                          value={url}
+                          label={he.access.copyUrl}
+                          analyticsEvent={AnalyticsEvent.McpUrlCopied}
+                        />
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="grid gap-2">
                       <CodeBlock
                         code={json}
-                        className="min-w-0 flex-1 bg-[var(--color-data)] text-[var(--color-data-fg)]"
+                        className="min-w-0 overflow-x-auto bg-[var(--color-data)] text-[var(--color-data-fg)]"
                       />
-                      <CopyButton
-                        value={json}
-                        label={he.access.copyJson}
-                        analyticsEvent={AnalyticsEvent.McpJsonCopied}
-                      />
+                      <div>
+                        <CopyButton
+                          value={json}
+                          label={he.access.copyJson}
+                          analyticsEvent={AnalyticsEvent.McpJsonCopied}
+                        />
+                      </div>
                     </div>
                   </div>
                 </details>

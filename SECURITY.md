@@ -27,5 +27,6 @@ We will acknowledge reports as soon as practical and coordinate disclosure after
 
 - Master API keys are break-glass: create them only via `pnpm create-key -- --role=master`. HTTP admin cannot mint masters.
 - Issue **standard** keys to external users. Keep masters offline and rotated.
-- Set `CORS_ORIGINS` to an explicit allowlist when a browser origin must call the API; leave it unset to disable browser CORS.
+- Set `CORS_ORIGINS` to an explicit allowlist when a browser origin must call the API (required for the marketing access form); leave it unset to disable browser CORS.
+- Access-request rate limiting keys on Fastify `request.ip`. Keep `TRUST_PROXY` enabled (default) only behind a proxy that overwrites `X-Forwarded-For`; set `TRUST_PROXY=0` for direct socket exposure.
 - Set `SUPER_MCP_READY_REQUIRE_AUTH=1` on public hosts if you do not want unauthenticated catalog inventory on `GET /ready`.

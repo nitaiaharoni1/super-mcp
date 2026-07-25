@@ -10,11 +10,6 @@ env:
     availability:
       - BUILD
       - RUNTIME
-  - variable: NEXT_PUBLIC_ACCESS_EMAIL
-    secret: NEXT_PUBLIC_ACCESS_EMAIL
-    availability:
-      - BUILD
-      - RUNTIME
   - variable: NEXT_PUBLIC_POSTHOG_KEY
     secret: NEXT_PUBLIC_POSTHOG_KEY
     availability:

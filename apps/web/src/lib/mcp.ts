@@ -5,9 +5,9 @@ export function getMcpUrl(): string {
   return process.env.NEXT_PUBLIC_MCP_URL?.trim() || "http://localhost:8787/mcp";
 }
 
-export function getAccessEmail(): string | null {
-  const email = process.env.NEXT_PUBLIC_ACCESS_EMAIL?.trim() || "";
-  return email.length > 0 ? email : null;
+/** API origin for public endpoints, derived from the MCP URL (same host). */
+export function getApiBaseUrl(): string {
+  return getMcpUrl().replace(/\/mcp\/?$/, "");
 }
 
 /** Authenticated Streamable HTTP MCP config. Never embeds a real key. */
@@ -35,17 +35,3 @@ export function buildMcpJsonSnippet(url: string): string {
   );
 }
 
-export function buildAccessMailto(email: string): string {
-  const subject = "בקשת גישה ל-Super MCP";
-  const body = [
-    "שלום,",
-    "",
-    "אשמח לקבל גישת MCP/API ל-Super MCP.",
-    "",
-    "שם / פרויקט:",
-    "שימוש מתוכנן (Cursor / Claude / אחר):",
-    "הערות:",
-  ].join("\n");
-
-  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-}

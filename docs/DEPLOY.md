@@ -20,7 +20,7 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `DATABASE_URL` | server |
 | `BASKET_CONTINUATION_SECRET` | server (≥32 bytes, unique) |
 | `GEOCODING_CACHE_SECRET` | server (≥32 bytes, unique) |
-| `CORS_ORIGINS` | server (comma-separated allowlist if browsers call the API) |
+| `CORS_ORIGINS` | server (required for the marketing access form; comma-separated browser origins) |
 | `SUPER_MCP_READY_REQUIRE_AUTH` | server (`1` recommended on public hosts) |
 | `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY` | server (must stay unset/`0`) |
 | `NOMINATIM_USER_AGENT` | server (identifying contact for OSM policy) |

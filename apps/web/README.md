@@ -2,7 +2,8 @@
 
 Hebrew RTL marketing landing for Super MCP (`apps/web` in the monorepo).
 
-Primary CTA is a hosted-access email request. Manual MCP config includes
+Primary CTA is an inline access-request form that POSTs to the API
+(`POST /v1/access-requests`). Manual MCP config includes
 `Authorization: Bearer <YOUR_API_KEY>` — there is no public one-click Cursor
 install without an issued key.
 
@@ -18,15 +19,18 @@ Create `apps/web/.env.local`:
 
 ```bash
 NEXT_PUBLIC_MCP_URL=http://localhost:8787/mcp
-NEXT_PUBLIC_ACCESS_EMAIL=you@example.com
 ```
 
-Both values are baked into the client/server bundle at build time.
+And on the API (repo-root `.env`), allow the marketing origin so the browser form can POST:
 
-- `NEXT_PUBLIC_MCP_URL` — Streamable HTTP MCP endpoint shown in the manual setup template
-- `NEXT_PUBLIC_ACCESS_EMAIL` — destination for the “בקשו גישת MCP” mailto CTA
+```bash
+CORS_ORIGINS=http://localhost:3000
+```
 
-If `NEXT_PUBLIC_ACCESS_EMAIL` is missing in development, the Access panel shows a visible configuration alert instead of a fake address.
+Values prefixed with `NEXT_PUBLIC_` are baked into the client/server bundle at build time.
+
+- `NEXT_PUBLIC_MCP_URL` — Streamable HTTP MCP endpoint (also used to derive the API base URL for the access form by stripping `/mcp`)
+- `CORS_ORIGINS` (API) — required for the access form; comma-separated browser origins allowed to call the API
 
 ## TypeScript note
 
@@ -52,6 +56,7 @@ gcloud run deploy super-mcp-web \
   --allow-unauthenticated
 ```
 
+Ensure the API service has `CORS_ORIGINS` set to the marketing site origin(s).
 `apphosting.yaml` remains for an optional Firebase App Hosting path; the live site is Cloud Run. Do not commit production URLs or secrets to the repo.
 
 ## Scripts
@@ -67,7 +72,6 @@ Production build example:
 
 ```bash
 NEXT_PUBLIC_MCP_URL=https://api.example.com/mcp \
-NEXT_PUBLIC_ACCESS_EMAIL=access@example.com \
 NEXT_PUBLIC_POSTHOG_KEY=phc_... \
 NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com \
 pnpm --filter @super-mcp/web build

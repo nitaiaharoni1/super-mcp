@@ -6,15 +6,11 @@ import { TrackedAnchor } from "@/components/shared/TrackedAnchor";
 import { Button } from "@/components/ui/button";
 import { he } from "@/content/he";
 import { AnalyticsEvent } from "@/lib/analytics";
-import { buildAccessMailto, getAccessEmail } from "@/lib/mcp";
 
 export function Hero() {
-  const accessEmail = getAccessEmail();
-  const accessHref = accessEmail ? buildAccessMailto(accessEmail) : "#access";
-
   return (
     <section id="top" className="relative isolate overflow-hidden">
-      <Container className="pt-14 pb-16 text-center md:pt-20 md:pb-24">
+      <Container className="pt-14 pb-10 text-center md:pt-20 md:pb-14">
         <MotionReveal>
           <p className="text-sm font-semibold text-[var(--color-accent)]">{he.hero.eyebrow}</p>
           <h1 className="mx-auto mt-4 max-w-[22ch] font-[family-name:var(--font-secular)] text-[clamp(2.5rem,6vw,4rem)] leading-[1.08] tracking-[-0.02em] text-[var(--color-ink)]">
@@ -26,9 +22,8 @@ export function Hero() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Button asChild size="xl">
               <TrackedAnchor
-                href={accessHref}
+                href="#access"
                 event={AnalyticsEvent.MarketingCtaClicked}
-                mailtoEvent={AnalyticsEvent.AccessMailtoClicked}
                 eventProperties={{ cta_id: "request_access", location: "hero" }}
               >
                 {he.hero.primaryCta}
@@ -52,6 +47,12 @@ export function Hero() {
             sizes="(max-width: 768px) 100vw, 768px"
             className="object-cover object-center"
           />
+          <a
+            href={he.hero.secondaryHref}
+            className="absolute bottom-4 right-4 rounded-[var(--radius-pill)] bg-white/95 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] shadow-[0_8px_24px_-8px_oklch(0.3_0.05_230_/_0.45)] backdrop-blur-sm transition-transform hover:-translate-y-0.5"
+          >
+            {he.hero.proofChip}
+          </a>
         </MotionReveal>
       </Container>
     </section>

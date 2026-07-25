@@ -10,7 +10,7 @@ export function BenefitTrio() {
   const [prices, missing] = items;
 
   return (
-    <Section id={he.benefits.id} className="scroll-mt-20 py-16 md:py-24">
+    <Section id={he.benefits.id} className="scroll-mt-20 pt-8 pb-16 md:pt-10 md:pb-24">
       <Container>
         <MotionReveal>
           <h2 className="max-w-[18ch] font-[family-name:var(--font-secular)] text-[clamp(1.85rem,3.6vw,2.75rem)] leading-[1.12] tracking-[-0.02em]">
@@ -21,7 +21,15 @@ export function BenefitTrio() {
         <div className="mt-10 grid gap-5 md:grid-cols-2 md:gap-6">
           <MotionReveal className="md:col-span-2">
             <div className="grid overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-line)] bg-white md:grid-cols-2">
-              <div className="relative aspect-[4/3] md:aspect-auto md:min-h-[320px]">
+              <div className="order-2 flex flex-col justify-center p-7 md:order-1 md:p-12">
+                <h3 className="text-2xl font-semibold tracking-tight md:text-3xl">
+                  {featured.title}
+                </h3>
+                <p className="mt-3 max-w-[40ch] text-base leading-7 text-[var(--color-ink-muted)] md:text-lg md:leading-8">
+                  {featured.body}
+                </p>
+              </div>
+              <div className="relative order-1 aspect-[4/3] md:order-2 md:aspect-auto md:min-h-[320px]">
                 <Image
                   src={featured.imageSrc}
                   alt={featured.imageAlt}
@@ -29,14 +37,6 @@ export function BenefitTrio() {
                   sizes="(max-width: 768px) 100vw, 540px"
                   className="object-cover"
                 />
-              </div>
-              <div className="flex flex-col justify-center p-7 md:p-12">
-                <h3 className="text-2xl font-semibold tracking-tight md:text-3xl">
-                  {featured.title}
-                </h3>
-                <p className="mt-3 max-w-[40ch] text-base leading-7 text-[var(--color-ink-muted)] md:text-lg md:leading-8">
-                  {featured.body}
-                </p>
               </div>
             </div>
           </MotionReveal>

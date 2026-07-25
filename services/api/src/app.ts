@@ -8,6 +8,7 @@ import { sendError, toAppError } from "./lib/errors.js";
 import { getOpenApiSpec } from "./openapi.js";
 import { beginPrivilegedAudit, finalizePrivilegedAudit } from "./services/privilegedAudit.js";
 import {
+  registerAccessRoutes,
   registerAdminRoutes,
   registerBasketRoutes,
   registerProductRoutes,
@@ -18,7 +19,7 @@ import {
 import { registerMcpRoutes } from "./mcp/server.js";
 import { assertBasketContinuationSecret } from "./services/basket/continuation.js";
 
-const PUBLIC_PATHS = new Set(["/health", "/ready", "/openapi.json"]);
+const PUBLIC_PATHS = new Set(["/health", "/ready", "/openapi.json", "/v1/access-requests"]);
 
 function isPublicPath(url: string): boolean {
   const path = url.split("?")[0] ?? url;
@@ -49,7 +50,10 @@ function corsOriginOption(): boolean | string[] {
 export async function buildApp(): Promise<FastifyInstance> {
   assertBasketContinuationSecret(process.env.BASKET_CONTINUATION_SECRET ?? "");
 
+  // Trust the platform proxy (Cloud Run / ingress) so request.ip is the client.
+  // Set TRUST_PROXY=0 only for direct socket exposure without a forwarding hop.
   const app = Fastify({
+    trustProxy: process.env.TRUST_PROXY !== "0",
     bodyLimit: 1_048_576,
     connectionTimeout: 60_000,
     requestTimeout: 120_000,
@@ -160,6 +164,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerPromotionRoutes(app);
   await registerBasketRoutes(app);
   await registerAdminRoutes(app);
+  await registerAccessRoutes(app);
   await registerMcpRoutes(app);
 
   return app;

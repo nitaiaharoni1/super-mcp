@@ -16,27 +16,36 @@ export function HowItWorks() {
           </p>
         </MotionReveal>
 
-        <MotionReveal delay={0.06} className="mt-10">
-          <div className="rounded-[var(--radius-xl)] border border-[var(--color-line)] bg-white p-8 shadow-[0_24px_60px_-44px_oklch(0.45_0.08_230_/_0.5)] md:p-12">
-            <ol className="relative grid gap-10 md:grid-cols-3 md:gap-8">
-              <div
-                aria-hidden
-                className="absolute top-7 right-[16.6%] left-[16.6%] hidden h-0.5 bg-[color-mix(in_oklch,var(--color-accent)_25%,transparent)] md:block"
-              />
-              {he.howItWorks.steps.map((step, index) => (
-                <li key={step.title} className="relative flex flex-col items-center text-center">
-                  <span className="relative z-10 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-accent)] font-[family-name:var(--font-geist-mono)] text-lg font-semibold text-white">
-                    {index + 1}
-                  </span>
-                  <h3 className="mt-5 text-lg font-semibold tracking-tight">{step.title}</h3>
-                  <p className="mt-2 max-w-[24ch] text-sm leading-6 text-[var(--color-ink-muted)]">
+        <ol className="mt-12 max-w-3xl space-y-10">
+          {he.howItWorks.steps.map((step, index) => (
+            <li key={step.title}>
+              <MotionReveal delay={0.05 * index} className="grid grid-cols-[auto_1fr] gap-x-6 md:gap-x-8">
+                <span
+                  aria-hidden
+                  className="w-14 select-none text-center font-[family-name:var(--font-secular)] text-5xl leading-none text-[var(--color-accent)] md:text-6xl"
+                >
+                  {index + 1}
+                </span>
+                <div className="pt-1">
+                  <h3 className="text-xl font-semibold tracking-tight md:text-2xl">{step.title}</h3>
+                  <p className="mt-2 max-w-[44ch] text-sm leading-6 text-[var(--color-ink-muted)] md:text-base md:leading-7">
                     {step.body}
                   </p>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </MotionReveal>
+                  {"exampleQuestion" in step && (
+                    <figure className="mt-4 max-w-md rounded-[var(--radius-lg)] rounded-tr-[4px] border border-[var(--color-line)] bg-white px-5 py-4">
+                      <figcaption className="text-xs font-medium text-[var(--color-accent)]">
+                        {step.exampleLabel}
+                      </figcaption>
+                      <blockquote className="mt-1 text-sm leading-6 text-[var(--color-ink)]">
+                        {step.exampleQuestion}
+                      </blockquote>
+                    </figure>
+                  )}
+                </div>
+              </MotionReveal>
+            </li>
+          ))}
+        </ol>
 
         <div className="mt-6 grid gap-5 md:grid-cols-2 md:gap-6">
           {he.howItWorks.explain.map((block, index) => (

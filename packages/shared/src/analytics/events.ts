@@ -5,6 +5,8 @@ export const POSTHOG_PRODUCT = "super_mcp" as const;
 export const AnalyticsEvent = {
   MarketingCtaClicked: "marketing_cta_clicked",
   AccessMailtoClicked: "access_mailto_clicked",
+  AccessRequestSubmitted: "access_request_submitted",
+  AccessRequestFailed: "access_request_failed",
   McpUrlCopied: "mcp_url_copied",
   McpJsonCopied: "mcp_json_copied",
   AccessDetailsOpened: "access_details_opened",
