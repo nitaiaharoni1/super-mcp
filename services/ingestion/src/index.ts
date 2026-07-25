@@ -8,18 +8,29 @@ import { runPipeline } from "./pipeline.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
 
-function parseArgs(argv: string[]): { source: string } {
+function parseArgs(argv: string[]): { source: string; chains: string[] } {
   let source = "fixture";
+  let chains: string[] = [];
   for (const arg of argv) {
     if (arg === "--fixture") source = "fixture";
     if (arg.startsWith("--source=")) source = arg.slice("--source=".length);
+    // --chains=TivTaam,osherad restricts Cerberus to those chains (FTP user or
+    // chain id). Chains run in list order and a large one can consume a whole
+    // run, so this is the only way to catch up a chain that has fallen behind
+    // without re-ingesting everything ahead of it.
+    if (arg.startsWith("--chains=")) {
+      chains = arg.slice("--chains=".length).split(",").map((s) => s.trim()).filter(Boolean);
+    }
   }
-  return { source };
+  return { source, chains };
 }
 
 async function main(): Promise<void> {
-  const { source } = parseArgs(process.argv.slice(2));
-  const adapters = getAdapters(source);
+  const { source, chains } = parseArgs(process.argv.slice(2));
+  const adapters = getAdapters(source, chains);
+  if (chains.length > 0) {
+    console.log(JSON.stringify({ event: "ingestion_chain_filter", chains }));
+  }
   // Independent sources (Shufersal / Cerberus / Carrefour) can run together.
   // Per-file parallelism inside each pipeline is controlled by SUPER_MCP_CONCURRENCY.
   const results = await Promise.all(
