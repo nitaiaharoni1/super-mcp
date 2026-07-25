@@ -70,6 +70,13 @@ export function evaluateAccept(
   for (const token of accept.forbidTokens ?? []) {
     if (resolvedName.includes(token)) failures.push(`forbidden token "${token}"`);
   }
+  for (const pattern of accept.forbidPatterns ?? []) {
+    // A malformed pattern must fail the label loudly rather than silently accept
+    // everything: a benchmark that quietly stops checking is worse than no check.
+    if (new RegExp(pattern).test(resolvedName)) {
+      failures.push(`forbidden pattern "${pattern}"`);
+    }
+  }
 
   // Class / preparation / availability are only checkable when facts were supplied.
   // A missing fact is NOT a failure: an unclassified catalog must not score as wrong,

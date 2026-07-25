@@ -54,6 +54,23 @@ describe("evaluateAccept", () => {
     expect(failures.join(" ")).toContain("derived_ingredient");
   });
 
+  it("separates a forbidden word from a brand that contains it", () => {
+    // עץ הזית is a CANOLA brand, so a plain forbidTokens:["זית"] scored 11 correct
+    // resolutions as wrong. The pattern must pass the brand and still catch the
+    // irregular olive-oil spellings a "שמן זית" phrase would have let through.
+    const accept = { requireTokens: ["שמן"], forbidPatterns: ["(?<!עץ ה)זית"] };
+    for (const canola of [
+      'שמן קנולה עץ הזית סוגת 750 מ"ל',
+      "שמן עץ הזית חמניות 1 ליטר בריאות מהטבע",
+      "שמן זרעי ענבים 1 ליטר עץ הזית",
+    ]) {
+      expect(evaluateAccept(accept, canola, facts()), canola).toEqual([]);
+    }
+    for (const olive of ['שמן  זית 750 מ"ל', 'שמןזית כתית מעולה 750מ"ל', "ש.זית צור יצחק כתית"]) {
+      expect(evaluateAccept(accept, olive, facts()), olive).not.toEqual([]);
+    }
+  });
+
   it("treats an unresolved line as a single failure", () => {
     expect(evaluateAccept({ requireTokens: ["אורז"] }, null, undefined)).toEqual(["unresolved"]);
   });

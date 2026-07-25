@@ -284,7 +284,9 @@ export const STAPLE_LABELS: StapleLabel[] = [
     category: "oil_vinegar",
     accept: {
       requireTokens: ["שמן"],
-      forbidTokens: ["חומץ", "סויה", "אמבט", "זית", "מנוע", "רחצה"],
+      forbidTokens: ["חומץ", "סויה", "אמבט", "מנוע", "רחצה"],
+      // Not a plain "זית" token: עץ הזית is a canola brand. See forbidPatterns.
+      forbidPatterns: ["(?<!עץ ה)זית"],
       anyOfClassL2: ["oil_vinegar"],
       minNearbyStoreShare: 0.25,
     },

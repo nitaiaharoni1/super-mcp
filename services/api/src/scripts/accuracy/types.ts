@@ -33,6 +33,18 @@ export interface AcceptCriteria {
    * noodles), `יוגורט` matching a chocolate dessert.
    */
   forbidTokens?: string[];
+  /**
+   * Same as `forbidTokens` but matched as a regex, for the case a plain substring
+   * cannot express: a forbidden word that is also part of a legitimate BRAND.
+   *
+   * Real example. `oil-cooking` must reject olive oil, so it forbade `זית`. But
+   * `עץ הזית` is a brand of CANOLA oil, so 11 correct products were scored wrong.
+   * Tightening to the phrase `שמן זית` is not right either: the catalog spells it
+   * `שמן  זית`, `שמןזית` and `ש.זית` on 4 real olive oils, which would then pass.
+   * `(?<!עץ ה)זית` is the rule that is actually meant, and it classifies all 15
+   * correctly.
+   */
+  forbidPatterns?: string[];
   /** Resolved product must sit in one of these class_l2 buckets. */
   anyOfClassL2?: string[];
   /** Resolved product's preparation must be one of these, when classified. */
