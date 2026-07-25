@@ -293,6 +293,25 @@ describe("label set integrity", () => {
       }
     }
   });
+
+  /**
+   * An invalid forbidPatterns regex throws out of evaluateAccept and is caught only
+   * by the CLI's top-level handler, so it aborts the WHOLE benchmark rather than
+   * failing one label. Catch it here, where the cost is a red test.
+   */
+  it("every forbidPattern compiles, and forbids nothing a label requires", () => {
+    for (const l of STAPLE_LABELS) {
+      for (const pattern of l.accept.forbidPatterns ?? []) {
+        expect(() => new RegExp(pattern), `${l.id} has an invalid forbidPattern`).not.toThrow();
+        const re = new RegExp(pattern);
+        for (const req of [...(l.accept.requireTokens ?? []), ...(l.accept.requireAnyToken ?? [])]) {
+          expect(re.test(req), `${l.id} forbidPattern ${pattern} rejects its own token ${req}`).toBe(
+            false,
+          );
+        }
+      }
+    }
+  });
 });
 
 /**

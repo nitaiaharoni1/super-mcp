@@ -71,8 +71,10 @@ export function evaluateAccept(
     if (resolvedName.includes(token)) failures.push(`forbidden token "${token}"`);
   }
   for (const pattern of accept.forbidPatterns ?? []) {
-    // A malformed pattern must fail the label loudly rather than silently accept
-    // everything: a benchmark that quietly stops checking is worse than no check.
+    // A malformed pattern throws here, propagates out of scoreBasket and aborts the
+    // whole run at the CLI's top-level handler. That is deliberate: silently
+    // accepting everything would be worse. Patterns are compile-checked by a test
+    // (`every forbidPattern compiles`) so this should never fire in practice.
     if (new RegExp(pattern).test(resolvedName)) {
       failures.push(`forbidden pattern "${pattern}"`);
     }
