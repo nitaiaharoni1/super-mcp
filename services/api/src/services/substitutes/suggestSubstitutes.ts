@@ -117,6 +117,8 @@ export async function suggestSubstitutes(
        AND sp.price > 0
        AND sp.unit_price IS NOT NULL
        AND sp.unit_price > 0
+       -- Physical branches only (see the candidate query below).
+       AND (st.store_kind IS NULL OR st.store_kind = 'branch')
        ${baseLoc}
      ORDER BY sp.unit_price ASC
      LIMIT 1`,
@@ -157,6 +159,11 @@ export async function suggestSubstitutes(
          AND sp.price > 0
          AND sp.unit_price IS NOT NULL
          AND sp.unit_price > 0
+         -- Physical branches only, matching basket and compare_prices. Both queries
+         -- rank on unit_price, so without this the cheapest "substitute" could be
+         -- priced at an online storefront or the logistics warehouse, which hold
+         -- the deepest catalogs in the feed and are not places to shop.
+         AND (st.store_kind IS NULL OR st.store_kind = 'branch')
          AND (
            ($3::text IS NOT NULL AND p.category_l1 = $3)
            OR ($4::text IS NOT NULL AND p.category_l2 = $4)
