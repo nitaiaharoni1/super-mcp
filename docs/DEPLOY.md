@@ -23,7 +23,7 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `CORS_ORIGINS` | server (required for the marketing access form; comma-separated browser origins) |
 | `SUPER_MCP_READY_REQUIRE_AUTH` | server (`1` recommended on public hosts) |
 | `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY` | server (must stay unset/`0`) |
-| `NOMINATIM_USER_AGENT` | server (identifying contact for OSM policy) |
+| `NOMINATIM_USER_AGENT` | **server (required)**. OSM returns 403 to the placeholder default, so address geocoding silently degrades to city centroids. See below. |
 | `SUPER_MCP_NO_CAP` | **ingest job (required, `1`)**. Without it the ingest silently covers ~1% of stores. See below. |
 | `NEXT_PUBLIC_MCP_URL` | web hosting only |
 | `NEXT_PUBLIC_POSTHOG_KEY` | web hosting only (Baliprop + Reflex project token) |
@@ -34,6 +34,29 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 Filter PostHog insights with `product = super_mcp`. Design: [docs/superpowers/specs/2026-07-21-posthog-analytics-design.md](./superpowers/specs/2026-07-21-posthog-analytics-design.md).
 
 Self-hosters clone this repo and supply **their own** values; they receive no access to the operator’s cloud.
+
+## NOMINATIM_USER_AGENT: unset means silently wrong distances
+
+OpenStreetMap's usage policy requires an identifying User-Agent with a real
+contact. The built-in default carries a placeholder address, and OSM answers it
+with **403**. Geocoding then reports `unavailable` and falls back to the city
+centroid, which is the honest thing for it to do but leaves every distance
+measured from the middle of town.
+
+That is exactly what happened on the first deploy of the precise-geocoding change:
+the code was right, the tests passed, and production still returned
+
+    "Geocoding temporarily unavailable (http_403); using city centroid"
+
+Measured for "מנדלסון 1, תל אביב": the centroid sits about 600m from the address,
+enough to reorder which branches look nearest, on a product whose whole promise is
+which shop is closest. Verified after setting the variable: `precision: "address"`,
+`provider: "nominatim"`, and a second identical request came back `cached: true`,
+which also keeps us inside OSM's one-request-per-second policy.
+
+Set it on the Cloud Run **service**. It is also set on the ingest job, which does
+not call Nominatim today (its geocoding step is the offline centroid backfill) but
+would hit the same silent 403 the moment someone adds the address tier there.
 
 ## The ingest job MUST set SUPER_MCP_NO_CAP=1
 
