@@ -1101,8 +1101,11 @@ describe("priceStoreBasket pricing metadata", () => {
     );
     expect(branch).toMatchObject({ distanceKm: 2.5, distanceAccuracy: "branch" });
 
-    // A centroid keeps its distance but is labelled coarse rather than nulled —
-    // nulling it used to make whole chains unrankable.
+    // A centroid keeps a usable distance rather than being nulled (nulling it
+    // used to make whole chains unrankable), but it is widened by the 2.6 km RMS
+    // spread of real branches around their city centre and labelled coarse. The
+    // bare 4 was a measurement of the city centre being passed off as a
+    // measurement of the store.
     const centroid = priceStoreBasket(
       { ...STORE, geoSource: "city_centroid", distanceKm: 4 },
       [simpleItem()],
@@ -1110,7 +1113,7 @@ describe("priceStoreBasket pricing metadata", () => {
       PRICES,
       new Map(),
     );
-    expect(centroid).toMatchObject({ distanceKm: 4, distanceAccuracy: "city" });
+    expect(centroid).toMatchObject({ distanceKm: 4.77, distanceAccuracy: "city" });
 
     const none = priceStoreBasket(STORE, [simpleItem()], LISTINGS, PRICES, new Map());
     expect(none).toMatchObject({ distanceKm: null, distanceAccuracy: "unknown" });

@@ -8,6 +8,7 @@ import {
   pickClosestUsefulStore,
   distancePenaltyForPreference,
   effectiveCost,
+  estimatedDistanceKm,
 } from "../../../src/services/basket/recommendStores.js";
 import type {
   BasketLine,
@@ -223,8 +224,12 @@ describe("preference", () => {
 
 describe("distance accuracy", () => {
   it("charges a city-placed store for its positional uncertainty but keeps it rankable", () => {
+    // The uncertainty is baked into `distanceKm` at construction, so a store
+    // built the way `priceStoreBasket` builds it already carries it. Two stores
+    // 5 km from the shopper: one measured, one known only to be somewhere in its
+    // city.
     const branch = store("branch", [line(0, 100)], 5, "branch");
-    const cityPlaced = store("city", [line(0, 100)], 5, "city");
+    const cityPlaced = store("city", [line(0, 100)], estimatedDistanceKm(5, "city")!, "city");
     const opts = { distancePenaltyPerKm: 3, distanceReliable: true };
 
     expect(effectiveCost(cityPlaced, opts)).toBeGreaterThan(effectiveCost(branch, opts));

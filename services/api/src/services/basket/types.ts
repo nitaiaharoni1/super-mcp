@@ -327,6 +327,15 @@ export interface BasketStoreResult {
   chainName: string;
   city: string | null;
   address: string | null;
+  /**
+   * Distance to the shopper, already widened by its own uncertainty.
+   *
+   * INVARIANT: this is `estimatedDistanceKm(rawKm, distanceAccuracy)`, applied
+   * once by `priceStoreBasket` (the only producer). Ranking and reporting share
+   * the one number on purpose, so nothing downstream re-inflates it and the
+   * figure the shopper reads is the figure the pick was made on. A `city`-
+   * accuracy value is therefore never the bare centroid distance.
+   */
   distanceKm: number | null;
   /** How much to trust `distanceKm` (branch coords vs city centroid vs none). */
   distanceAccuracy: DistanceAccuracy;
@@ -424,6 +433,14 @@ export interface MultiStoreStop {
   chainName: string;
   address: string | null;
   distanceKm: number | null;
+  /**
+   * How much to trust this stop's `distanceKm`.
+   *
+   * The plan a shopper actually drives is this one, so the label has to travel
+   * with the stop. Without it a `city`-precision estimate was indistinguishable
+   * from a measured branch distance in the only place that decides the trip.
+   */
+  distanceAccuracy: DistanceAccuracy;
   /** Money spent at this stop. */
   subtotal: number;
   /** How many basket lines are bought here. */

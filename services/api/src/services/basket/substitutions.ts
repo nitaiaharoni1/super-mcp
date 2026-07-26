@@ -332,6 +332,7 @@ export function buildMultiStorePlan(
       chainName: store.chainName,
       address: store.address,
       distanceKm: store.distanceKm,
+      distanceAccuracy: store.distanceAccuracy,
       subtotal: Math.round(storeLines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100,
       lines: storeLines.length,
     };

@@ -2,6 +2,7 @@ import { computeUnitPrice, isShoppableStoreKind, resolvePurchaseQty } from "@sup
 import { listStores } from "../stores/index.js";
 import { getActivePromotionsForListings, pickBestPromoForStore } from "../promotions/index.js";
 import { buildProductLink } from "../productLinks/index.js";
+import { estimatedDistanceKm } from "./recommendStores.js";
 import {
   brandFamilyEquivalentReason,
   chainEquivalentReason,
@@ -331,6 +332,7 @@ export function priceStoreBasket(
 
   const total = Math.round(lines.reduce((sum, l) => sum + l.lineTotal, 0) * 100) / 100;
   const currency = storeCurrency ?? "ILS";
+  const distanceAccuracy = distanceAccuracyForGeoSource(store.geoSource, store.distanceKm);
 
   return {
     storeId: store.id,
@@ -339,11 +341,14 @@ export function priceStoreBasket(
     chainName: store.chainName,
     city: store.city,
     address: store.address,
-    // Keep the centroid-derived distance but label it, rather than nulling it.
-    // Dropping it used to make whole chains unrankable (every Sharon Rami Levy
-    // branch), which cost the shopper far more than a few km of imprecision.
-    distanceKm: store.distanceKm,
-    distanceAccuracy: distanceAccuracyForGeoSource(store.geoSource, store.distanceKm),
+    // Keep the centroid-derived distance but label it and widen it to the
+    // uncertainty it really carries, rather than nulling it. Dropping it used to
+    // make whole chains unrankable (every Sharon Rami Levy branch), which cost
+    // the shopper far more than a few km of imprecision — but reporting the
+    // distance to the middle of the city AS the store's distance is a
+    // fabrication that sends people on wasted drives.
+    distanceKm: estimatedDistanceKm(store.distanceKm, distanceAccuracy),
+    distanceAccuracy,
     storeKind: store.storeKind ?? null,
     currency,
     total,

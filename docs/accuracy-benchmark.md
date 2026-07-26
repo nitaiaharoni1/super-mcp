@@ -40,6 +40,22 @@ being cold buffer cache.
 The last two are not gated because they describe the catalog and the promotion
 landscape as much as the code. Failing a build on them would punish a data refresh.
 
+### `coverage` rewards a store that lies about where it is
+
+`coverage` scores the store the ranking picked, and the ranking prefers near
+stores — so anything that makes a far store look near will raise it. Measured:
+Rami Levy Ramat HaHayal had a polluted address (`דבורה הנביאה 127&#x0D;`), failed
+to geocode, and fell back to the Tel Aviv centroid, 0.6 km from the benchmark
+origin. It is really about 7 km away. Geocoding it correctly moved `coverage`
+from 95.0% to 92.0%, and putting the centroid back restored 95.0% exactly.
+
+Nothing about the code got worse. A big-catalog store stopped being recommended
+to shoppers who would have had to drive 7 km to reach it. So before treating a
+`coverage` drop as a regression, check whether store coordinates changed:
+a **fall** here can mean the numbers stopped flattering themselves.
+`resolutionAccuracy` is unaffected by store position and is the cleaner signal
+for resolution changes.
+
 ## Baseline, measured on the full Israeli catalog
 
 Herzliya and nearby locations, 10km radius, 10 baskets, 100 scored lines.

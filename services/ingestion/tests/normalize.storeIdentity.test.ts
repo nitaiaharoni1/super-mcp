@@ -140,6 +140,37 @@ describe("store kind at ingest", () => {
     );
   });
 
+  it("marks an order-picking depot, which is not a shop", async () => {
+    // "ליקוט" is order picking. Tiv Taam files seven of these, all with no
+    // address and no coordinates, and each one shadows a real branch of the same
+    // name ("ליקוט רמת החייל" beside the actual רמת החייל on דבורה הנביאה 122).
+    // A live basket recommended the depot as the shopper's first stop.
+    await ingest(storeRecord({ chainId: "7290873255550", storeId: "801", name: "ליקוט רמת החייל" }));
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ storeKind: "online" }),
+    );
+  });
+
+  it("does not mistake a word that merely starts with those letters", async () => {
+    await ingest(storeRecord({ storeId: "802", name: "ליקוטי מרקט" }));
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ storeKind: "branch" }),
+    );
+  });
+
+  it("decodes feed escaping so an address stays geocodable", async () => {
+    // Rami Levy Ramat HaHayal filed "דבורה הנביאה 127&#x0D;". The trailing
+    // carriage-return entity survived XML parsing and made the address
+    // unresolvable, so the branch fell back to the Tel Aviv centroid — while the
+    // Tiv Taam store on the SAME street (דבורה הנביאה 122) geocoded fine.
+    await ingest(
+      storeRecord({ storeId: "803", name: "רמת החייל", address: "דבורה הנביאה 127&#x0D;" }),
+    );
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ address: "דבורה הנביאה 127" }),
+    );
+  });
+
   it("marks an ordinary branch as a branch", async () => {
     await ingest(storeRecord({ name: "רמת השרון" }));
     expect(upsertStore).toHaveBeenCalledWith(

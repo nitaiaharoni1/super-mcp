@@ -114,8 +114,14 @@ const STORE_NAME_NOISE_TOKENS: ReadonlySet<string> = new Set([
   "store",
 ]);
 
+// "ליקוט" is order picking: a dark store where staff assemble web orders. Tiv
+// Taam files seven, each shadowing a real branch of the same name ("ליקוט רמת
+// החייל" beside the actual רמת החייל on דבורה הנביאה 122), all with no address
+// and no coordinates. They belong with the other online-fulfilment endpoints,
+// not with the warehouses that restock branches. The negative lookahead keeps it
+// off words that merely begin with those letters, e.g. "ליקוטי".
 const ONLINE_STORE_PATTERN =
-  /(online|on\s*line|אונליין|און\s*ליין|אינטרנט|internet|ecom|e-?commerce|וולט|wolt|יאנגו|yango|ten\s*bis|טן\s*ביס|משלוח)/i;
+  /(online|on\s*line|אונליין|און\s*ליין|אינטרנט|internet|ecom|e-?commerce|וולט|wolt|יאנגו|yango|ten\s*bis|טן\s*ביס|משלוח|ליקוט(?![א-ת]))/i;
 const PICKUP_STORE_PATTERN = /(pick\s*-?\s*up|פיק\s*-?\s*אפ|פיקאפ|איסוף|drive\s*-?\s*in)/i;
 // No bare "dc": it fires on any name ending in those letters ("אקדח מים DC" read
 // as a distribution centre). The remaining patterns already cover the real rows,
