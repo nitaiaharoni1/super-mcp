@@ -65,6 +65,13 @@ async function downloadBuffer(client: Client, remotePath: string): Promise<Buffe
   return Buffer.concat(chunks);
 }
 
+
+/** FTP "550 File not found": the listed name no longer exists on the server. */
+function isMissingFile(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /\b550\b/.test(msg) && /not found|no such file/i.test(msg);
+}
+
 async function connectCerberus(
   client: Client,
   host: string,
@@ -91,6 +98,29 @@ export function createCerberusAdapter(
   const attempted = useAllChains ? chains : chains.slice(0, 2);
   /** Reused FTP logins per chain — avoids connect/auth on every PriceFull file. */
   const pools = new Map<string, FtpPool>();
+
+  /**
+   * Re-list the chain and find the file that replaced a rotated-away one.
+   *
+   * Matches on (kind, storeId) rather than the filename, because only the
+   * embedded publish timestamp changes when a retailer republishes. Picks the
+   * newest candidate, since names sort by that timestamp.
+   */
+  async function findCurrentRemotePath(
+    chain: CerberusChainConfig,
+    want: FeedFile,
+  ): Promise<string | null> {
+    if (!want.storeId) return null;
+    const names = await poolFor(chain).withClient(async (client) => {
+      const list = await client.list();
+      return list.filter((f) => f.isFile || f.type === 1).map((f) => f.name);
+    });
+    const candidates = names
+      .filter((name) => classifyFeedFile(name) === want.kind)
+      .filter((name) => parseFeedFileMeta(name).storeId === want.storeId)
+      .sort((a, b) => (b > a ? 1 : -1));
+    return candidates[0] ?? null;
+  }
 
   function poolFor(chain: CerberusChainConfig): FtpPool {
     let pool = pools.get(chain.chainId);
@@ -213,9 +243,36 @@ export function createCerberusAdapter(
     async fetch(file: FeedFile): Promise<RawBlob> {
       const chain = chains.find((c) => c.chainId === file.chainId);
       if (!chain) throw new Error(`Unknown cerberus chain ${file.chainId}`);
-      const bytes = await poolFor(chain).withClient((client) =>
-        downloadBuffer(client, file.remotePath),
-      );
+      let bytes: Buffer;
+      try {
+        bytes = await poolFor(chain).withClient((client) =>
+          downloadBuffer(client, file.remotePath),
+        );
+      } catch (err) {
+        if (!isMissingFile(err)) throw err;
+        // The name was valid at discovery and has since been rotated away.
+        // Discovery happens once for every chain at run start, but processing
+        // takes hours, and retailers republish under a new timestamp and delete
+        // the old file. Measured on one run: 117 "550 File not found" failures,
+        // falling entirely on the chains processed last, which is why those
+        // chains kept ending up with no data at all.
+        const replacement = await findCurrentRemotePath(chain, file);
+        if (!replacement) throw err;
+        bytes = await poolFor(chain).withClient((client) =>
+          downloadBuffer(client, replacement),
+        );
+        console.log(
+          JSON.stringify({
+            event: "ingestion_file_rotated",
+            sourceId: "il-cerberus",
+            chainId: file.chainId,
+            storeId: file.storeId ?? null,
+            expected: file.fileName,
+            used: replacement,
+          }),
+        );
+        file = { ...file, remotePath: replacement, fileName: replacement };
+      }
       return {
         sourceId: "il-cerberus",
         file,

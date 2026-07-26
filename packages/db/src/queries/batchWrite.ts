@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { getPool } from "../client/index.js";
+import { priceHistoryEnabled } from "./priceHistory.js";
 
 /**
  * Batched hot-path writes for ingestion. Each price row previously cost three
@@ -251,6 +252,17 @@ export async function bulkUpsertStorePrices(
   const q = client ?? getPool();
   if (rows.length === 0) return;
 
+  // Data-modifying CTEs execute even when the outer query ignores them, so the
+  // upsert still happens with history off; only the second INSERT and its index
+  // maintenance are skipped.
+  const historyTail = priceHistoryEnabled()
+    ? `INSERT INTO price_point (listing_id, store_id, price, unit_price, currency, source_ts)
+       SELECT u.listing_id, u.store_id, u.price, u.unit_price, u.currency, u.source_ts
+       FROM ups u
+       LEFT JOIN old o ON o.listing_id = u.listing_id AND o.store_id = u.store_id
+       WHERE o.old_price IS NULL OR abs(o.old_price - u.price) > 0.0005`
+    : `SELECT 1 FROM ups`;
+
   await q.query(
     `WITH input AS (
        SELECT * FROM unnest(
@@ -289,11 +301,7 @@ export async function bulkUpsertStorePrices(
          last_seen_at = now()
        RETURNING listing_id, store_id, price, unit_price, currency, source_ts
      )
-     INSERT INTO price_point (listing_id, store_id, price, unit_price, currency, source_ts)
-     SELECT u.listing_id, u.store_id, u.price, u.unit_price, u.currency, u.source_ts
-     FROM ups u
-     LEFT JOIN old o ON o.listing_id = u.listing_id AND o.store_id = u.store_id
-     WHERE o.old_price IS NULL OR abs(o.old_price - u.price) > 0.0005`,
+     ${historyTail}`,
     [
       rows.map((r) => r.listingId),
       rows.map((r) => r.storeId),

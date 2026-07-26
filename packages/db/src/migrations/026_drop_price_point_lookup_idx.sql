@@ -1,0 +1,21 @@
+-- Drop the price_point lookup index.
+--
+-- price_point is append-only history for GET /v1/products/:id/history, an
+-- endpoint called once in the service's lifetime (2026-07-16, almost certainly a
+-- smoke test) against 2,209 /mcp calls. pg_stat_user_indexes recorded idx_scan = 0
+-- for this index: it has never served a single query.
+--
+-- It was not free. Cloud SQL disk throughput scales with disk size, and on the
+-- 20GB PD_SSD instance writes are capped near 600 IOPS. Measured during a full
+-- ingest: ~585 write ops/sec sustained, so the disk sat at roughly 97% of quota
+-- while CPU idled at 48%. Maintaining an unused index on every appended row spent
+-- the one resource that was actually exhausted.
+--
+-- The table itself stays, and so does the endpoint. Ingestion no longer appends by
+-- default (SUPER_MCP_PRICE_HISTORY=1 re-enables it); if that is turned back on and
+-- history queries become common, recreate this index and measure it then.
+--
+-- The primary key (id, source_ts) is untouched, so the partition still has its
+-- uniqueness guarantee.
+
+DROP INDEX IF EXISTS price_point_lookup_idx;

@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { getPool } from "../client/index.js";
+import { priceHistoryEnabled } from "./priceHistory.js";
 
 export interface UpsertPriceInput {
   listingId: string;
@@ -13,6 +14,16 @@ export interface UpsertPriceInput {
 
 export async function upsertStorePrice(input: UpsertPriceInput, client?: PoolClient): Promise<void> {
   const q = client ?? getPool();
+  // A data-modifying CTE runs whether or not the outer query references it, so
+  // `ups` still performs the upsert when history is off; only the extra INSERT
+  // and its index maintenance go away.
+  const historyTail = priceHistoryEnabled()
+    ? `INSERT INTO price_point (listing_id, store_id, price, unit_price, currency, source_ts)
+       SELECT ups.listing_id, ups.store_id, ups.price, ups.unit_price, ups.currency, ups.source_ts
+       FROM ups
+       LEFT JOIN old ON true
+       WHERE old.price IS NULL OR abs(old.price - ups.price) > 0.0005`
+    : `SELECT 1 FROM ups`;
   // Single round-trip: read previous price, upsert current, append history only when
   // the applied shelf price actually changed (or this is the first row).
   await q.query(
@@ -45,11 +56,7 @@ export async function upsertStorePrice(input: UpsertPriceInput, client?: PoolCli
          last_seen_at = now()
        RETURNING listing_id, store_id, price, unit_price, currency, source_ts
      )
-     INSERT INTO price_point (listing_id, store_id, price, unit_price, currency, source_ts)
-     SELECT ups.listing_id, ups.store_id, ups.price, ups.unit_price, ups.currency, ups.source_ts
-     FROM ups
-     LEFT JOIN old ON true
-     WHERE old.price IS NULL OR abs(old.price - ups.price) > 0.0005`,
+     ${historyTail}`,
     [
       input.listingId,
       input.storeId,
