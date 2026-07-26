@@ -16,6 +16,17 @@ import { getEmbedder } from "./embedder.js";
 import { loadOntologySnapshot } from "./ontology.js";
 import type { CandidateRow, DrainSemanticIndexOptions, DrainSemanticIndexResult } from "./types.js";
 
+/**
+ * Statement timeout for the drain's bulk selection, in milliseconds.
+ *
+ * Generous by design: this runs after an ingest, when the database is at its
+ * busiest, and a slow scan should finish late rather than abandon the queue.
+ */
+function drainStatementTimeoutMs(): number {
+  const raw = Number(process.env.SUPER_MCP_SEMANTIC_DRAIN_TIMEOUT_MS ?? "600000");
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 600_000;
+}
+
 export async function drainSemanticIndex(
   opts: DrainSemanticIndexOptions = {},
 ): Promise<DrainSemanticIndexResult> {
@@ -35,7 +46,20 @@ export async function drainSemanticIndex(
   // - force: all products (subject to limit)
   // - dirtyOnly: only semantic_index_dirty rows
   // - default (!dirtyOnly): dirty OR missing embedding/profile for this generation
-  const candidates = await pool.query<CandidateRow>(
+  // The pool pins statement_timeout to 30s so a stray API query cannot hang. This
+  // selection is a bulk background job, not an API query: it scans product joined
+  // to embeddings, profiles and the dirty queue, and during an ingest the disk is
+  // saturated. Measured on a full run: it timed out for both Shufersal and
+  // Carrefour, so newly ingested products got no embeddings even though every
+  // feed file had ingested cleanly (543/543 and 207/207). SET LOCAL keeps the
+  // override inside this transaction, so the connection returns to the pool with
+  // the API's own bound intact.
+  const selectClient = await pool.connect();
+  let candidates: { rows: CandidateRow[] };
+  try {
+    await selectClient.query("BEGIN");
+    await selectClient.query(`SET LOCAL statement_timeout = ${drainStatementTimeoutMs()}`);
+    candidates = await selectClient.query<CandidateRow>(
     `SELECT p.id, p.name, p.brand, p.category_l1, p.category_l2,
             ARRAY(
               SELECT l.name FROM listing l
@@ -66,8 +90,15 @@ export async function drainSemanticIndex(
      )
      ORDER BY (d.product_id IS NOT NULL) DESC, p.updated_at DESC NULLS LAST, p.id
      LIMIT $5`,
-    [model, ontology.version, force, dirtyOnly, limit],
-  );
+      [model, ontology.version, force, dirtyOnly, limit],
+    );
+    await selectClient.query("COMMIT");
+  } catch (err) {
+    await selectClient.query("ROLLBACK").catch(() => undefined);
+    throw err;
+  } finally {
+    selectClient.release();
+  }
 
   let processed = 0;
   let skipped = 0;
