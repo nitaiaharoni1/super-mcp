@@ -12,6 +12,7 @@ import { allChainsEnabled, storeCountCap } from "../../ingestCaps.js";
 import { fileConcurrency, mapPool } from "@super-mcp/shared";
 import { selectRegionalFeedFiles } from "../../selectRegionalFiles.js";
 import type { StoreLocationHint } from "../../regions.js";
+import { knownStoreLocationsForChain } from "@super-mcp/db";
 import { FtpPool } from "../common/ftpPool.js";
 
 export interface CerberusChainConfig {
@@ -214,6 +215,37 @@ export function createCerberusAdapter(
                 publishedAt: meta.publishedAt,
                 sizeBytes: f.size,
               });
+            }
+          }
+
+          // Some chains publish price files and no Stores file at all
+          // (Fresh Market: 51 PriceFull, 51 PromoFull, zero Stores). The region
+          // filter derives its allow-list from those locations, so with none it
+          // drops every price file, silently and forever. Fall back to the
+          // branches already in the database rather than go blind.
+          if (locations.length === 0) {
+            try {
+              locations = (await knownStoreLocationsForChain(chain.chainId)).map((s) => ({
+                storeId: s.storeId,
+                city: s.city ?? undefined,
+                lat: s.lat ?? undefined,
+                lng: s.lng ?? undefined,
+              }));
+              if (locations.length > 0) {
+                console.log(
+                  JSON.stringify({
+                    event: "ingestion_store_locations_from_db",
+                    sourceId: "il-cerberus",
+                    chainId: chain.chainId,
+                    locations: locations.length,
+                    reason: storeFiles[0] ? "stores_file_unusable" : "no_stores_file_published",
+                  }),
+                );
+              }
+            } catch (err) {
+              errors.push(
+                `${chain.ftpUser} store-location fallback: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
           }
 

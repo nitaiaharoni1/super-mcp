@@ -1,4 +1,5 @@
 export { query } from "./query.js";
+export { knownStoreLocationsForChain } from "./stores.js";
 export { upsertChain, upsertStore, type UpsertChainInput, type UpsertStoreInput } from "./chains.js";
 export {
   resolveProduct,
