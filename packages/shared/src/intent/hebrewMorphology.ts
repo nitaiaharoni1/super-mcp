@@ -43,6 +43,31 @@ function strippedNounSuffix(token: string): (typeof NOUN_SUFFIXES)[number] | nul
  * is long enough. Short staples (פיתות/פיתה, length 4) must stem — there is no
  * minimum input length gate.
  */
+
+/**
+ * Drop the optional yod/vav (matres lectionis) so ktiv male and ktiv haser
+ * spellings of one word compare equal.
+ *
+ * Hebrew writes many words both with and without those letters and the feeds are
+ * inconsistent even inside a single chain. Measured: a shopper asking for
+ * `קורנפלייקס` was refused `קורנפלקס 500 גרם`, the same product, because the two
+ * heads differ by two yods.
+ *
+ * Only applied to words of at least MIN_MATRES_FOLD_LEN letters, because in short
+ * words those letters usually carry the meaning rather than decorate it: `שמן`
+ * (oil) and `שומן` (fat) are different products and must not collapse together.
+ * Used when comparing HEAD words, never on search text at large.
+ */
+const MIN_MATRES_FOLD_LEN = 5;
+
+export function foldMatresLectionis(token: string): string {
+  if (token.length < MIN_MATRES_FOLD_LEN) return token;
+  const folded = token.replace(/[יו]/g, "");
+  // A word that is mostly matres (e.g. "אוויר") would fold to almost nothing and
+  // start matching unrelated words; keep the original when too little survives.
+  return folded.length >= 3 ? folded : token;
+}
+
 export function stemHebrewToken(token: string): string {
   const t = foldFinalLetters(token);
   for (const suf of NOUN_SUFFIXES) {

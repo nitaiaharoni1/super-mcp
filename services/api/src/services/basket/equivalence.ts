@@ -1,6 +1,7 @@
 import {
   ROLL_PRODUCT_CONTEXT,
   compareClassPaths,
+  foldMatresLectionis,
   inferPackSizeFromName,
   isCountUnit,
   normalizeEmbedInput,
@@ -104,6 +105,11 @@ const NON_COMMODITY_LEADERS: ReadonlySet<string> = new Set([
   "מטחנת", "מטחנה", "מועך", "מקציף", "כד", "מסננת", "מכשיר", "מתקן", "סיר",
   "מחבת", "צלחת", "קולפן", "מברשת", "מגירת", "קנקן", "בקבוקון", "קערת", "כוסון",
   "כוס", "פלסט",
+  // Holders / stands / dispensers. A live basket returned "מחזיק נייר טואלט"
+  // (a toilet-roll HOLDER) for "נייר טואלט": the shopper wanted paper and would
+  // have gone home with a plastic bracket. The list already had מתקן and מכשיר,
+  // so the mechanism was right and only the vocabulary was short.
+  "מחזיק", "מחזיקי", "מעמד", "סטנד", "תושבת", "דיספנסר",
   // openers / corkscrews — "יין" must never auto-resolve to "חולץ יין" / "פותחן יין"
   "חולץ", "פותחן", "מחלץ",
   // "derived product OF X" (vinegar/juice/powder/concentrate of X ≠ X)
@@ -273,9 +279,12 @@ export function pieceCountsConflict(
 export function queryHeadAnchored(queryText: string, primaryName: string): boolean {
   const q = tokenizeNormalized(normalizeEmbedInput(queryText));
   if (q.length === 0) return true;
-  const head = stemHebrewToken(q[0]!);
+  // Compare heads with ktiv doubling collapsed: the feeds spell the same word
+  // both ways, and `קורנפלייקס` vs `קורנפלקס` differing by one yod was enough to
+  // refuse the very product the shopper asked for.
+  const head = foldMatresLectionis(stemHebrewToken(q[0]!));
   const nameRaw = tokenizeNormalized(normalizeEmbedInput(primaryName));
-  const first2 = nameRaw.slice(0, 2).map(stemHebrewToken);
+  const first2 = nameRaw.slice(0, 2).map((t) => foldMatresLectionis(stemHebrewToken(t)));
   const idx = first2.indexOf(head);
   if (idx === -1) return false;
   // head at position 1 behind a utensil/container/device leader → not the commodity
