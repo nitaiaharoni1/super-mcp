@@ -81,4 +81,41 @@ describe("chain with no Stores file", () => {
     // no hint that the database lookup is what broke.
     await expect(createCerberusAdapter(fm).discover()).rejects.toThrow(/store-location fallback/);
   });
+  it("logs the outcome even when the database has no branches either", async () => {
+    // Silence must mean "did not apply", never "no idea what happened". A run
+    // where this looked like it never fired cost real diagnosis time.
+    knownLocations.mockResolvedValue([]);
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const { createCerberusAdapter, CERBERUS_CHAINS } = await import(
+      "../src/sources/cerberus/adapter.js"
+    );
+    const fm = CERBERUS_CHAINS.filter((c) => c.chainId === FRESH_MARKET);
+    await createCerberusAdapter(fm).discover().catch(() => undefined);
+
+    const line = spy.mock.calls
+      .map((c) => String(c[0]))
+      .find((l) => l.includes("ingestion_store_locations_from_db"));
+    expect(line, "fallback outcome was not logged").toBeDefined();
+    expect(JSON.parse(line!).outcome).toBe("database_had_none");
+    spy.mockRestore();
+  });
+
+  it("logs a WARNING when the lookup itself fails", async () => {
+    knownLocations.mockRejectedValue(new Error("db down"));
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { createCerberusAdapter, CERBERUS_CHAINS } = await import(
+      "../src/sources/cerberus/adapter.js"
+    );
+    const fm = CERBERUS_CHAINS.filter((c) => c.chainId === FRESH_MARKET);
+    await createCerberusAdapter(fm).discover().catch(() => undefined);
+
+    const line = spy.mock.calls
+      .map((c) => String(c[0]))
+      .find((l) => l.includes("ingestion_store_locations_from_db"));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!);
+    expect(parsed.severity).toBe("WARNING");
+    expect(parsed.outcome).toBe("lookup_failed");
+    spy.mockRestore();
+  });
 });

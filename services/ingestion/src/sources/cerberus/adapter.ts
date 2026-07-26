@@ -224,6 +224,12 @@ export function createCerberusAdapter(
           // drops every price file, silently and forever. Fall back to the
           // branches already in the database rather than go blind.
           if (locations.length === 0) {
+            // Always log the outcome, including "found none" and "threw". The
+            // first version only logged success, so when the fallback appeared
+            // not to run there was no way to tell whether it had been skipped,
+            // returned nothing, or failed. Silence has to mean "did not apply",
+            // never "we have no idea".
+            const reason = storeFiles[0] ? "stores_file_unusable" : "no_stores_file_published";
             try {
               locations = (await knownStoreLocationsForChain(chain.chainId)).map((s) => ({
                 storeId: s.storeId,
@@ -231,21 +237,32 @@ export function createCerberusAdapter(
                 lat: s.lat ?? undefined,
                 lng: s.lng ?? undefined,
               }));
-              if (locations.length > 0) {
-                console.log(
-                  JSON.stringify({
-                    event: "ingestion_store_locations_from_db",
-                    sourceId: "il-cerberus",
-                    chainId: chain.chainId,
-                    locations: locations.length,
-                    reason: storeFiles[0] ? "stores_file_unusable" : "no_stores_file_published",
-                  }),
-                );
-              }
-            } catch (err) {
-              errors.push(
-                `${chain.ftpUser} store-location fallback: ${err instanceof Error ? err.message : String(err)}`,
+              console.log(
+                JSON.stringify({
+                  event: "ingestion_store_locations_from_db",
+                  sourceId: "il-cerberus",
+                  chainId: chain.chainId,
+                  ftpUser: chain.ftpUser,
+                  locations: locations.length,
+                  reason,
+                  outcome: locations.length > 0 ? "recovered" : "database_had_none",
+                }),
               );
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              console.error(
+                JSON.stringify({
+                  severity: "WARNING",
+                  event: "ingestion_store_locations_from_db",
+                  sourceId: "il-cerberus",
+                  chainId: chain.chainId,
+                  ftpUser: chain.ftpUser,
+                  reason,
+                  outcome: "lookup_failed",
+                  error: msg,
+                }),
+              );
+              errors.push(`${chain.ftpUser} store-location fallback: ${msg}`);
             }
           }
 
