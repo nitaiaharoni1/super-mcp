@@ -126,6 +126,16 @@ export async function listStores(params: ListStoresParams): Promise<StoreSummary
     // NULL store_kind is treated as a branch so an unclassified backlog never
     // silently empties the candidate set.
     conditions.push(`(st.store_kind IS NULL OR st.store_kind = 'branch')`);
+    // Exclude branches the ingest never refreshes. They exist only because the
+    // 2026-07-18 backfill ran nationally with the region filter off; measured
+    // 2026-07-26, 277 of 888 branches sit outside the covered metros with prices
+    // frozen at 07-18 and no prospect of an update. Quoting a month-old price as
+    // if it were current is worse than saying nothing.
+    //
+    // NULL means not yet evaluated and stays visible, so the column appearing
+    // before the marking script runs can never blank out the store list. The
+    // public directory (shoppableOnly off) still shows everything, labelled.
+    conditions.push(`st.in_coverage IS NOT FALSE`);
   }
 
   const location = storeLocationSql(
