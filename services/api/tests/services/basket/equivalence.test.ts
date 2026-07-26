@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAvailabilityEquivalents,
+  restrictToDominantClassL2,
   buildCommodityEquivalents,
   packUnitCount,
   pieceCountsConflict,
@@ -341,6 +342,152 @@ describe("buildAvailabilityEquivalents", () => {
       opts,
     );
     expect(set).toHaveLength(2);
+  });
+
+  it("does not let a minority-class SKU be the primary just because it ranks first", () => {
+    // Live defect: "בשר טחון" ranked "בשר טחון ביונד מיט" (plant-based,
+    // classL2 meat_processed) first, so pool[0] made it the primary and the line
+    // priced ₪159.60 of Beyond Meat instead of ₪79.80 of beef. Every other
+    // candidate in the pool was classL2 beef.
+    //
+    // It stayed hidden because the narrow pack gate starved this branch below its
+    // 2-peer minimum, so the branch bailed out and something else answered. The
+    // wrong primary was already selected; a coincidence suppressed it.
+    const plant = h({
+      productId: "plant",
+      name: "בשר טחון ביונד מיט 250 גרם",
+      sizeQty: 250,
+      classL1: "meat_fish",
+      classL2: "meat_processed",
+    });
+    const beefA = h({
+      productId: "beef-a",
+      name: "בשר טחון בלדי טהור 500 גר",
+      sizeQty: 500,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    const beefB = h({
+      productId: "beef-b",
+      name: "בשר טחון טרי מחפוד",
+      sizeQty: 500,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    // Four beef to one plant, matching the live pool's proportions (15 beef,
+    // 3 processed). A clear majority is required — see the next case.
+    const beefC = h({
+      productId: "beef-c",
+      name: "בשר טחון טרי",
+      sizeQty: 500,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    const beefD = h({
+      productId: "beef-d",
+      name: "בשר טחון פרימיום טרי",
+      sizeQty: 500,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    const set = buildAvailabilityEquivalents(
+      [plant, beefA, beefB, beefC, beefD],
+      "בשר טחון",
+      opts,
+    );
+    expect(set.length).toBeGreaterThanOrEqual(2);
+    expect(set.map((c) => c.productId)).not.toContain("plant");
+    expect(set[0]!.classL2).toBe("beef");
+  });
+
+  it("leaves a near-even class split alone, because that is the labels disagreeing", () => {
+    // Unit-tested on the helper: buildAvailabilityEquivalents cannot show this,
+    // because classesConflict already rejects a cross-L2 peer pair on its own.
+    //
+    // L2 labels are LLM-assigned. A 50/50 split means the labels disagree, not
+    // that half the pool is the wrong food, so the pool must survive intact.
+    const mk = (id: string, l2: string) => h({ productId: id, classL1: "pantry", classL2: l2 });
+    const evenSplit = [mk("a", "spreads"), mk("b", "salads")];
+    expect(restrictToDominantClassL2(evenSplit)).toHaveLength(2);
+  });
+
+  it("drops a clear minority class from the helper", () => {
+    const mk = (id: string, l2: string) => h({ productId: id, classL1: "meat_fish", classL2: l2 });
+    const pool = [mk("plant", "meat_processed"), mk("b1", "beef"), mk("b2", "beef"), mk("b3", "beef"), mk("b4", "beef")];
+    const kept = restrictToDominantClassL2(pool);
+    expect(kept.map((c) => c.productId)).not.toContain("plant");
+    expect(kept).toHaveLength(4);
+  });
+
+  it("keeps unclassified rows whatever the majority is", () => {
+    const mk = (id: string, l2: string | null) =>
+      h({ productId: id, classL1: "meat_fish", classL2: l2 ?? undefined });
+    const pool = [mk("plant", "meat_processed"), mk("b1", "beef"), mk("b2", "beef"), mk("b3", "beef"), mk("u", null)];
+    const kept = restrictToDominantClassL2(pool).map((c) => c.productId);
+    expect(kept).toContain("u");
+    expect(kept).not.toContain("plant");
+  });
+
+  it("admits a differently-packed peer when the line asked for a weight", () => {
+    // "1 kg of mince" is a purchase quantity, not a pack size. The butcher's
+    // per-kilo cut (₪63.90/kg) and a 500g tray (₪89.80/kg) both compose a kilo,
+    // so both must be priced and the cheaper per kilo must be free to win. Pack
+    // tolerance alone rejected the pair as a 100% size difference.
+    const tray = h({
+      productId: "tray",
+      name: "בשר טחון בלדי טהור 500 גר",
+      sizeQty: 500,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    const counter = h({
+      productId: "counter",
+      name: "בשר טחון טרי לקבב/המבורגר",
+      sizeQty: 1000,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    const withAmount = { ...opts, requestedAmount: { quantity: 1, unit: "kg" } };
+    const set = buildAvailabilityEquivalents([tray, counter], "בשר טחון", withAmount);
+    expect(set.map((c) => c.productId).sort()).toEqual(["counter", "tray"]);
+  });
+
+  it("still refuses a pack far larger than the weight asked for", () => {
+    // A 5kg catering pack "satisfies" 1kg only by sending someone home with 5kg.
+    const tray = h({
+      productId: "tray",
+      name: "בשר טחון 500 גר",
+      sizeQty: 500,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    const catering = h({
+      productId: "catering",
+      name: "בשר טחון 5 קג",
+      sizeQty: 5000,
+      classL1: "meat_fish",
+      classL2: "beef",
+    });
+    const withAmount = { ...opts, requestedAmount: { quantity: 1, unit: "kg" } };
+    const set = buildAvailabilityEquivalents([tray, catering], "בשר טחון", withAmount);
+    expect(set.map((c) => c.productId)).not.toContain("catering");
+  });
+
+  it("keeps an unclassified candidate, since unknown is not a disagreement", () => {
+    // The file's standing rule everywhere else: a null class never conflicts.
+    // 95% of the catalog is unclassified, so treating null as a minority would
+    // empty the pool.
+    const unknownA = h({ productId: "u-a", name: "חומוס אסלי 700 גרם" });
+    const unknownB = h({ productId: "u-b", name: "חומוס צבר 700 גרם" });
+    const set = buildAvailabilityEquivalents([unknownA, unknownB], "חומוס", opts);
+    expect(set).toHaveLength(2);
+  });
+
+  it("leaves a single-class pool exactly as it was", () => {
+    const a = h({ productId: "a", name: "חומוס אסלי", classL1: "pantry", classL2: "spreads" });
+    const b = h({ productId: "b", name: "חומוס צבר", classL1: "pantry", classL2: "spreads" });
+    const set = buildAvailabilityEquivalents([a, b], "חומוס", opts);
+    expect(set.map((c) => c.productId)).toEqual(["a", "b"]);
   });
 
   it("excludes candidates with no local price (availability is required)", () => {

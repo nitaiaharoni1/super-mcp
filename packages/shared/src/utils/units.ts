@@ -797,3 +797,58 @@ export function packSizesCompatible(
 
   return { compatible: false, reason: "unit_mismatch" };
 }
+
+/**
+ * Largest fraction by which whole packs may overshoot a requested amount.
+ *
+ * Packs rarely divide an amount evenly, so some overshoot is unavoidable: three
+ * 400g trays are the only way to reach a kilo with 400g trays, and 1.2kg is a
+ * fair reading of "a kilo". Two 700g trays is 1.4kg, which is not. 0.25 sits
+ * between those and, at the sizes real shelves use, admits 250/400/500/1000g for
+ * a kilo while rejecting 700g, 2kg and 5kg.
+ */
+export const MAX_AMOUNT_OVERSHOOT = 0.25;
+
+/**
+ * Can whole packs of this candidate build the amount the shopper asked for?
+ *
+ * The amount-mode counterpart to `packSizesCompatible`'s tolerance test. That
+ * test asks "is this pack about the same size as the primary's pack", which is
+ * the right question for `pack_qty` ("3 of these") and the wrong one for
+ * `amount + unit`: a kilo of mince is a kilo whether it arrives as two 500g
+ * trays or a kilo off the butcher's scale.
+ *
+ * Enforcing pack similarity in amount mode cost real money. At Tiv Taam Eden Gan
+ * Ha'ir both of these were stocked and fresh:
+ *
+ *   בשר טחון בלדי טהור 500 גר   ₪44.90 / 500 g  = ₪89.80 per kg
+ *   בשר טחון טרי לקבב/המבורגר   ₪63.90 / kg     = ₪63.90 per kg
+ *
+ * 500g against 1000g is a 100% pack difference, so the counter cut failed
+ * `qty_tolerance`, never became a peer, and was never price-compared. The shopper
+ * was quoted the tray and paid ₪26 more for the same kilo.
+ *
+ * Asymmetric on purpose: buying several small packs is fine, buying one pack far
+ * larger than requested is not. A 5kg catering pack "satisfies" a 1kg request
+ * only by sending someone home with 5kg.
+ */
+export function packComposesAmount(
+  pack: PackSizeInput,
+  requested: { amount: number; unit: string },
+  maxOvershoot: number = MAX_AMOUNT_OVERSHOOT,
+): boolean {
+  if (!(requested.amount > 0) || !requested.unit) return false;
+  const want = normalizeMeasure(requested.amount, requested.unit);
+  if (want.unparseable || !(want.quantity > 0)) return false;
+  // Only mass and volume compose: a count of pieces is not a fraction of a kilo.
+  if (want.unit !== "g" && want.unit !== "ml") return false;
+
+  if (pack.sizeQty == null || !pack.sizeUnit) return false;
+  const have = normalizeMeasure(pack.sizeQty, pack.sizeUnit);
+  if (have.unparseable || !(have.quantity > 0)) return false;
+  if (have.unit !== want.unit) return false;
+
+  const packs = Math.ceil(want.quantity / have.quantity);
+  const delivered = packs * have.quantity;
+  return (delivered - want.quantity) / want.quantity <= maxOvershoot;
+}

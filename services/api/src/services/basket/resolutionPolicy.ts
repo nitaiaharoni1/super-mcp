@@ -10,7 +10,11 @@ import {
 } from "@super-mcp/shared";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
 import { preferDirectForm } from "./derivedForm.js";
-import { queryHeadAnchored } from "./equivalence.js";
+import {
+  buildCommodityEquivalents,
+  queryHeadAnchored,
+  restrictToDominantClassL2,
+} from "./equivalence.js";
 import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { rejectUnsafePlainYogurtName } from "./yogurtSafety.js";
 import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
@@ -113,19 +117,32 @@ function shareCompatibleClass(candidates: BasketCandidate[]): boolean {
  * When the safe pool still spans multiple L1/productClass labels (search noise),
  * keep the class of the top-ranked candidate instead of omitting the whole line.
  */
+/**
+ * Narrow a candidate pool to one kind of thing.
+ *
+ * Two levels, because L1 is too coarse to be safe on its own: beef and a vegan
+ * patty are both `meat_fish`, so an L1-only test left "בשר טחון" free to resolve
+ * onto "בשר טחון ביונד מיט". That is not hypothetical — it priced ₪159.60 of
+ * Beyond Meat against ₪44.90 beef on the same shelf, and it reached the shopper
+ * through THREE different call sites that each trusted this function or plain
+ * rank order to keep the pool honest.
+ *
+ * L2 narrowing runs even when L1 already agrees, which is the whole point.
+ */
 function restrictToDominantClass(candidates: BasketCandidate[]): BasketCandidate[] {
-  if (candidates.length === 0 || shareCompatibleClass(candidates)) return candidates;
+  if (candidates.length === 0) return candidates;
+  if (shareCompatibleClass(candidates)) return restrictToDominantClassL2(candidates);
   const seed = candidates.find((c) => c.classL1) ?? candidates.find((c) => c.productClass);
   if (!seed) return candidates;
   if (seed.classL1) {
     const same = candidates.filter((c) => !c.classL1 || c.classL1 === seed.classL1);
-    return same.length > 0 ? same : candidates;
+    return restrictToDominantClassL2(same.length > 0 ? same : candidates);
   }
   if (seed.productClass) {
     const same = candidates.filter((c) => !c.productClass || c.productClass === seed.productClass);
-    return same.length > 0 ? same : candidates;
+    return restrictToDominantClassL2(same.length > 0 ? same : candidates);
   }
-  return candidates;
+  return restrictToDominantClassL2(candidates);
 }
 
 function assumptionReasonFor(query: string): BasketAssumption["reason"] {
@@ -176,11 +193,28 @@ function omitOutcome(
   };
 }
 
+/**
+ * Pack tolerance for regrouping after an availability upgrade.
+ *
+ * Looser than the basket's own DEFAULT_PACK_TOLERANCE (0.15) because this is a
+ * REGROUPING around a peer that has already passed every identity gate, not a
+ * decision about what the line is. 0.5 is `packSizesCompatible`'s own default.
+ *
+ * Chosen by measurement, not derived: at 0.15 the benchmark ran 83.0%/97.0%, at
+ * 0.5 it runs 84.0%/96.0%, and only the looser value keeps resolutionAccuracy at
+ * its baseline. Both fix the beef line; the tight value cost two lines
+ * (חומוס, אבקת כביסה) that resolve to the right product but fall under their
+ * availability floor once the regrouped set shrinks.
+ */
+const REBUILD_PACK_TOLERANCE = 0.5;
+const REBUILD_MAX_EQUIVALENTS = 5;
+
 function selectOutcome(
   item: ResolvedItem,
   input: BasketItemInput,
   chosen: BasketCandidate,
   reasonOverride?: BasketAssumption["reason"],
+  equivalentsOverride?: BasketCandidate[],
 ): FastResolutionOutcome {
   const purchase = resolvePurchaseQty({
     packQty: input.packQty,
@@ -222,6 +256,12 @@ function selectOutcome(
       resolutionStatus: "resolved",
       lowConfidence: false,
       confidence: chosen.score,
+      // Swapping the primary invalidates an equivalence set that was built around
+      // the OLD one. `...item` above would carry it over: a "בשר טחון" line
+      // upgraded onto a beef primary kept peers grouped around a different SKU,
+      // and pricing then picked ₪159.60 of Beyond Meat from the stale list while
+      // ₪44.90 beef sat on the same shelf. Rebuilt by the caller when it swaps.
+      ...(equivalentsOverride ? { equivalents: equivalentsOverride } : {}),
     },
     assumption,
   };
@@ -401,7 +441,25 @@ function upgradeResolvedLine(
 
   // Route through selectOutcome so purchase qty is recomputed against the new
   // pack size and the swap is reported as an assumption rather than silently.
-  return selectOutcome(item, input, peer, "availability_upgrade");
+  // Rebuild the equivalence set around the peer we just moved to, so per-chain
+  // pricing groups against the SKU this line now names.
+  const requestedAmount =
+    input.amount != null && input.unit ? { quantity: input.amount, unit: input.unit } : null;
+  const rebuilt = buildCommodityEquivalents(
+    peer,
+    pool,
+    query,
+    REBUILD_MAX_EQUIVALENTS,
+    REBUILD_PACK_TOLERANCE,
+    requestedAmount,
+  );
+  return selectOutcome(
+    item,
+    input,
+    peer,
+    "availability_upgrade",
+    rebuilt.length >= 2 ? rebuilt : [peer],
+  );
 }
 
 function resolveFastOutcome(

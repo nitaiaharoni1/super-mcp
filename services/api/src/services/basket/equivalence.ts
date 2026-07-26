@@ -5,6 +5,7 @@ import {
   inferPackSizeFromName,
   isCountUnit,
   normalizeEmbedInput,
+  packComposesAmount,
   packSizesCompatible,
   queryTokensSatisfied,
   stemHebrewToken,
@@ -204,17 +205,48 @@ function allowCountToWeight(
  */
 export const DEFAULT_PACK_TOLERANCE = 0.15;
 
+/** The physical quantity a line asked for, in the shape `isStapleIncompatible` uses. */
+export interface RequestedAmount {
+  quantity: number;
+  unit: string;
+}
+
 function packsCompatible(
   a: BasketCandidate,
   b: BasketCandidate,
   queryText: string,
   packTolerance: number,
+  requestedAmount?: RequestedAmount | null,
 ): boolean {
   // Count-sold goods first: `packSizesCompatible` skips tolerance whenever a side
   // is a "1 unit" stub, and 98.5% of the catalog has no piece_count, so eggs and
   // toilet paper reach it as 1-unit stubs and every pack size looks compatible.
   // That is how a 6-pack of eggs was priced for a 12-pack request.
   if (pieceCountsConflict(a, b)) return false;
+  // A WEIGHT request is a purchase quantity, not a pack size — the same rule
+  // `isStapleIncompatible` already applies one layer up. "1 kg" is 1 kg whether
+  // it arrives as two 500g trays or a kilo off the butcher's scale, so admit a
+  // peer that can BUILD the amount instead of demanding it resemble the
+  // primary's box. Pack similarity cost a shopper ₪26 on a kilo of mince: the
+  // ₪63.90/kg counter cut failed `qty_tolerance` against a 500g tray, never
+  // became a peer, and was never price-compared.
+  //
+  // Purely ADDITIVE. Anything that does not compose still faces the old
+  // tolerance test unchanged, so this can only widen the peer set. Requiring
+  // both sides to compose looked tidier and was wrong: the primary for a generic
+  // line is often a unit stub (`בשר טחון`, sizeQty 1, sizeUnit "unit") that
+  // composes nothing, which rejected every peer and dropped the line at three
+  // stores that had priced it a moment earlier.
+  //
+  // Not extended to count or volume requests: counts do not compose out of
+  // grams, and a volume stated as a pack size is a real constraint ("שמן 1 ל"
+  // must not accept 750ml) — the line `isStapleIncompatible` already draws.
+  if (requestedAmount && isWeightRequestUnit(requestedAmount.unit)) {
+    const want = { amount: requestedAmount.quantity, unit: requestedAmount.unit };
+    if (packComposesAmount({ sizeQty: b.sizeQty, sizeUnit: b.sizeUnit, name: b.name }, want)) {
+      return true;
+    }
+  }
   return packSizesCompatible(
     { sizeQty: a.sizeQty, sizeUnit: a.sizeUnit, name: a.name },
     { sizeQty: b.sizeQty, sizeUnit: b.sizeUnit, name: b.name },
@@ -648,6 +680,7 @@ export function buildCommodityEquivalents(
   queryText: string,
   maxEquivalents: number,
   packTolerance = DEFAULT_PACK_TOLERANCE,
+  requestedAmount?: RequestedAmount | null,
 ): BasketCandidate[] {
   if (!top.productClass) return [top];
   const queryTokens = tokenizeNormalized(normalizeEmbedInput(queryText));
@@ -664,7 +697,7 @@ export function buildCommodityEquivalents(
     // Fat/content percentage is written into the name, never labelled as a
     // variant, so 1% and 9% cottage both read as "regular" without this.
     if (percentConflict(top, c)) continue;
-    if (!packsCompatible(top, c, queryText, packTolerance)) continue;
+    if (!packsCompatible(top, c, queryText, packTolerance, requestedAmount)) continue;
     // Prepared-food hosts share a produce token ("עוגת לימונים") but must not join.
     if (!queryHeadAnchored(queryText, c.name)) continue;
     // Query specificity (morphology-tolerant). Preserved/personal-care traps are
@@ -690,6 +723,13 @@ export interface AvailabilityEquivalenceOptions {
   penaltyBlock: number;
   /** Penalty score for a candidate id (from the semantic gate). */
   penaltyOf: (productId: string) => number;
+  /**
+   * Physical quantity the line asked for, when it asked for one. Safe to honour
+   * here now that `restrictToDominantClassL2` decides the primary: widening the
+   * peer test used to change whether this branch fired at all, which is how a
+   * beef line became ₪159.60 of Beyond Meat.
+   */
+  requestedAmount?: RequestedAmount | null;
 }
 
 /**
@@ -715,6 +755,68 @@ export interface AvailabilityEquivalenceOptions {
  * signal that separates a real staple from a coincidental token hit. Fewer than
  * two → [] and the caller keeps needs_confirmation.
  */
+/**
+ * Share of the classified pool the leading `classL2` must hold before it is
+ * treated as "the" class. Below this the labels are simply disagreeing.
+ *
+ * A safety bound on a noisy inference, not a tuned optimum: the benchmark scores
+ * identically at 0.7 and at 0.0 (always narrow to the mode), so nothing in it
+ * exercises a near-even split. Kept because L2 labels are LLM-assigned and
+ * chopping a 51/49 pool to its mode would be a guess presented as a fact.
+ */
+const DOMINANT_CLASS_MIN_SHARE = 0.7;
+
+/**
+ * Drop minority-class candidates before a primary is picked from rank order.
+ *
+ * This path takes `pool[0]` as the primary with no class test, which is fine
+ * while every candidate is the same kind of thing and wrong the moment one is
+ * not. Live defect: "בשר טחון" ranked "בשר טחון ביונד מיט" (plant-based,
+ * `classL2: meat_processed`) first, so the line priced ₪159.60 of Beyond Meat
+ * while every other candidate in the pool was `beef`.
+ *
+ * It stayed hidden because the narrow pack gate starved this branch below its
+ * two-peer minimum, so it bailed out and another path answered. The wrong
+ * primary was already being selected; a coincidence suppressed it. Widening the
+ * pack rule without this un-masks it, which is why this lands first.
+ *
+ * Keyed on `classL2`, because the offender agrees at `classL1` (`meat_fish` for
+ * both beef and a vegan patty) — which is why the existing
+ * `restrictToDominantClass` could not catch it.
+ *
+ * A null class is kept, never counted as a minority: unknown is not a
+ * disagreement anywhere else in this file, and ~95% of the catalog is
+ * unclassified, so treating null as odd-one-out would empty the pool.
+ */
+export function restrictToDominantClassL2(pool: BasketCandidate[]): BasketCandidate[] {
+  const counts = new Map<string, number>();
+  for (const c of pool) {
+    if (c.classL2) counts.set(c.classL2, (counts.get(c.classL2) ?? 0) + 1);
+  }
+  if (counts.size < 2) return pool;
+  // Sort by name first so an exact tie resolves deterministically.
+  let winner: string | null = null;
+  let winnerCount = 0;
+  for (const [cls, n] of [...counts].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (n > winnerCount) {
+      winner = cls;
+      winnerCount = n;
+    }
+  }
+  if (!winner) return pool;
+  // Only act on a CLEAR majority. L2 labels are LLM-assigned and noisy, so a
+  // near-even split means the labels disagree, not that half the pool is the
+  // wrong food. Narrowing on every split cost two benchmark lines: חומוס and
+  // אבקת כביסה each spread across two L2 labels, and chopping to the mode threw
+  // away better-stocked peers, dropping both below their availability floor.
+  // A vegan patty among beef is 3-of-18, nothing like an even split.
+  const classified = [...counts.values()].reduce((n, v) => n + v, 0);
+  if (winnerCount / classified < DOMINANT_CLASS_MIN_SHARE) return pool;
+  const kept = pool.filter((c) => !c.classL2 || c.classL2 === winner);
+  // Never shrink below the two-peer commodity signal on a class guess alone.
+  return kept.length >= 2 ? kept : pool;
+}
+
 export function buildAvailabilityEquivalents(
   candidates: BasketCandidate[],
   queryText: string,
@@ -727,7 +829,7 @@ export function buildAvailabilityEquivalents(
   // order. Preserved-word guard is a fallback only for unlabeled candidates.
   // Head-anchor drops prepared-food hosts ("עוגת לימונים") that share a produce
   // token but are not the commodity.
-  const pool = candidates.filter((c) => {
+  const rawPool = candidates.filter((c) => {
     if (!c.hasLocalPrice) return false;
     if (opts.penaltyOf(c.productId) >= opts.penaltyBlock) return false;
     if (c.intentTier === 0) return false;
@@ -741,13 +843,16 @@ export function buildAvailabilityEquivalents(
     if (rejectUnsafePlainYogurtName(queryText, c.name, c.preparation)) return false;
     return queryTokensSatisfied(queryTokens, c.name);
   });
+  // Before pool[0] becomes the primary, drop candidates that are a different
+  // KIND of thing from the bulk of the pool.
+  const pool = restrictToDominantClassL2(rawPool);
   if (pool.length < 2) return [];
   const primary = pool[0]!;
   const out: BasketCandidate[] = [primary];
   for (const c of pool) {
     if (out.length > opts.maxEquivalents) break;
     if (c.productId === primary.productId) continue;
-    if (!packsCompatible(primary, c, queryText, opts.packTolerance)) continue;
+    if (!packsCompatible(primary, c, queryText, opts.packTolerance, opts.requestedAmount)) continue;
     if (primary.productClass && c.productClass && primary.productClass !== c.productClass) continue;
     if (classesConflict(primary, c)) continue;
     if (variantConflict(primary, c)) continue;

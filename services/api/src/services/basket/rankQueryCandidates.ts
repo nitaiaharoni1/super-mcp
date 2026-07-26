@@ -336,6 +336,11 @@ export function rankQueryCandidates(
   const { item, wantsPackSize, hits: allHits, searchMs, candidateLimit, semantic, ontology, location } =
     ctx;
   const searchConfig = ontology?.searchConfig;
+  // A weight request ("1 kg of mince") is a purchase quantity, not a pack size,
+  // so equivalence may admit any peer whose whole packs BUILD it. Only
+  // amount+unit lines carry one; pack_qty lines deliberately do not.
+  const requestedAmount =
+    item.amount != null && item.unit ? { quantity: item.amount, unit: item.unit } : null;
   const profileMs = options?.profileMs ?? 0;
   const sharedProfileBatch = options?.sharedProfileBatch === true;
   const mergedProfileCache = options?.mergedProfileCache;
@@ -727,6 +732,7 @@ export function rankQueryCandidates(
         queryText,
         searchConfig?.maxEquivalents ?? 5,
         searchConfig?.packTolerance ?? DEFAULT_PACK_TOLERANCE,
+        requestedAmount,
       );
       if (equivalents.length >= 2) {
         return {
@@ -766,6 +772,7 @@ export function rankQueryCandidates(
       packTolerance: searchConfig?.packTolerance ?? DEFAULT_PACK_TOLERANCE,
       penaltyBlock: searchConfig?.penaltyBlockThreshold ?? 1,
       penaltyOf: (id) => gateById.get(id)?.penaltyScore ?? 0,
+      requestedAmount,
     });
     if (
       equivalents.length >= 2 &&
@@ -813,6 +820,7 @@ export function rankQueryCandidates(
         queryForEq,
         searchConfig?.maxEquivalents ?? 5,
         searchConfig?.packTolerance ?? DEFAULT_PACK_TOLERANCE,
+        requestedAmount,
       );
       if (equivalents.length >= 2) {
         return { ...base, equivalents };
