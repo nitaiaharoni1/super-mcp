@@ -25,10 +25,17 @@
  * "21 of the 24 benchmark failures are a correctly-identified product that is
  * thinly stocked".
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildLexicalRankedCte } from "../../../src/services/search/lexicalSql.js";
 import { searchProductsScored } from "../../../src/services/search/index.js";
 import { query } from "@super-mcp/db";
+import {
+  closeLivePool,
+  isFullCatalog,
+  liveCatalogSkipReason,
+  probeLiveCatalog,
+  type LiveCatalogStats,
+} from "../../integration/helpers/liveEnv.js";
 
 describe("tie-break among equally-scored name matches", () => {
   it("orders by how widely a product is stocked, not by the alphabet", () => {
@@ -39,7 +46,9 @@ describe("tie-break among equally-scored name matches", () => {
   });
 
   it("keeps a deterministic final tiebreak so results never reorder run to run", () => {
-    expect(buildLexicalRankedCte()).toMatch(/p\.store_count DESC,\s*p\.name ASC/);
+    expect(buildLexicalRankedCte()).toMatch(
+      /p\.store_count DESC,\s*p\.name ASC/,
+    );
   });
 });
 
@@ -47,18 +56,35 @@ describe("generic staple queries retrieve the staple (live DB)", () => {
   // The pool is 20 wide; a mainstream staple has to be in it.
   const STAPLES = ["שמן", "יוגורט", "פסטה", "קפה", "קמח"];
 
-  it.each(STAPLES)("retrieves a widely stocked product for %s", async (q) => {
-    const hits = await searchProductsScored({ q, limit: 20 });
-    expect(hits.length).toBeGreaterThan(0);
-
-    const counts = await query<{ id: string; store_count: number }>(
-      `SELECT id, store_count FROM product WHERE id = ANY($1::uuid[])`,
-      [hits.map((h) => h.id)],
-    );
-    const best = Math.max(0, ...counts.rows.map((r) => Number(r.store_count)));
-
-    // Before the fix these pools topped out in the single digits or low teens
-    // while 400+ store products sat un-retrieved.
-    expect(best).toBeGreaterThan(100);
+  // Needs the real catalog. CI runs an ephemeral Postgres holding only fixture
+  // rows, where no product is stocked in 100 stores because there are not 100
+  // stores, so without this guard these fail for the wrong reason.
+  let stats: LiveCatalogStats | null = null;
+  beforeAll(async () => {
+    stats = await probeLiveCatalog();
+  }, 30_000);
+  afterAll(async () => {
+    await closeLivePool();
   });
+
+  for (const q of STAPLES) {
+    it(`retrieves a widely stocked product for ${q}`, async ({ skip }) => {
+      skip(!isFullCatalog(stats), liveCatalogSkipReason());
+      const hits = await searchProductsScored({ q, limit: 20 });
+      expect(hits.length).toBeGreaterThan(0);
+
+      const counts = await query<{ id: string; store_count: number }>(
+        `SELECT id, store_count FROM product WHERE id = ANY($1::uuid[])`,
+        [hits.map((h) => h.id)],
+      );
+      const best = Math.max(
+        0,
+        ...counts.rows.map((r) => Number(r.store_count)),
+      );
+
+      // Before the fix these pools topped out in the single digits or low teens
+      // while 400+ store products sat un-retrieved.
+      expect(best).toBeGreaterThan(100);
+    });
+  }
 });
