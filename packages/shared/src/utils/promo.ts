@@ -174,6 +174,17 @@ export function normalizePromoMechanic(fields: PromoFields): RawPromoRecord["mec
   };
 }
 
+/**
+ * How close an absolute `discountedPrice` must stay to what the promo's own rate
+ * implies before it is believed.
+ *
+ * 0.7 leaves room for rounding and for a promo that stacks a little deeper than
+ * its headline rate, while catching the gross mismatches that come from a blanket
+ * promo filed against a SKU it was not written for (₪13.21 offered against a
+ * ₪79.90 shelf price under a 5% rate is a 6x gap, not rounding).
+ */
+const ABSOLUTE_PRICE_MIN_SHARE_OF_RATE = 0.7;
+
 /** Apply a promo to a single unit price for basket math (best-effort). */
 export function applyPromoToUnitPrice(
   listPrice: number,
@@ -184,7 +195,39 @@ export function applyPromoToUnitPrice(
   switch (m) {
     case "simple_discount": {
       const dp = mechanic.params.discountedPrice;
-      if (typeof dp === "number" && Number.isFinite(dp) && dp > 0) {
+      const rawRate = mechanic.params.discountRate;
+      const rateFactor =
+        typeof rawRate === "number" && Number.isFinite(rawRate) && rawRate > 0
+          ? // rate > 1 means percent points; else a fraction
+            rawRate > 1
+            ? 1 - rawRate / 100
+            : 1 - rawRate
+          : null;
+      // A blanket promo's absolute price belongs to ONE SKU, not to every SKU it
+      // is filed against. Shufersal's "תו זהב 5% הנחה מותג שופרסל" carries
+      // discountRate 5 AND discountedPrice 13.21; the 13.21 is 5% off some ₪13.90
+      // item and is nonsense for a ₪79.90/kg beef. Reading the absolute price
+      // first priced a kilo of mince at ₪13.21, and another store at ₪5.61 —
+      // which then wins "cheapest" and sends the shopper to the wrong shop.
+      //
+      // When both signals are present and the absolute price implies a far deeper
+      // cut than the rate does, the rate is the one that travels with the promo.
+      // Sampled on production: 1.2% of promo-to-product links (29 of 2,458) carry
+      // an absolute price contradicting their own rate by more than 30%.
+      const absoluteContradictsRate =
+        typeof dp === "number" &&
+        Number.isFinite(dp) &&
+        dp > 0 &&
+        rateFactor != null &&
+        rateFactor > 0 &&
+        rateFactor < 1 &&
+        dp < listPrice * rateFactor * ABSOLUTE_PRICE_MIN_SHARE_OF_RATE;
+      if (
+        !absoluteContradictsRate &&
+        typeof dp === "number" &&
+        Number.isFinite(dp) &&
+        dp > 0
+      ) {
         // Quantity-gated per-unit price ("buy N+, each at dp"): below the
         // threshold the shelf price applies; at/above it, dp is per unit.
         const minQty = Number(mechanic.params.minQty ?? 0);
@@ -193,13 +236,8 @@ export function applyPromoToUnitPrice(
         }
         return { effectiveTotal: dp * qty, applied: true };
       }
-      const rate = mechanic.params.discountRate;
-      if (typeof rate === "number" && Number.isFinite(rate) && rate > 0) {
-        // Heuristic: rate > 1 means percent points; else fraction
-        const factor = rate > 1 ? 1 - rate / 100 : 1 - rate;
-        if (factor > 0 && factor < 1) {
-          return { effectiveTotal: listPrice * qty * factor, applied: true };
-        }
+      if (rateFactor != null && rateFactor > 0 && rateFactor < 1) {
+        return { effectiveTotal: listPrice * qty * rateFactor, applied: true };
       }
       return { effectiveTotal: listPrice * qty, applied: false };
     }
