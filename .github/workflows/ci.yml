@@ -1,9 +1,10 @@
 name: CI
 
+# Manual only. Every push and pull request used to start a run, which burns
+# Actions minutes for a check that already runs locally before each commit.
+# Start one from the Actions tab, or `gh workflow run ci.yml`.
 on:
-  push:
-    branches: [master, main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   gitleaks:
