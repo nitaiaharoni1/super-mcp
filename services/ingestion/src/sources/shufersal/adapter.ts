@@ -28,6 +28,38 @@ import { extractFeedHrefs, maxPageFromHtml, parseStoreDropdown } from "./parseHt
  * Shufersal publishes via HTTPS portal → Azure Blob SAS URLs.
  * List endpoint: GET /FileObject/UpdateCategory?catID=&storeId=&page=
  */
+/**
+ * Mint a fresh signed URL for one file.
+ *
+ * The portal's UpdateCategory listing can be scoped to a single store, so this
+ * costs one request rather than re-crawling all 22 pages. The filename is
+ * stable; only the SAS query string changes, so an exact filename match is the
+ * right target, with the newest file for that store as a fallback in case the
+ * feed also republished while we waited.
+ */
+async function refreshSignedUrl(file: FeedFile): Promise<string | null> {
+  if (!file.storeId) return null;
+  const catId = file.kind === "promosfull" ? CAT_PROMOS_FULL : CAT_PRICES_FULL;
+  try {
+    const html = await fetchText(
+      `${SHUFERSAL_BASE}/FileObject/UpdateCategory?catID=${catId}&storeId=${encodeURIComponent(file.storeId)}&page=1`,
+      DISCOVER_TIMEOUT_MS,
+    );
+    const hrefs = [...extractFeedHrefs(html)];
+    const named = (h: string): string => ((h.split("?")[0] ?? h).split("/").pop() ?? "");
+    const exact = hrefs.find((h) => named(h) === file.fileName);
+    const sameKind = hrefs
+      .filter((h) => classifyFeedFile(named(h)) === file.kind)
+      .sort((a, b) => (named(b) > named(a) ? 1 : -1));
+    const pick = exact ?? sameKind[0];
+    if (!pick) return null;
+    return pick.startsWith("http") ? pick : new URL(pick, SHUFERSAL_BASE).toString();
+  } catch {
+    // A refresh failure must surface as the original 403, not as a new error.
+    return null;
+  }
+}
+
 export function createShufersalAdapter(): SourceAdapter {
   const maxStores = storeCountCap(20);
 
@@ -141,17 +173,47 @@ export function createShufersalAdapter(): SourceAdapter {
     },
 
     async fetch(file: FeedFile): Promise<RawBlob> {
-      const res = await fetchAllowedFeed(file.remotePath, SHUFERSAL_ALLOWED_HOSTS, {
-        headers: { "User-Agent": BROWSER_UA },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      });
+      const get = (url: string): Promise<Response> =>
+        fetchAllowedFeed(url, SHUFERSAL_ALLOWED_HOSTS, {
+          headers: { "User-Agent": BROWSER_UA },
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        });
+
+      let used = file;
+      let res = await get(file.remotePath);
+
+      // Shufersal hands out pre-signed Azure Blob URLs that expire about 30
+      // minutes after they are minted, and discovery mints all of them at run
+      // start. A full ingest takes hours, so everything queued past the first
+      // half hour comes back 403. Measured on one nightly run: 459 of 542 files
+      // failed this way, which is why the chain refreshed 76 of its 271
+      // in-coverage stores and looked like a coverage problem rather than an
+      // expiry one.
+      if (res.status === 403) {
+        const fresh = await refreshSignedUrl(file);
+        if (fresh) {
+          res = await get(fresh);
+          if (res.ok) {
+            used = { ...file, remotePath: fresh };
+            console.log(
+              JSON.stringify({
+                event: "ingestion_url_resigned",
+                sourceId: "il-shufersal",
+                storeId: file.storeId ?? null,
+                file: file.fileName,
+              }),
+            );
+          }
+        }
+      }
+
       if (!res.ok) {
-        throw new Error(`Shufersal fetch ${file.remotePath} -> ${res.status}`);
+        throw new Error(`Shufersal fetch ${used.remotePath} -> ${res.status}`);
       }
       const ab = await res.arrayBuffer();
       return {
         sourceId: "il-shufersal",
-        file,
+        file: used,
         bytes: Buffer.from(ab),
         fetchedAt: new Date(),
       };
