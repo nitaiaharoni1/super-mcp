@@ -87,19 +87,24 @@ function mapResolutionMode(value: "fast" | "strict" | undefined): BasketResoluti
   }
 }
 
-function geocodeStrategyForResolutionMode(
-  mode: BasketResolutionMode,
-): "fast" | "precise" {
-  switch (mode) {
-    case "fast":
-      return "fast";
-    case "strict":
-      return "precise";
-    default: {
-      const exhaustive: never = mode;
-      return exhaustive;
-    }
-  }
+/**
+ * How hard to work to locate the shopper.
+ *
+ * Deliberately NOT tied to `resolution_mode`, which controls how carefully
+ * PRODUCTS are matched. Those are unrelated, and conflating them meant a shopper
+ * on the default fast path had their typed street address silently replaced by
+ * the city centre. Measured for "מנדלסון 1, תל אביב": fast returned 32.0853,
+ * 34.7818 (the middle of Tel Aviv) while precise returned 32.0820, 34.7766, the
+ * actual street, about 600m away. Distance is a headline feature here, and 600m
+ * is enough to reorder which branches look nearest.
+ *
+ * The saving was not worth it either: precise measured 329ms against 121ms, on a
+ * basket that takes seconds, and results are cached so a repeated address is
+ * free. A bare `city` still uses the fast path, because a city IS a centroid and
+ * there is nothing more precise to find.
+ */
+function geocodeStrategyForInput(hasFreeTextLocation: boolean): "fast" | "precise" {
+  return hasFreeTextLocation ? "precise" : "fast";
 }
 
 function mapResponseDetail(
@@ -280,7 +285,7 @@ export function registerBasketTools(server: McpServer): void {
       }
       const resolutionMode = mapResolutionMode(args.resolution_mode);
       const loc = await resolveToolLocation(args, {
-        geocodeStrategy: geocodeStrategyForResolutionMode(resolutionMode),
+        geocodeStrategy: geocodeStrategyForInput(Boolean(args.location)),
       });
       return optimizeBasket(
         {
