@@ -12,6 +12,7 @@ import { rejectUnsafeChickenName } from "./chickenSafety.js";
 import { preferDirectForm } from "./derivedForm.js";
 import { queryHeadAnchored } from "./equivalence.js";
 import { rejectUnsafePlainMilkName } from "./milkSafety.js";
+import { rejectUnsafePlainYogurtName } from "./yogurtSafety.js";
 import { assertPurchaseQtyPreservesRequest } from "./purchaseQtyGuard.js";
 import { filterSafeCandidates, rankSafeCandidatesForFast } from "./rankQueryCandidates.js";
 import { isEligibleForFastBestEffortCandidate } from "./resolutionDecision.js";
@@ -242,7 +243,9 @@ function filterPool(
   // and "חלב מרוכז" still keep their specialty forms.
   const withoutUnsafeStaples = base.filter(
     (c) =>
-      !rejectUnsafeChickenName(query, c.name) && !rejectUnsafePlainMilkName(query, c.name),
+      !rejectUnsafeChickenName(query, c.name) &&
+      !rejectUnsafePlainMilkName(query, c.name) &&
+      !rejectUnsafePlainYogurtName(query, c.name, c.preparation),
   );
 
   const anchored = withoutUnsafeStaples.filter(
@@ -367,7 +370,8 @@ function lockedPrimaryIsUnsafe(
   return (
     filterSafeCandidates({ query, profile, candidates: [locked] }).length === 0 ||
     rejectUnsafeChickenName(query, item.name) ||
-    rejectUnsafePlainMilkName(query, item.name)
+    rejectUnsafePlainMilkName(query, item.name) ||
+    rejectUnsafePlainYogurtName(query, item.name)
   );
 }
 

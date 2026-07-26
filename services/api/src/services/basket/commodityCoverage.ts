@@ -8,6 +8,7 @@ import {
 } from "@super-mcp/shared";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
 import { rejectUnsafePlainMilkName } from "./milkSafety.js";
+import { rejectUnsafePlainYogurtName } from "./yogurtSafety.js";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { resolveCoverageClassScope, type CoverageClassScope } from "./coverageScope.js";
 import { diversifyByChain } from "./diversifyByChain.js";
@@ -292,6 +293,7 @@ export function filterClassPeers(
     if (requireQueryTokens && !queryHeadAnchored(queryText, row.name)) continue;
     if (rejectUnsafeChickenName(queryText, row.name)) continue;
     if (rejectUnsafePlainMilkName(queryText, row.name)) continue;
+    if (rejectUnsafePlainYogurtName(queryText, row.name, row.preparation)) continue;
     // The SAME form / percentage / pack gates the resolution path applies.
     //
     // These were missing here, so anything resolution rejected as the wrong form

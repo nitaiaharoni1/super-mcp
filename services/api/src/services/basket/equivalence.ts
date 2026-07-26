@@ -14,6 +14,7 @@ import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
 import { hasUnrequestedDerivedForm, queryNamesDerivedForm } from "./derivedForm.js";
 import { rejectUnsafePlainMilkName } from "./milkSafety.js";
+import { rejectUnsafePlainYogurtName } from "./yogurtSafety.js";
 import { percentConflict, rejectPercentMismatch } from "./percentAttribute.js";
 import { resolveCoverageClassScope, scopedClassesConflict } from "./coverageScope.js";
 import type { BasketCandidate } from "./types.js";
@@ -486,6 +487,7 @@ export function isStapleIncompatible(
   // "קוטג׳ תנובה 5%" must not resolve to 1%.
   if (rejectPercentMismatch(queryText, candidate.name)) return true;
   if (rejectUnsafePlainMilkName(queryText, candidate.name)) return true;
+  if (rejectUnsafePlainYogurtName(queryText, candidate.name, candidate.preparation)) return true;
   if (rejectUnsafeChickenName(queryText, candidate.name)) return true;
   // Head-anchoring stays a soft preference (preferQueryHeadAnchored / override
   // guards). Hard-rejecting every non-anchored name empties shortlists for
@@ -675,6 +677,7 @@ export function buildCommodityEquivalents(
     if (rejectPercentMismatch(queryText, c.name)) continue;
     if (rejectUnsafeChickenName(queryText, c.name)) continue;
     if (rejectUnsafePlainMilkName(queryText, c.name)) continue;
+    if (rejectUnsafePlainYogurtName(queryText, c.name, c.preparation)) continue;
     out.push(c);
   }
   return out;
@@ -735,6 +738,7 @@ export function buildAvailabilityEquivalents(
     if (rejectPercentMismatch(queryText, c.name)) return false;
     if (rejectUnsafeChickenName(queryText, c.name)) return false;
     if (rejectUnsafePlainMilkName(queryText, c.name)) return false;
+    if (rejectUnsafePlainYogurtName(queryText, c.name, c.preparation)) return false;
     return queryTokensSatisfied(queryTokens, c.name);
   });
   if (pool.length < 2) return [];

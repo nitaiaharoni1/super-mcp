@@ -48,15 +48,21 @@ import {
   plainMilkNameIsUndesired,
   rejectUnsafePlainMilkName,
 } from "./milkSafety.js";
+import { rejectUnsafePlainYogurtName } from "./yogurtSafety.js";
 
 export { chickenNameIsUndesired } from "./chickenSafety.js";
 export { plainMilkNameIsUndesired } from "./milkSafety.js";
 
-/** Drop organ/processed chicken and specialty milk traps for staple queries. */
-function rejectUnsafeStapleName(queryText: string, candidateName: string): boolean {
+/** Drop organ/processed chicken, specialty milk and drinking-yogurt traps. */
+function rejectUnsafeStapleName(
+  queryText: string,
+  candidateName: string,
+  preparation?: string | null,
+): boolean {
   return (
     rejectUnsafeChickenName(queryText, candidateName) ||
-    rejectUnsafePlainMilkName(queryText, candidateName)
+    rejectUnsafePlainMilkName(queryText, candidateName) ||
+    rejectUnsafePlainYogurtName(queryText, candidateName, preparation)
   );
 }
 
@@ -710,7 +716,9 @@ export function rankQueryCandidates(
     candidates[0] != null &&
     !isVectorOnly(chosen)
   ) {
-    const stapleSafe = candidates.filter((c) => !rejectUnsafeStapleName(queryText, c.name));
+    const stapleSafe = candidates.filter(
+      (c) => !rejectUnsafeStapleName(queryText, c.name, c.preparation),
+    );
     const top = stapleSafe.find((c) => queryHeadAnchored(queryText, c.name));
     if (top) {
       const equivalents = buildCommodityEquivalents(
@@ -762,7 +770,7 @@ export function rankQueryCandidates(
     if (
       equivalents.length >= 2 &&
       queryHeadAnchored(queryText, equivalents[0]!.name) &&
-      !rejectUnsafeStapleName(queryText, equivalents[0]!.name)
+      !rejectUnsafeStapleName(queryText, equivalents[0]!.name, equivalents[0]!.preparation)
     ) {
       const top = equivalents[0]!;
       return {
@@ -795,8 +803,10 @@ export function rankQueryCandidates(
   ) {
     const primary = candidates.find((c) => c.productId === base.productId) ?? candidates[0]!;
     const queryForEq = item.query ?? "";
-    const stapleSafe = candidates.filter((c) => !rejectUnsafeStapleName(queryForEq, c.name));
-    if (!rejectUnsafeStapleName(queryForEq, primary.name)) {
+    const stapleSafe = candidates.filter(
+      (c) => !rejectUnsafeStapleName(queryForEq, c.name, c.preparation),
+    );
+    if (!rejectUnsafeStapleName(queryForEq, primary.name, primary.preparation)) {
       const equivalents = buildCommodityEquivalents(
         primary,
         stapleSafe,
