@@ -389,8 +389,13 @@ describe.skipIf(!LIVE)("MCP real-world flows (live DB)", () => {
 
       const milk = result.items.find((item) => item.index === 0);
       expect(milk?.resolutionStatus).toBe("resolved");
-      // Hebrew has no \b word boundary — require leading חלב + separator, not חלבה.
-      expect(milk?.name ?? "").toMatch(/^חלב[\s%0-9]/);
+      // Hebrew has no \b word boundary, so require חלב as a leading whole word,
+      // not חלבה. A packaging word may come first: feeds file real milk as
+      // "קרטון חלב 2 ליטר 3%" and "שקית חלב", and the Tel Aviv pick is a 2L
+      // carton because it is the most widely stocked milk near that origin.
+      // Anything else in front (שוקולד חלב, מקציף חלב, תחליב) still fails, which
+      // is what this guard is for.
+      expect(milk?.name ?? "").toMatch(/^(?:(?:קרטון|בקבוק|שקית)\s+)?חלב[\s%0-9]/);
       expect(milk?.name ?? "").not.toMatch(/מרוכז|חלבה|גוף|פנים|משקה/);
 
       const chicken = result.items.find((item) => item.index === 7);

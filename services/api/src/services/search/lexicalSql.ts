@@ -221,7 +221,13 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
       WHERE ($2::text IS NULL OR p.category_l1 = $2 OR p.category_l2 = $2)
         AND ($3::text IS NULL OR p.brand ILIKE '%' || $3 || '%' ESCAPE '\\')
         AND ($4::text IS NULL OR p.gtin = $4)
-      ORDER BY score DESC, p.name ASC
+      -- Score first, then how widely the product is actually stocked.
+      -- A leading whole-word match scores a flat 0.95, so a one-word staple
+      -- query ties hundreds of rows; breaking that tie on p.name made the pool
+      -- the alphabetically first 20 ("שמן" returned watermelon, oregano, argan
+      -- and lemon oil, while canola in 747 stores was never a candidate).
+      -- p.name stays as the final tiebreak so results are deterministic.
+      ORDER BY score DESC, p.store_count DESC, p.name ASC
       LIMIT $7
     )`;
 }

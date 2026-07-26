@@ -4,8 +4,10 @@ export { upsertChain, upsertStore, type UpsertChainInput, type UpsertStoreInput 
 export {
   resolveProduct,
   healSizeUnitFamily,
+  refreshProductStoreCounts,
   type ResolveProductInput,
   type SizeUnitHealResult,
+  type StoreCountRefreshResult,
 } from "./products.js";
 export {
   upsertListing,

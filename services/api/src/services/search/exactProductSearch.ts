@@ -79,7 +79,12 @@ export function buildExactProductRankedCte(): string {
       WHERE ($2::text IS NULL OR p.category_l1 = $2 OR p.category_l2 = $2)
         AND ($3::text IS NULL OR p.brand ILIKE '%' || $3 || '%' ESCAPE '\\')
         AND ($4::text IS NULL OR p.gtin = $4)
-      ORDER BY score DESC, p.name ASC
+      -- Same tie-break as the full lexical ranker, and it matters more here:
+      -- this pool is only 10 wide. "קפה" matches 711 products, 200 of them on
+      -- the leading word alone, all scoring a flat 0.95 — so ordering by name
+      -- handed back the alphabetically first ten (דבאח בהיר, דבאח בינוני,
+      -- דבאח שחור, הפוך) and never the coffee anyone buys.
+      ORDER BY score DESC, p.store_count DESC, p.name ASC
       LIMIT $7
     )`;
 }

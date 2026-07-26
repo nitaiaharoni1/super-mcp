@@ -133,3 +133,39 @@ export async function healSizeUnitFamily(): Promise<SizeUnitHealResult> {
 
   return { scanned: res.rows.length, healed: ids.length };
 }
+
+export interface StoreCountRefreshResult {
+  /** Products whose stored count changed (0 on a no-op re-run). */
+  updated: number;
+}
+
+/**
+ * Recompute `product.store_count`, the number of stores currently pricing each
+ * product.
+ *
+ * Search breaks score ties on this. A leading whole-word name match scores a
+ * flat 0.95, so a one-word staple query ties hundreds of products, and the old
+ * `p.name ASC` tiebreak turned the 20-wide candidate pool into an alphabet
+ * lottery: "שמן" retrieved watermelon, oregano and argan oil while canola in
+ * 747 stores was never a candidate at all.
+ *
+ * Full recompute rather than incremental: the whole aggregate runs in under a
+ * second over 122k products, and a stale popularity signal degrades every
+ * search quietly, which is exactly the kind of failure worth spending a second
+ * to rule out. Idempotent, and never fatal to an ingest.
+ */
+export async function refreshProductStoreCounts(): Promise<StoreCountRefreshResult> {
+  const res = await query(
+    `UPDATE product p
+        SET store_count = COALESCE(c.n, 0)
+       FROM (
+         SELECT l.product_id, count(DISTINCT sp.store_id) AS n
+           FROM listing l
+           JOIN store_price sp ON sp.listing_id = l.id
+          GROUP BY l.product_id
+       ) c
+      WHERE c.product_id = p.id
+        AND p.store_count IS DISTINCT FROM c.n`,
+  );
+  return { updated: res.rowCount ?? 0 };
+}

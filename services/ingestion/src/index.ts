@@ -1,7 +1,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { backfillCentroids, closePool, healSizeUnitFamily } from "@super-mcp/db";
+import {
+  backfillCentroids,
+  closePool,
+  healSizeUnitFamily,
+  refreshProductStoreCounts,
+} from "@super-mcp/db";
 import { getAdapters } from "./sources/index.js";
 import { runPipeline } from "./pipeline.js";
 
@@ -49,6 +54,17 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ event: "heal_size_unit_family", ...heal }));
   } catch (err) {
     console.error("heal_size_unit_family failed (non-fatal):", err);
+  }
+
+  // Refresh the popularity signal search uses to break score ties. Prices have
+  // just moved, so a stale count quietly degrades every generic query: a
+  // one-word staple ties hundreds of products on name score alone, and without
+  // this the 20-wide candidate pool falls back to alphabetical order.
+  try {
+    const counts = await refreshProductStoreCounts();
+    console.log(JSON.stringify({ event: "product_store_counts", ...counts }));
+  } catch (err) {
+    console.error("product_store_counts refresh failed (non-fatal):", err);
   }
 
   // Stamp any store still missing coordinates (new branches, or ones whose
