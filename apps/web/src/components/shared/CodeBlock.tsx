@@ -11,7 +11,7 @@ export function CodeBlock({
     <pre
       dir="ltr"
       className={cn(
-        "overflow-x-auto rounded-[var(--radius-lg)] bg-[var(--color-olive-soft)] p-4 font-mono text-sm text-[var(--color-ink)]",
+        "overflow-x-auto rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-paper-sunk)] p-4 font-mono text-[0.8125rem] leading-6 text-[var(--color-ink)]",
         className,
       )}
     >

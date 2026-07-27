@@ -6,26 +6,41 @@ import { AnalyticsEvent } from "@/lib/analytics";
 
 export function SiteHeader() {
   return (
-    <header className="sticky top-0 z-30 h-16 border-b border-[var(--color-line)] bg-[color:color-mix(in_oklch,var(--color-paper)_94%,transparent)] backdrop-blur-md">
-      <Container className="flex h-full items-center justify-between gap-4">
+    <header className="sticky top-0 z-30 h-16 border-b border-[var(--color-line)] bg-[color-mix(in_oklch,var(--color-paper)_88%,transparent)] backdrop-blur-md">
+      {/* Sticky nav sits ahead of the content, so give keyboards a way past it. */}
+      <a
+        href="#ledger"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:end-4 focus:z-40 focus:rounded-[var(--radius-pill)] focus:bg-[var(--color-ink)] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[var(--color-paper)]"
+      >
+        דלגו לתוכן
+      </a>
+      <Container className="flex h-full items-center gap-6">
         <a
-          className="font-[family-name:var(--font-secular)] text-lg tracking-[-0.02em] text-[var(--color-ink)]"
+          className="display text-lg text-[var(--color-ink)]"
           href="#top"
           aria-label={he.header.brand}
         >
           <span dir="ltr">{he.header.brand}</span>
         </a>
+
         <nav
           className="hidden items-center gap-6 text-sm text-[var(--color-ink-muted)] md:flex"
           aria-label="ניווט ראשי"
         >
           {he.header.nav.map((item) => (
-            <a key={item.href} href={item.href} className="hover:text-[var(--color-ink)]">
+            <a
+              key={item.href}
+              href={item.href}
+              className="transition-colors hover:text-[var(--color-ink)]"
+            >
               {item.label}
             </a>
           ))}
         </nav>
-        <Button asChild size="sm" variant="outline">
+
+        {/* Solid, not outline: this is the page's single intent, so it should not
+            look like a tertiary control sitting in the corner. */}
+        <Button asChild size="sm" className="ms-auto">
           <TrackedAnchor
             href="#access"
             event={AnalyticsEvent.MarketingCtaClicked}

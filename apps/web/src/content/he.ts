@@ -1,188 +1,254 @@
+/**
+ * All page copy and every published figure in one place.
+ *
+ * Every number below was measured, not estimated. The catalog counts come from
+ * the production catalog on 26.7.2026 (last feed ingest 21.7.2026). The basket
+ * and the ledger come from one real `optimize_basket` call near Dizengoff
+ * Center that compared 68 stores.
+ *
+ * Three rules for editing this file:
+ *   1. No claim without a number behind it, and no number we cannot re-measure.
+ *   2. Say what the reader gets, not how we built it. Architecture words earn
+ *      their place only in the connect section, where the reader came for them.
+ *   3. No em dashes or en dashes. This copy is public. The Hebrew maqaf is fine.
+ */
+
+/** The measured basket that the hero and the ledger both draw from. */
+const measurement = {
+  measuredOn: "26.7.2026",
+  ingestedOn: "21.7.2026",
+  storesCompared: 68,
+  origin: "דיזנגוף סנטר, תל אביב",
+  radiusKm: 5,
+} as const;
+
+/** MCP clients we name. Ordered by how established their MCP support is. */
+const clients = ["Claude", "Cursor", "ChatGPT", "Gemini"] as const;
+
 export const he = {
   meta: {
-    title: "Super MCP | מרשימת קניות לתוכנית קנייה חכמה",
+    title: "Super MCP | מחירי הסופרמרקטים בישראל, בתוך העוזר שלכם",
     description:
-      "חברו סוכן AI לסופרמרקטים בישראל: שולחים רשימת קניות בעברית ומקבלים השוואת מחירים אמיתית לפי חנויות קרובות, עם שאלה לפני כל החלפה.",
+      "שרת MCP שמחבר את Claude, Cursor, ChatGPT או Gemini למחירונים הרשמיים של 10 רשתות בישראל. רשימת קניות בעברית נכנסת, תוכנית קנייה מתומחרת יוצאת: איפה לקנות, כמה זה עולה, ומה שחסר מסומן כחסר.",
   },
+
   header: {
     brand: "Super MCP",
     nav: [
-      { href: "#example", label: "דוגמה" },
-      { href: "#how", label: "איך זה עובד" },
-      { href: "#access", label: "גישה" },
+      { href: "#ledger", label: "ההשוואה" },
+      { href: "#coverage", label: "הנתונים" },
+      { href: "#connect", label: "חיבור" },
     ],
-    cta: "בקשו גישה",
+    cta: "בקשו מפתח",
   },
+
   hero: {
-    eyebrow: "לסוכני AI · סופרמרקטים בישראל",
-    title: "שולחים רשימת קניות. מקבלים תוכנית קנייה חכמה.",
+    eyebrow: "שרת MCP · מחירי סופרמרקט בישראל",
+    titleLines: ["אותו מוצר.", "שני מחירים."],
+    titleAccent: "אנחנו אומרים איזה.",
     subtitle:
-      "הסוכן מוצא את המוצרים הנכונים, משווה מחירים אמיתיים בחנויות שלידכם, ושואל לפני שהוא מחליף מוצר.",
-    primaryCta: "בקשו גישה",
-    secondaryCta: "ראו דוגמה אמיתית",
-    secondaryHref: "#example",
-    proofChip: "דוגמה אמיתית: ₪267 בקארפור",
-  },
-  benefits: {
-    id: "why",
-    title: "למה אפשר לסמוך על התוכנית",
-    featured: {
-      title: "מזהה את אותו מוצר בכל רשת",
-      body: "אותו מוצר מופיע בשם אחר בכל מחירון רשת. אנחנו מאחדים את השמות לפריט אחד, כדי שההשוואה תהיה על אותו מוצר בדיוק.",
-      imageSrc: "/story-problem.webp",
-      imageAlt: "אותו מוצר באריזות שונות",
+      "מחברים את Super MCP לעוזר שאתם כבר עובדים איתו, כותבים רשימת קניות בעברית, ומקבלים תוכנית קנייה אמיתית: איפה לקנות, כמה זה עולה, ומה שאין במחירון מסומן כחסר במקום להיעלם.",
+    primaryCta: "בקשו מפתח",
+    secondaryCta: "איך מתחברים",
+    secondaryHref: "#connect",
+    clientsLabel: "עובד בכל לקוח שתומך ב־MCP",
+    clients,
+
+    /*
+     * The hero artifact is one real exchange: what a person typed, the tool the
+     * assistant reached for, and what came back. The tool call is shown on
+     * purpose. It is the clearest way to say "this is an MCP server" without a
+     * paragraph explaining what an MCP server is.
+     */
+    chat: {
+      userLabel: "אתם",
+      userMessage:
+        "תכנן לי קנייה שבועית ליד דיזנגוף סנטר: חלב 3% פעמיים, לחם פרוס, ביצים L, קוטג׳ 5% פעמיים, קילו עגבניות, קילו מלפפונים, קילו בננות, ארבעה יוגורטים, אורז ושתי חבילות פסטה.",
+      toolServer: "super-mcp",
+      toolName: "optimize_basket",
+      toolMeta: `10 פריטים · ${measurement.storesCompared} חנויות`,
+      replyLead: "הכי משתלם לסל הזה:",
+      planStore: "יוחננוף יד אליהו",
+      planDistance: "2.14 ק״מ",
+      planDistancePrecision: "מדויק לכתובת הסניף",
+      planTotal: "₪99.96",
+      planCoverage: "9 מתוך 10 תומחרו",
+      planMissingLabel: "חסר במחירון",
+      planMissing: "מלפפונים",
+      footnote: `נמדד ${measurement.measuredOn}`,
     },
-    items: [
+  },
+
+  ledger: {
+    id: "ledger",
+    eyebrow: "אותו מוצר, שתי חנויות",
+    title: "החנות שמתחת לבית גובה 13.7% יותר",
+    body: "השווינו רק מוצרים שבשתי החנויות הם אותו פריט בדיוק: אותו שם, אותה אריזה, אותו יצרן. בכל אחד מהם חוץ מהחלב, הסניף הקרוב יותר יקר יותר.",
+    columns: {
+      item: "מוצר",
+      /** Full store names head the legend; the short forms head the table on narrow screens. */
+      near: "שופרסל דיל תל אביב",
+      nearShort: "שופרסל",
+      nearMeta: "0.08 ק״מ",
+      far: "יוחננוף יד אליהו",
+      farShort: "יוחננוף",
+      farMeta: "2.14 ק״מ",
+      delta: "פער",
+    },
+    rows: [
+      { item: "חלב 3% מהדרין שקית 1 ליטר", qty: "×2", far: "12.82", near: "12.82", delta: "0.00" },
+      { item: "לחם פרוס אחיד 750 גרם", qty: "×1", far: "8.20", near: "8.38", delta: "0.18" },
+      { item: "קוטג׳ 5% שומן 250 גרם", qty: "×2", far: "13.40", near: "14.20", delta: "0.80" },
+      { item: "יוגורט דנונה ביו לבן 0% 200 גרם", qty: "×4", far: "15.60", near: "18.80", delta: "3.20" },
+      { item: "אורז בסמטי מובחר דאווט 1 ק״ג", qty: "×1", far: "13.90", near: "17.50", delta: "3.60" },
+    ],
+    totals: { label: "חמישה מוצרים זהים", far: "₪63.92", near: "₪72.70", delta: "₪8.78" },
+    deltaHeadline: "13.7%",
+    deltaCaption: "יותר על אותם חמישה מוצרים, בשביל לחסוך 2 ק״מ הליכה",
+    footnote: `סל אחד שנמדד ב־${measurement.measuredOn} מול מחירונים שנטענו ב־${measurement.ingestedOn}. זו מדידה אחת, לא הבטחת חיסכון. מחירים זזים, ולכן כל מחיר אצלנו נושא את המועד שבו נראה לאחרונה.`,
+  },
+
+  integrity: {
+    id: "integrity",
+    title: "למה אפשר לסמוך על המספר הזה",
+    lead: "השוואת מחירים נשברת בשלוש נקודות, ובכל אחת מהן קל להחליק ניחוש שנראה כמו תשובה. בחרנו להגיד מה אנחנו לא יודעים.",
+    question: {
+      label: "שאלה אמיתית שהסוכן החזיר",
+      text: "יש קולה בבקבוק 1.5 ליטר וגם בשישיית פחיות ליד הכתובת. מה להשוות?",
+      caption: "כשכמה מוצרים מתאימים, הסוכן שואל. הוא לא מחליף בשקט ומקווה שלא תשימו לב.",
+    },
+    points: [
       {
-        title: "מחירים מהחנויות שלידכם",
-        body: "המחירים נמשכים מהמחירונים הרשמיים של הרשתות, לחנויות בסביבה שלכם. לא קטלוג ארצי כללי.",
-        imageSrc: "/story-market-fresh.webp",
-        imageAlt: "דוכן ירקות טריים בשוק",
+        title: "מוצר זהה, לא מוצר דומה",
+        body: "אותו פריט מופיע בשם אחר בכל מחירון רשת. אנחנו מאחדים אותם לפריט אחד ומוודאים שהקטגוריה, הווריאנט וגודל האריזה תואמים. בשר טחון לא מושווה לקציצה צמחית, וקוטג׳ 5% לא מושווה ל־3%.",
       },
       {
-        title: "אומר מה חסר",
-        body: "פריט שלא מופיע במחירון הרשמי מסומן כחסר. בלי לנחש מחיר ובלי להעלים אותו מהסל.",
+        title: "חסר נשאר חסר",
+        body: "פריט שלא מופיע במחירון הסניף מסומן כחסר, והתוכנית אומרת כמה שורות תומחרו מתוך כמה. חנות לא תיראה זולה רק מפני שהיא לא מוכרת את הפריט היקר.",
+      },
+      {
+        title: "מרחק שנמדד, לא מרחק שנוח לנו",
+        body: "לסניף עם כתובת מלאה יש מרחק מדויק. סניף שפורסם עם שם עיר בלבד מסומן כמשוער ונושא את טווח אי הוודאות שלו, במקום להתחזות לחנות שנמצאת ליד הבית.",
       },
     ],
   },
-  howItWorks: {
-    id: "how",
-    title: "מה קורה מאחורי הקלעים",
-    intro: "מרשימה חופשית בעברית ועד תוכנית סגורה, בשלושה שלבים.",
-    steps: [
-      {
-        title: "שולחים רשימה",
-        body: "רשימת קניות חופשית בעברית, עם עיר או שכונה.",
-      },
-      {
-        title: "הסוכן מברר",
-        body: "כל מה שלא חד־משמעי חוזר כשאלה, לפני שממשיכים.",
-        exampleLabel: "שאלה לדוגמה",
-        exampleQuestion: "יש קולה בבקבוק 1.5 ליטר וגם בשישיית פחיות ליד הכתובת. מה להשוות?",
-      },
-      {
-        title: "מקבלים תוכנית",
-        body: "חנות מומלצת, מחיר כולל, ורשימה של מה שחסר.",
-      },
+
+  coverage: {
+    id: "coverage",
+    eyebrow: "הנתונים",
+    title: "כל המחירונים הרשמיים, במקום אחד",
+    body: "רשתות השיווק בישראל מחויבות לפרסם מחירונים מלאים לפי חוק שקיפות המחירים. אנחנו טוענים אותם כל יום, מאחדים מוצרים וסניפים, ושומרים לכל מחיר את המועד שבו נראה לאחרונה. מחירון רשמי של הרשת, לא גרידה מאפליקציות.",
+    stats: [
+      { value: "10", label: "רשתות" },
+      { value: "880", label: "סניפים" },
+      { value: "156", label: "עיירות וערים" },
+      { value: "122,575", label: "מוצרים" },
+      { value: "6.7M", label: "מחירי סניף" },
+      { value: "1.07M", label: "מבצעים" },
     ],
-    explain: [
-      {
-        title: "מאיפה המחירים",
-        body: "רשתות השיווק בישראל מפרסמות מחירונים מלאים לפי חוק שקיפות המחירים. אנחנו אוספים אותם, מאחדים מוצרים וחנויות, ושומרים מתי כל מחיר עודכן. מחירון רשמי של הרשת, לא גרידה מאפליקציות.",
-        chips: ["מחירון רשמי", "חוק שקיפות המחירים", "חותמת עדכון לכל מחיר"],
-      },
-      {
-        title: "איך מתחברים",
-        body: "MCP הוא התקן שמחבר כלים לסוכני AI. מחברים את Claude או Cursor עם מפתח, והסוכן יודע לשלוח רשימה ולקבל תוכנית: התאמת מוצרים, השוואת מחירים ושאלות הבהרה. אותה שכבה זמינה גם כ־REST API.",
-        chips: ["Claude", "Cursor", "REST API"],
-      },
+    statsFootnote: `נמדד ${measurement.measuredOn}. המחירונים נטענו לאחרונה ב־${measurement.ingestedOn}.`,
+    chainsLabel: "הרשתות שנטענות היום",
+    chains: [
+      "שופרסל",
+      "רמי לוי",
+      "קרפור",
+      "יוחננוף",
+      "טיב טעם",
+      "אושר עד",
+      "פרשמרקט",
+      "קשת טעמים",
+      "סטופ מרקט",
+      "סלח דבאח",
     ],
   },
-  example: {
-    id: "example",
-    eyebrow: "שיחה אמיתית, בלי עריכה",
-    title: "ככה נראית תוכנית קנייה אמיתית",
-    body: "רשימת ברביקיו בנווה עמל, הרצליה: הסוכן השווה חנויות באזור, בחר את הזולה ופירט מחיר לכל פריט.",
-    mapCaption: "השוואת חנויות סביב הכתובת. קארפור יצא הזול ביותר לסל הזה.",
-    tableCaption: "פירוט מלא: 14 פריטים תומחרו, בשר טרי ושקית קרח סומנו כחסרים.",
-    highlightStore: "קארפור קצנלסון 19, הרצליה",
-    highlightTotal: "₪267",
-    highlightNote: "סך הסל שתומחר, בלי בשר מהדלפק",
-  },
-  faq: {
-    id: "faq",
-    title: "שאלות נפוצות",
-    items: [
-      {
-        q: "כמה זה עולה?",
-        a: "בשלב הזה הגישה חינמית למשתמשים מוקדמים. כשנוסיף תוכניות בתשלום, מי שכבר מחובר יקבל הודעה מראש ותקופת מעבר.",
-      },
-      {
-        q: "מה קורה עם רשימת הקניות שלי?",
-        a: "הרשימה משמשת רק לבניית התוכנית. אנחנו שומרים לוגים תפעוליים לשיפור הדיוק, לא מוכרים נתונים ולא בונים פרופיל פרסומי.",
-      },
-      {
-        q: "עד כמה המחירים מעודכנים?",
-        a: "המחירונים הרשמיים נטענים כל יום, וכל מחיר נושא חותמת עדכון. מחיר בן יותר מיומיים מסומן ככזה בתשובה.",
-      },
-      {
-        q: "יש הגבלת שימוש?",
-        a: "יש הגבלת קצב הוגנת לכל מפתח, שמספיקה בנוחות לשימוש אישי ולפיתוח. לשימוש כבד יותר, כתבו לנו.",
-      },
-      {
-        q: "אפשר להריץ לבד במקום להתחבר לשרת שלנו?",
-        a: "כן. הפרויקט פתוח, וה־README במאגר מסביר איך מריצים עותק עצמאי עם הנתונים שלכם.",
-      },
+
+  connect: {
+    id: "connect",
+    eyebrow: "חיבור",
+    title: "שתי דקות, בלי SDK",
+    body: "Super MCP הוא שרת MCP מרוחק. מדביקים בלוק אחד לקובץ ההגדרות של הלקוח, מחליפים את המפתח, והעוזר מקבל את הכלים. אין ספרייה להתקין ואין קוד לכתוב. אותה שכבה זמינה גם כ־REST.",
+    clientsLabel: "נבדק מול",
+    clients,
+    clientsNote: "וכל לקוח אחר שמדבר MCP.",
+    jsonLabel: "mcp.json",
+    urlLabel: "כתובת השרת",
+    copyJson: "העתקת JSON",
+    copyUrl: "העתקת כתובת",
+    secretWarning: "אל תדביקו כאן מפתח אמיתי. הבלוק מגיע עם מציין להחלפה.",
+    toolsLabel: "שמונה כלים, מפתח אחד",
+    toolsHint: "רשימה שלמה נכנסת בקריאה אחת ל־optimize_basket. שאר הכלים לשורות בודדות ולבירורים.",
+    groups: [
+      { title: "תכנון סל", tools: ["optimize_basket"] },
+      { title: "מוצרים", tools: ["search_products", "resolve_products", "get_product", "suggest_substitutes"] },
+      { title: "מחירים", tools: ["compare_prices"] },
+      { title: "חנויות ומבצעים", tools: ["list_stores", "get_promotions"] },
     ],
+    proofCaption: "שיחה אמיתית בקלוד, בלי עריכה: 14 פריטים תומחרו, וחמישה סומנו כחסרים במקום להיעלם מהסל.",
+    proofImageSrc: "/example-chat-table.webp",
+    proofImageAlt: "צילום מסך מקלוד: טבלת מחירים לכל פריט ורשימת פריטים שסומנו כחסרים",
+    rateLimit: "מגבלת קצב הוגנת לכל מפתח, שמספיקה לשימוש אישי ולפיתוח.",
   },
-  safety: {
-    id: "safety",
-    statement: "כשלא בטוח, שואל. לא מחליף בשקט.",
-    body: "כשיש כמה מוצרים דומים, הסוכן מציג את האפשרויות הזמינות בקרבת מקום, והבחירה נשארת אצלכם.",
-    imageSrc: "/story-safety.webp",
-    imageAlt: "מדף משקאות דומים, בחירה במקום החלפה שקטה",
-  },
+
   access: {
     id: "access",
-    title: "מוכנים לחבר סוכן?",
-    body: "השאירו אימייל ונחזור אליכם עם מפתח והוראות חיבור של שתי דקות, תוך יום עסקים.",
+    title: "חברו את זה לעוזר שלכם",
+    body: "השאירו אימייל ונחזור אליכם עם מפתח והוראות חיבור, תוך יום עסקים.",
     form: {
       emailLabel: "אימייל",
       emailPlaceholder: "you@example.com",
       useCaseLabel: "איך תשתמשו בזה? (לא חובה)",
       useCasePlaceholder: "למשל: סוכן קניות לבית ב־Claude",
-      submit: "בקשו גישה",
+      submit: "בקשו מפתח",
       submitting: "שולחים...",
       successTitle: "הבקשה התקבלה",
       successBody: "נחזור אליכם עם מפתח והוראות חיבור תוך יום עסקים.",
       error: "משהו השתבש בשליחה. נסו שוב עוד רגע.",
       rateLimited: "נשלחו יותר מדי בקשות מכתובת זו. נסו שוב בעוד שעה.",
     },
-    alreadyHaveKey: "כבר יש לכם מפתח?",
-    alreadyHaveKeyHint:
-      "הדביקו את התבנית ל־mcp.json והחליפו את המציין. אל תדביקו סוד כאן.",
     selfHost: "אירוח עצמי",
-    selfHostHint: "אפשר גם להריץ אצלכם. ראו את ה־README במאגר.",
+    selfHostHint: "הפרויקט פתוח. אפשר להריץ עותק משלכם עם הנתונים שלכם.",
     selfHostCta: "לתיעוד במאגר",
-    copyJson: "העתקת JSON",
-    copyUrl: "העתקת URL",
-    imageSrc: "/story-access.webp",
-    imageAlt: "אריזת מצרכים טריים",
   },
-  developer: {
-    id: "developers",
-    summary: "פרטים למפתחים",
-    title: "MCP ו־REST על אותה שכבה",
-    body: "אותם כלים, מפתח אחד. החיבור דרך MCP או REST.",
-    groups: [
-      { title: "תכנון סל", tools: ["optimize_basket"] },
+
+  faq: {
+    id: "faq",
+    title: "שאלות נפוצות",
+    items: [
       {
-        title: "מוצרים",
-        tools: ["search_products", "resolve_products", "get_product", "suggest_substitutes"],
-      },
-      { title: "מחירים", tools: ["compare_prices"] },
-      { title: "חנויות ומבצעים", tools: ["list_stores", "get_promotions"] },
-    ],
-  },
-  trust: {
-    body: "מחירים משתנים. כל מחיר אצלנו נושא מועד עדכון, ומה שלא מתומחר מסומן כחסר.",
-    links: [
-      {
-        href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/DATA.md",
-        label: "מקורות נתונים",
+        q: "באילו עוזרים זה עובד?",
+        a: "בכל לקוח שתומך בפרוטוקול MCP. בדקנו מול Claude, Cursor, ChatGPT ו־Gemini. אם ללקוח שלכם יש קובץ הגדרות של שרתי MCP, הבלוק שבסעיף החיבור מספיק. מי שמעדיף לא לעבור דרך MCP יכול לקרוא לאותם כלים ב־REST.",
       },
       {
-        href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/SECURITY.md",
-        label: "אבטחה",
+        q: "כמה זה עולה?",
+        a: "בשלב הזה הגישה חינמית למשתמשים מוקדמים. כשנוסיף תוכניות בתשלום, מי שכבר מחובר יקבל הודעה מראש ותקופת מעבר.",
       },
       {
-        href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/README.md",
-        label: "אירוח מול self-host",
+        q: "עד כמה המחירים מעודכנים?",
+        a: "המחירונים הרשמיים נטענים כל יום, וכל מחיר נושא חותמת עדכון. שימו לב שיש הבדל בין המועד שבו ראינו את הפריט לאחרונה לבין המועד שבו הרשת שינתה את המחיר. מחיר שלא השתנה שבועות הוא מחיר יציב, לא מחיר מיושן.",
+      },
+      {
+        q: "מה עם מחירי מועדון וקופונים?",
+        a: "שורה שמתומחרת במחיר מועדון או בקופון מסומנת ככזו, והתוכנית אומרת כמה שורות תלויות בתנאי. אפשר גם לבקש תמחור בלי מועדון ובלי קופונים, כדי לקבל מחיר שכל אחד משלם.",
+      },
+      {
+        q: "מה קורה עם רשימת הקניות שלי?",
+        a: "הרשימה משמשת רק לבניית התוכנית. אנחנו שומרים לוגים תפעוליים לשיפור הדיוק, לא מוכרים נתונים ולא בונים פרופיל פרסומי.",
+      },
+      {
+        q: "אפשר להריץ לבד במקום להתחבר לשרת שלכם?",
+        a: "כן. הפרויקט פתוח, וה־README במאגר מסביר איך מריצים עותק עצמאי עם הנתונים שלכם.",
       },
     ],
   },
+
   footer: {
-    note: "Super MCP · תוכנית קנייה אמינה לסוכני AI",
+    note: "Super MCP · מחירי הסופרמרקטים בישראל, דרך MCP",
+    disclosure: "כל מחיר נושא את המועד שבו נראה לאחרונה במחירון הרשת. מה שלא תומחר מסומן כחסר.",
+    links: [
+      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/DATA.md", label: "מקורות נתונים" },
+      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/SECURITY.md", label: "אבטחה" },
+      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/README.md", label: "אירוח עצמי" },
+    ],
   },
 } as const;
 

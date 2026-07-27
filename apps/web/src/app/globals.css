@@ -1,33 +1,88 @@
 @import "tailwindcss";
 
+/*
+ * Design system: "operational ledger".
+ *
+ * The page argues with numbers, so the type system treats figures as a
+ * first-class citizen: one mono face, always tabular, always aligned. The
+ * recurring visual motif is the hairline rule, not the rounded card, because
+ * the artifact this product actually produces is a price list.
+ *
+ * Neutrals are tinted toward the brand hue (230) rather than pure gray, and
+ * paper is never #fff. Both are deliberate: untinted neutrals next to a cyan
+ * accent read as dirty.
+ */
+
 @theme {
-  --color-paper: oklch(1 0 0);
-  --color-ink: oklch(0.28 0.02 250);
-  --color-ink-muted: oklch(0.48 0.02 250);
-  /* Darker cyan for AA white-on-accent CTAs */
-  --color-accent: oklch(0.5 0.14 230);
-  --color-accent-deep: oklch(0.42 0.13 230);
-  --color-olive: oklch(0.45 0.08 230);
-  --color-olive-soft: oklch(0.96 0.025 230);
-  /* Bright band for hero visual (not used as text contrast surface) */
-  --color-brand-band: oklch(0.72 0.12 230);
-  --color-brand-band-deep: oklch(0.58 0.14 230);
-  --color-data: oklch(0.22 0.025 250);
-  --color-data-fg: oklch(0.98 0.005 230);
-  --color-data-muted: oklch(0.72 0.03 230);
-  --color-line: color-mix(in oklch, var(--color-accent) 16%, transparent);
-  --radius-lg: 20px;
-  --radius-xl: 28px;
+  /* Surfaces, all tinted toward the brand hue. */
+  --color-paper: oklch(0.994 0.002 230);
+  --color-paper-raised: oklch(1 0 0);
+  --color-paper-sunk: oklch(0.972 0.008 230);
+
+  /*
+   * Ink. Never pure black.
+   *
+   * `ink-faint` is the lightest tint that still clears WCAG AA (4.5:1) at 12px
+   * against all three light surfaces, measured: 5.07 on paper, 4.78 on sunk,
+   * 4.55 on accent-soft. It carries footnotes and figure captions, which is
+   * exactly the copy people squint at, so it is not allowed to go lighter.
+   */
+  --color-ink: oklch(0.22 0.022 250);
+  --color-ink-muted: oklch(0.47 0.021 250);
+  --color-ink-faint: oklch(0.53 0.018 250);
+
+  /* Accent. Deep enough to carry white text at AA. */
+  --color-accent: oklch(0.47 0.135 232);
+  --color-accent-deep: oklch(0.36 0.115 235);
+  --color-accent-soft: oklch(0.955 0.026 230);
+
+  /* The ledger band: the page's one colour block. */
+  --color-band: oklch(0.31 0.098 236);
+  --color-band-raised: oklch(0.36 0.098 236);
+  --color-band-ink: oklch(0.98 0.006 230);
+  --color-band-muted: oklch(0.79 0.031 230);
+  --color-band-line: oklch(0.48 0.075 236);
+
+  /* Semantic figures. A delta is not decoration, it carries sign. */
+  /* Same AA floor as ink-faint: this colour labels the missing line at 12px. */
+  --color-over: oklch(0.545 0.155 32);
+  --color-over-band: oklch(0.78 0.13 45);
+
+  /* Hairlines, the recurring motif. */
+  --color-line: oklch(0.89 0.011 230);
+  --color-line-strong: oklch(0.8 0.02 230);
+
+  --radius-lg: 16px;
+  --radius-xl: 24px;
   --radius-pill: 999px;
+
   --font-sans: var(--font-heebo), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-secular), var(--font-heebo), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/*
+ * Fluid type scale, ratio ~1.26 at the small end opening to ~1.33 at the
+ * large end so headlines gain more on a wide screen than body copy does.
+ */
+:root {
+  --step-0: clamp(0.9375rem, 0.92rem + 0.1vw, 1rem);
+  --step-1: clamp(1.0625rem, 1rem + 0.28vw, 1.1875rem);
+  --step-2: clamp(1.25rem, 1.16rem + 0.42vw, 1.5rem);
+  --step-3: clamp(1.5rem, 1.32rem + 0.85vw, 2rem);
+  --step-4: clamp(1.875rem, 1.55rem + 1.6vw, 2.875rem);
+  --step-5: clamp(2.375rem, 1.75rem + 3.1vw, 4.25rem);
+
+  /* Spacing rhythm. Sections vary on purpose; monotone padding reads flat. */
+  --space-section: clamp(4rem, 3rem + 4vw, 7.5rem);
+  --space-section-tight: clamp(2.75rem, 2.25rem + 2vw, 4.5rem);
 }
 
 html {
   background: var(--color-paper);
   color: var(--color-ink);
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -40,9 +95,123 @@ body {
   background: var(--color-paper);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-size: var(--step-0);
+  line-height: 1.65;
 }
 
 ::selection {
-  background: color-mix(in oklch, var(--color-accent) 28%, white);
+  background: var(--color-accent-soft);
   color: var(--color-ink);
+}
+
+/* Consistent, visible focus for keyboard users on every interactive surface. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/*
+ * Figures. Every published number on this page goes through this class, so a
+ * column of prices always aligns and never reflows as digits change.
+ */
+.figure {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.01em;
+}
+
+/*
+ * Currency and Latin-in-Hebrew runs. Hebrew is RTL but a price is LTR, so
+ * without an explicit direction the shekel sign lands on the wrong side.
+ */
+.ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Display headings: tight tracking, tighter leading, Secular One. */
+.display {
+  font-family: var(--font-display);
+  line-height: 1.06;
+  letter-spacing: -0.022em;
+  font-weight: 400;
+}
+
+/*
+ * Reveals, as progressive enhancement.
+ *
+ * The previous implementation animated from opacity 0 in JavaScript, which meant
+ * the copy was invisible until a client component hydrated and decided to show
+ * it. Under `prefers-reduced-motion` the hero headline stayed at opacity 0
+ * permanently. Anything that hides content by default and needs JS to reveal it
+ * is one hydration failure away from a blank marketing page.
+ *
+ * So: content is visible in the stylesheet. Motion is added only where the
+ * browser supports scroll-linked animation and the reader has not asked for
+ * less of it. No JavaScript is involved in either path.
+ */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The scroll reveal moves but never fades: see the note on `data-reveal` below. */
+@keyframes rise-in-opaque {
+  from {
+    transform: translateY(10px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /*
+   * One orchestrated page-load moment, two beats, above the fold only. Safe to
+   * fade: it is a plain timed animation that always runs to completion, with no
+   * dependency on scroll position or on JavaScript.
+   */
+  [data-enter] {
+    animation: rise-in 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  [data-enter="2"] {
+    animation-delay: 110ms;
+  }
+
+  /*
+   * Scroll reveals ride the view timeline, so there is no observer to miss an
+   * element and no stuck state. Where view timelines are unsupported the rule
+   * never applies and the content simply renders.
+   *
+   * Deliberately transform-only. A scroll-linked opacity fade leaves everything
+   * below the fold genuinely transparent, which means full-page screenshots,
+   * print, PDF export and any crawler that does not scroll all capture blank
+   * sections. Moving 10px costs nothing if it never plays; fading from zero
+   * costs the reader the page.
+   */
+  @supports (animation-timeline: view()) {
+    [data-reveal] {
+      animation: rise-in-opaque linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 60%;
+    }
+  }
+}
+
+/* Nothing animates on paper, and nothing arrives mid-transition. */
+@media print {
+  [data-enter],
+  [data-reveal] {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }

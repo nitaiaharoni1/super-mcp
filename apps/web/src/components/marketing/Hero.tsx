@@ -1,60 +1,147 @@
-import Image from "next/image";
-
 import { Container } from "@/components/shared/Container";
-import { MotionReveal } from "@/components/shared/MotionReveal";
+import { Reveal } from "@/components/shared/Reveal";
 import { TrackedAnchor } from "@/components/shared/TrackedAnchor";
 import { Button } from "@/components/ui/button";
 import { he } from "@/content/he";
 import { AnalyticsEvent } from "@/lib/analytics";
 
+/**
+ * The hero shows the product instead of describing it, as one real exchange:
+ * what a person typed, the tool the assistant reached for, and what came back.
+ * Every figure is from the measured basket in `he.ts`, and the missing line is
+ * shown rather than hidden, because "it tells you what it does not know" is the
+ * whole positioning.
+ */
 export function Hero() {
+  const { hero } = he;
+
   return (
     <section id="top" className="relative isolate overflow-hidden">
-      <Container className="pt-14 pb-10 text-center md:pt-20 md:pb-14">
-        <MotionReveal>
-          <p className="text-sm font-semibold text-[var(--color-accent)]">{he.hero.eyebrow}</p>
-          <h1 className="mx-auto mt-4 max-w-[22ch] font-[family-name:var(--font-secular)] text-[clamp(2.5rem,6vw,4rem)] leading-[1.08] tracking-[-0.02em] text-[var(--color-ink)]">
-            {he.hero.title}
-          </h1>
-          <p className="mx-auto mt-5 max-w-[36ch] text-base leading-7 text-[var(--color-ink-muted)] md:text-lg md:leading-8">
-            {he.hero.subtitle}
+      {/* One soft wash so the page does not open on flat white. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[70%] bg-[linear-gradient(to_bottom,var(--color-accent-soft),transparent)]"
+      />
+
+      <Container className="grid items-center gap-10 pt-[clamp(2.5rem,1.75rem+3.5vw,5rem)] pb-[var(--space-section-tight)] lg:grid-cols-[1.02fr_0.98fr] lg:gap-16">
+        <Reveal on="load" beat={1} className="max-w-[38rem]">
+          <p className="text-sm font-semibold tracking-wide text-[var(--color-accent)]">
+            {hero.eyebrow}
           </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+
+          <h1 className="display mt-5 text-[length:var(--step-5)]">
+            {hero.titleLines.map((line) => (
+              <span key={line} className="block">
+                {line}
+              </span>
+            ))}
+            <span className="block text-[var(--color-accent)]">{hero.titleAccent}</span>
+          </h1>
+
+          <p className="mt-6 max-w-[44ch] text-[length:var(--step-1)] leading-[1.6] text-[var(--color-ink-muted)]">
+            {hero.subtitle}
+          </p>
+
+          <div className="mt-8 flex flex-wrap items-center gap-x-7 gap-y-4">
             <Button asChild size="xl">
               <TrackedAnchor
                 href="#access"
                 event={AnalyticsEvent.MarketingCtaClicked}
                 eventProperties={{ cta_id: "request_access", location: "hero" }}
               >
-                {he.hero.primaryCta}
+                {hero.primaryCta}
               </TrackedAnchor>
             </Button>
-            <Button asChild size="lg" variant="outline">
-              <a href={he.hero.secondaryHref}>{he.hero.secondaryCta}</a>
+            <Button asChild variant="quiet">
+              <a href={hero.secondaryHref}>{hero.secondaryCta}</a>
             </Button>
           </div>
-        </MotionReveal>
 
-        <MotionReveal
-          delay={0.08}
-          className="relative mx-auto mt-12 aspect-[16/9] w-full max-w-3xl overflow-hidden rounded-[var(--radius-xl)] bg-[var(--color-brand-band)] shadow-[0_40px_80px_-40px_oklch(0.58_0.14_230_/_0.5)]"
-        >
-          <Image
-            src="/hero-basket.webp"
-            alt="סל מצרכים טריים על רקע תכלת"
-            fill
-            priority
-            sizes="(max-width: 768px) 100vw, 768px"
-            className="object-cover object-center"
-          />
-          <a
-            href={he.hero.secondaryHref}
-            className="absolute bottom-4 right-4 rounded-[var(--radius-pill)] bg-white/95 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] shadow-[0_8px_24px_-8px_oklch(0.3_0.05_230_/_0.45)] backdrop-blur-sm transition-transform hover:-translate-y-0.5"
-          >
-            {he.hero.proofChip}
-          </a>
-        </MotionReveal>
+          <div className="mt-9 border-t border-[var(--color-line)] pt-5">
+            <p className="text-xs text-[var(--color-ink-muted)]">{hero.clientsLabel}</p>
+            <ul className="mt-2.5 flex flex-wrap items-baseline gap-x-5 gap-y-2">
+              {hero.clients.map((client) => (
+                <li
+                  key={client}
+                  dir="ltr"
+                  className="text-sm font-semibold tracking-[-0.01em] text-[var(--color-ink)]"
+                >
+                  {client}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Reveal>
+
+        <Reveal on="load" beat={2}>
+          <ChatExchange />
+        </Reveal>
       </Container>
     </section>
+  );
+}
+
+/**
+ * A chat exchange, not a dashboard. No fake client chrome and no borrowed
+ * branding: a message the reader could have typed, the MCP tool call it
+ * triggered, and the answer. Showing the tool call is the shortest possible way
+ * to say "this is an MCP server" without a paragraph defining one.
+ */
+function ChatExchange() {
+  const { chat } = he.hero;
+
+  return (
+    <figure className="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-line)] bg-[var(--color-paper-raised)] p-4 shadow-[0_30px_70px_-45px_oklch(0.31_0.098_236/0.45)] md:p-5">
+      {/* What the person typed. */}
+      <div className="flex justify-start">
+        <p className="max-w-[92%] rounded-[var(--radius-lg)] rounded-tr-[6px] bg-[var(--color-accent-soft)] px-4 py-3 text-[0.9375rem] leading-[1.55] text-[var(--color-ink)]">
+          {chat.userMessage}
+        </p>
+      </div>
+
+      {/* The tool the assistant reached for. */}
+      <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[var(--radius-lg)] bg-[var(--color-paper-sunk)] px-3.5 py-2.5">
+        <span
+          aria-hidden
+          className="size-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+        />
+        <span dir="ltr" className="figure text-xs text-[var(--color-ink)]">
+          {chat.toolServer}
+          <span className="text-[var(--color-ink-faint)]"> · </span>
+          {chat.toolName}
+        </span>
+        <span className="ms-auto text-xs text-[var(--color-ink-muted)]">{chat.toolMeta}</span>
+      </div>
+
+      {/* What came back. */}
+      <div className="mt-3.5 px-1">
+        <p className="text-sm text-[var(--color-ink-muted)]">{chat.replyLead}</p>
+
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+          <div>
+            <p className="display text-[length:var(--step-3)]">{chat.planStore}</p>
+            <p className="mt-1 text-xs text-[var(--color-ink-muted)]">
+              {/* No `.ltr` here: "2.14 ק״מ" mixes digits with a Hebrew unit, and
+                  forcing the run LTR puts the unit first, reading "ק״מ 2.14". */}
+              <span className="figure">{chat.planDistance}</span>
+              <span className="px-1.5 text-[var(--color-ink-faint)]">·</span>
+              {chat.planDistancePrecision}
+            </p>
+          </div>
+          <p className="figure ltr text-[length:var(--step-4)] leading-none text-[var(--color-ink)]">
+            {chat.planTotal}
+          </p>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-[var(--color-line)] pt-3 text-xs">
+          <span className="text-[var(--color-ink-muted)]">{chat.planCoverage}</span>
+          <span className="inline-flex items-baseline gap-1.5 rounded-[var(--radius-pill)] bg-[color-mix(in_oklch,var(--color-over)_12%,transparent)] px-2.5 py-1 font-medium text-[var(--color-over)]">
+            {chat.planMissingLabel}
+            <span className="font-semibold">{chat.planMissing}</span>
+          </span>
+          <figcaption className="ms-auto text-[var(--color-ink-faint)]">{chat.footnote}</figcaption>
+        </div>
+      </div>
+    </figure>
   );
 }
