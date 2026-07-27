@@ -71,3 +71,28 @@ with the bars inset so they survive the rounding.
 `og.html` hard-codes the measured comparison and its date. Those figures also
 appear in `../src/content/he.ts`. If the measurement is refreshed, update both
 and keep the caveat line on the card: it gets shared without the page around it.
+
+## Third-party assistant marks
+
+`../src/components/shared/AssistantRow.tsx` inlines the Claude, ChatGPT (OpenAI),
+Gemini and Cursor marks. They come from [Simple Icons](https://simpleicons.org),
+whose SVG files are CC0. The trademarks themselves belong to Anthropic, OpenAI,
+Google and Anysphere.
+
+They appear only to state what SuperMCP connects to, which is what the labels
+next to them claim and nothing more. Do not use them in a way that implies any of
+those companies endorse or sponsor this.
+
+They are drawn in a single ink colour rather than each brand's own palette. Four
+competing brand colours, one of them a gradient, would fight the page and each
+other, and a flat row reads as a compatibility list rather than a badge wall.
+
+Names stay beside the marks because the audience is shoppers: the Anthropic burst
+and the Cursor cube are not yet recognised without a label.
+
+To refresh a mark:
+
+```bash
+curl -o icon.svg https://cdn.jsdelivr.net/npm/simple-icons@15/icons/claude.svg
+# then copy the single path `d` into AssistantRow.tsx
+```

@@ -1,3 +1,4 @@
+import { AssistantRow } from "@/components/shared/AssistantRow";
 import { Container } from "@/components/shared/Container";
 import { Reveal } from "@/components/shared/Reveal";
 import { TrackedAnchor } from "@/components/shared/TrackedAnchor";
@@ -60,18 +61,7 @@ export function Hero() {
           <p className="mt-3.5 text-xs text-[var(--color-ink-muted)]">{hero.ctaReassurance}</p>
 
           <div className="mt-9 border-t border-[var(--color-line)] pt-5">
-            <p className="text-xs text-[var(--color-ink-muted)]">{hero.assistantsLabel}</p>
-            <ul className="mt-2.5 flex flex-wrap items-baseline gap-x-5 gap-y-2">
-              {hero.assistants.map((name) => (
-                <li
-                  key={name}
-                  dir="ltr"
-                  className="text-sm font-semibold tracking-[-0.01em] text-[var(--color-ink)]"
-                >
-                  {name}
-                </li>
-              ))}
-            </ul>
+            <AssistantRow label={hero.assistantsLabel} />
           </div>
         </Reveal>
 

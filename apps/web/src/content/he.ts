@@ -27,9 +27,6 @@ const measurement = {
   radiusKm: 5,
 } as const;
 
-/** The assistants this works inside, named the way a shopper would say them. */
-const assistants = ["Claude", "ChatGPT", "Gemini", "Cursor"] as const;
-
 export const he = {
   meta: {
     title: "SuperMCP | אותם מוצרים, מחיר אחר בכל חנות",
@@ -63,7 +60,6 @@ export const he = {
     secondaryCta: "תראו השוואה אמיתית",
     secondaryHref: "#ledger",
     assistantsLabel: "עובד בתוך העוזרים שאתם כבר משתמשים בהם",
-    assistants,
 
     /*
      * The hero artifact is one real exchange: what a person typed, what the
@@ -191,7 +187,6 @@ export const he = {
       },
     ],
     assistantsLabel: "נבדק בתוך",
-    assistants,
     assistantsNote: "ובכל עוזר אחר שיודע להתחבר לכלים חיצוניים.",
     proofCaption: "שיחה אמיתית, בלי עריכה: 14 פריטים תומחרו, וחמישה סומנו כחסרים במקום להיעלם מהסל.",
     proofImageSrc: "/example-chat-table.webp",

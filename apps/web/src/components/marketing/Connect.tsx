@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 
+import { AssistantRow } from "@/components/shared/AssistantRow";
 import { CodeBlock } from "@/components/shared/CodeBlock";
 import { Container } from "@/components/shared/Container";
 import { CopyButton } from "@/components/shared/CopyButton";
@@ -58,21 +59,7 @@ export function Connect() {
             </ol>
 
             <div className="mt-9 border-t border-[var(--color-line)] pt-5">
-              <p className="text-xs text-[var(--color-ink-muted)]">{connect.assistantsLabel}</p>
-              <ul className="mt-2.5 flex flex-wrap items-baseline gap-x-5 gap-y-2">
-                {connect.assistants.map((name) => (
-                  <li
-                    key={name}
-                    dir="ltr"
-                    className="text-sm font-semibold tracking-[-0.01em] text-[var(--color-ink)]"
-                  >
-                    {name}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-2.5 text-xs text-[var(--color-ink-muted)]">
-                {connect.assistantsNote}
-              </p>
+              <AssistantRow label={connect.assistantsLabel} note={connect.assistantsNote} />
             </div>
           </Reveal>
 
