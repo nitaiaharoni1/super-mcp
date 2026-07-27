@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Heebo, Secular_One } from "next/font/google";
+import { Gabarito, Geist_Mono, Heebo, Secular_One } from "next/font/google";
 
 import { he } from "@/content/he";
 import { getSiteUrl } from "@/lib/mcp";
@@ -22,6 +22,21 @@ const heebo = Heebo({
 const geistMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-geist-mono",
+  display: "swap",
+});
+
+/*
+ * The wordmark gets its own face, used nowhere else on the page.
+ *
+ * Secular One was doing double duty as Hebrew display type and as the Latin
+ * wordmark, and its Latin is unremarkable, so "Super MCP" looked like body text
+ * in bold. Gabarito is a geometric grotesk with enough personality to read as a
+ * logo at one weight and one size.
+ */
+const gabarito = Gabarito({
+  weight: ["600", "700"],
+  subsets: ["latin"],
+  variable: "--font-wordmark",
   display: "swap",
 });
 
@@ -56,7 +71,7 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "Super MCP: אותו מוצר, שני מחירים, ואנחנו אומרים איזה",
+        alt: "SuperMCP: אותו מוצר, שני מחירים, ואנחנו אומרים איזה",
       },
     ],
   },
@@ -73,7 +88,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="he"
       dir="rtl"
-      className={`${secular.variable} ${heebo.variable} ${geistMono.variable}`}
+      className={`${secular.variable} ${heebo.variable} ${geistMono.variable} ${gabarito.variable}`}
     >
       <body className="min-h-[100dvh] antialiased">{children}</body>
     </html>

@@ -32,13 +32,13 @@ const assistants = ["Claude", "ChatGPT", "Gemini", "Cursor"] as const;
 
 export const he = {
   meta: {
-    title: "Super MCP | אותם מוצרים, מחיר אחר בכל חנות",
+    title: "SuperMCP | אותם מוצרים, מחיר אחר בכל חנות",
     description:
       "כותבים רשימת קניות בעברית לקלוד או ל־ChatGPT, ומקבלים תשובה ברורה: באיזו חנות לידכם הקנייה הזאת הכי זולה, כמה כל פריט עולה, ומה שאין בחנות מסומן. המחירים מגיעים מהמחירונים הרשמיים של 10 רשתות בישראל.",
   },
 
   header: {
-    brand: "Super MCP",
+    brand: "SuperMCP",
     nav: [
       { href: "#ledger", label: "ההשוואה" },
       { href: "#coverage", label: "המחירים" },
@@ -203,7 +203,7 @@ export const he = {
      */
     dev: {
       summary: "למפתחים: MCP, REST והרצה עצמאית",
-      body: "Super MCP הוא שרת MCP מרוחק. מדביקים את הבלוק לקובץ ההגדרות, מחליפים את המפתח, והכלים זמינים. אותה שכבה חשופה גם כ־REST, והפרויקט פתוח.",
+      body: "SuperMCP הוא שרת MCP מרוחק. מדביקים את הבלוק לקובץ ההגדרות, מחליפים את המפתח, והכלים זמינים. אותה שכבה חשופה גם כ־REST, והפרויקט פתוח.",
       jsonLabel: "mcp.json",
       urlLabel: "כתובת השרת",
       copyJson: "העתקת JSON",
@@ -275,7 +275,7 @@ export const he = {
   },
 
   footer: {
-    note: "Super MCP · השוואת מחירי סופר לעוזרי AI",
+    note: "SuperMCP · השוואת מחירי סופר לעוזרי AI",
     disclosure: "כל מחיר נושא את המועד שבו נראה לאחרונה במחירון הרשת. מה שלא תומחר מסומן כחסר.",
     links: [
       { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/DATA.md", label: "מאיפה המחירים" },
