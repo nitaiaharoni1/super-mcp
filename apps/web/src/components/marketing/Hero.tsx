@@ -60,15 +60,15 @@ export function Hero() {
           <p className="mt-3.5 text-xs text-[var(--color-ink-muted)]">{hero.ctaReassurance}</p>
 
           <div className="mt-9 border-t border-[var(--color-line)] pt-5">
-            <p className="text-xs text-[var(--color-ink-muted)]">{hero.clientsLabel}</p>
+            <p className="text-xs text-[var(--color-ink-muted)]">{hero.assistantsLabel}</p>
             <ul className="mt-2.5 flex flex-wrap items-baseline gap-x-5 gap-y-2">
-              {hero.clients.map((client) => (
+              {hero.assistants.map((name) => (
                 <li
-                  key={client}
+                  key={name}
                   dir="ltr"
                   className="text-sm font-semibold tracking-[-0.01em] text-[var(--color-ink)]"
                 >
-                  {client}
+                  {name}
                 </li>
               ))}
             </ul>
@@ -85,9 +85,9 @@ export function Hero() {
 
 /**
  * A chat exchange, not a dashboard. No fake client chrome and no borrowed
- * branding: a message the reader could have typed, the MCP tool call it
- * triggered, and the answer. Showing the tool call is the shortest possible way
- * to say "this is an MCP server" without a paragraph defining one.
+ * branding: a message the reader could have typed, what the assistant went and
+ * checked, and the answer. Showing a real tool run is what makes the page
+ * credible without asking a shopper to learn what a protocol is.
  */
 function ChatExchange() {
   const { chat } = he.hero;
@@ -101,18 +101,17 @@ function ChatExchange() {
         </p>
       </div>
 
-      {/* The tool the assistant reached for. */}
-      <div className="mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[var(--radius-lg)] bg-[var(--color-paper-sunk)] px-3.5 py-2.5">
-        <span
-          aria-hidden
-          className="size-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-        />
-        <span dir="ltr" className="figure text-xs text-[var(--color-ink)]">
-          {chat.toolServer}
-          <span className="text-[var(--color-ink-faint)]"> · </span>
+      {/* What the assistant went and did. Plain sentence first: a shopper reads
+          that and understands. The tool name underneath is for credibility, and
+          is the only place above the developer disclosure where it appears. */}
+      <div className="mt-3.5 rounded-[var(--radius-lg)] bg-[var(--color-paper-sunk)] px-3.5 py-2.5">
+        <p className="flex items-center gap-2.5 text-[0.8125rem] text-[var(--color-ink)]">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" />
+          {chat.toolLabel}
+        </p>
+        <p dir="ltr" className="figure mt-1 ps-[1rem] text-[0.6875rem] text-[var(--color-ink-faint)]">
           {chat.toolName}
-        </span>
-        <span className="ms-auto text-xs text-[var(--color-ink-muted)]">{chat.toolMeta}</span>
+        </p>
       </div>
 
       {/* What came back. */}

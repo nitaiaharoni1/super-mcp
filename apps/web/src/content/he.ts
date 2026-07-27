@@ -1,16 +1,21 @@
 /**
  * All page copy and every published figure in one place.
  *
- * Every number below was measured, not estimated. The catalog counts come from
- * the production catalog on 26.7.2026 (last feed ingest 21.7.2026). The basket
- * and the ledger come from one real `optimize_basket` call near Dizengoff
- * Center that compared 68 stores.
+ * Audience: a regular Israeli shopper who already talks to Claude or ChatGPT and
+ * is tired of guessing which supermarket is cheaper. NOT a developer. That
+ * decision drives the whole file.
  *
- * Three rules for editing this file:
- *   1. No claim without a number behind it, and no number we cannot re-measure.
- *   2. Say what the reader gets, not how we built it. Architecture words earn
- *      their place only in the connect section, where the reader came for them.
- *   3. No em dashes or en dashes. This copy is public. The Hebrew maqaf is fine.
+ * Four rules for editing:
+ *   1. Plain Hebrew. If a word only makes sense to someone who builds software
+ *      ("שרת", "SDK", "endpoint", "לקוח" in the API sense), it does not belong
+ *      above the developer disclosure in the connect section.
+ *   2. No claim without a number behind it, and no number we cannot re-measure.
+ *   3. Say what the reader gets, not how we built it.
+ *   4. No em dashes or en dashes. This copy is public. The Hebrew maqaf is fine.
+ *
+ * Every number below was measured on the production catalog on 26.7.2026 (last
+ * feed ingest 21.7.2026). The basket and the ledger come from one real
+ * `optimize_basket` call near Dizengoff Center that compared 68 stores.
  */
 
 /** The measured basket that the hero and the ledger both draw from. */
@@ -22,64 +27,62 @@ const measurement = {
   radiusKm: 5,
 } as const;
 
-/** MCP clients we name. Ordered by how established their MCP support is. */
-const clients = ["Claude", "Cursor", "ChatGPT", "Gemini"] as const;
+/** The assistants this works inside, named the way a shopper would say them. */
+const assistants = ["Claude", "ChatGPT", "Gemini", "Cursor"] as const;
 
 export const he = {
   meta: {
-    title: "Super MCP | מחירי הסופרמרקטים בישראל, בתוך העוזר שלכם",
+    title: "Super MCP | אותם מוצרים, מחיר אחר בכל חנות",
     description:
-      "שרת MCP שמחבר את Claude, Cursor, ChatGPT או Gemini למחירונים הרשמיים של 10 רשתות בישראל. רשימת קניות בעברית נכנסת, תוכנית קנייה מתומחרת יוצאת: איפה לקנות, כמה זה עולה, ומה שחסר מסומן כחסר.",
+      "כותבים רשימת קניות בעברית לקלוד או ל־ChatGPT, ומקבלים תשובה ברורה: באיזו חנות לידכם הקנייה הזאת הכי זולה, כמה כל פריט עולה, ומה שאין בחנות מסומן. המחירים מגיעים מהמחירונים הרשמיים של 10 רשתות בישראל.",
   },
 
   header: {
     brand: "Super MCP",
     nav: [
       { href: "#ledger", label: "ההשוואה" },
-      { href: "#coverage", label: "הנתונים" },
-      { href: "#connect", label: "חיבור" },
+      { href: "#coverage", label: "המחירים" },
+      { href: "#connect", label: "איך מחברים" },
     ],
-    cta: "קבלו מפתח",
+    cta: "התחילו עכשיו",
   },
 
   hero: {
-    eyebrow: "שרת MCP · מחירי סופרמרקט בישראל",
+    eyebrow: "השוואת מחירי סופר, בתוך העוזר שאתם כבר מדברים איתו",
     titleLines: ["אותו מוצר.", "שני מחירים."],
     titleAccent: "אנחנו אומרים איזה.",
     subtitle:
-      "מחברים את Super MCP לעוזר שאתם כבר עובדים איתו, כותבים רשימת קניות בעברית, ומקבלים תוכנית קנייה אמיתית: איפה לקנות, כמה זה עולה, ומה שאין במחירון מסומן כחסר במקום להיעלם.",
-    primaryCta: "קבלו מפתח",
+      "כותבים רשימת קניות בעברית ומקבלים תשובה ברורה: באיזו חנות לידכם הסל הזה הכי זול, כמה כל פריט עולה, ומה שאין בחנות מסומן במקום להיעלם.",
+    primaryCta: "התחילו עכשיו",
     /*
-     * The button asks for an email, which raises two objections on the spot:
-     * what does it cost, and how long am I waiting. Both are answered here
-     * rather than stuffed into the label, which keeps the label a clean verb.
+     * The button says "now" and the truth is "within a business day", so the
+     * gap gets closed here rather than left for the reader to discover in the
+     * form. It also answers the first question anyone asks: what does it cost.
      */
-    ctaReassurance: "חינם למשתמשים מוקדמים. תשובה תוך יום עסקים.",
-    secondaryCta: "ראו איך מחברים",
-    secondaryHref: "#connect",
-    clientsLabel: "עובד בכל לקוח שתומך ב־MCP",
-    clients,
+    ctaReassurance: "חינם. שולחים לכם הוראות חיבור תוך יום עסקים.",
+    secondaryCta: "תראו השוואה אמיתית",
+    secondaryHref: "#ledger",
+    assistantsLabel: "עובד בתוך העוזרים שאתם כבר משתמשים בהם",
+    assistants,
 
     /*
-     * The hero artifact is one real exchange: what a person typed, the tool the
-     * assistant reached for, and what came back. The tool call is shown on
-     * purpose. It is the clearest way to say "this is an MCP server" without a
-     * paragraph explaining what an MCP server is.
+     * The hero artifact is one real exchange: what a person typed, what the
+     * assistant went and checked, and what came back. The plain sentence leads;
+     * the tool name sits underneath it in small type, because a shopper does not
+     * need to read it but seeing a real tool run is what makes the page credible.
      */
     chat: {
-      userLabel: "אתם",
       userMessage:
         "תכנן לי קנייה שבועית ליד דיזנגוף סנטר: חלב 3% פעמיים, לחם פרוס, ביצים L, קוטג׳ 5% פעמיים, קילו עגבניות, קילו מלפפונים, קילו בננות, ארבעה יוגורטים, אורז ושתי חבילות פסטה.",
-      toolServer: "super-mcp",
-      toolName: "optimize_basket",
-      toolMeta: `10 פריטים · ${measurement.storesCompared} חנויות`,
-      replyLead: "הכי משתלם לסל הזה:",
+      toolLabel: `בודק את 10 הפריטים ב־${measurement.storesCompared} חנויות ליד הכתובת`,
+      toolName: "super-mcp · optimize_basket",
+      replyLead: "הכי זול לסל הזה:",
       planStore: "יוחננוף יד אליהו",
       planDistance: "2.14 ק״מ",
-      planDistancePrecision: "מדויק לכתובת הסניף",
+      planDistancePrecision: "לפי כתובת הסניף",
       planTotal: "₪99.96",
-      planCoverage: "9 מתוך 10 תומחרו",
-      planMissingLabel: "חסר במחירון",
+      planCoverage: "9 מתוך 10 פריטים תומחרו",
+      planMissingLabel: "לא נמצא בחנות",
       planMissing: "מלפפונים",
       footnote: `נמדד ${measurement.measuredOn}`,
     },
@@ -89,10 +92,10 @@ export const he = {
     id: "ledger",
     eyebrow: "אותו מוצר, שתי חנויות",
     title: "החנות שמתחת לבית גובה 13.7% יותר",
-    body: "השווינו רק מוצרים שבשתי החנויות הם אותו פריט בדיוק: אותו שם, אותה אריזה, אותו יצרן. בכל אחד מהם חוץ מהחלב, הסניף הקרוב יותר יקר יותר.",
+    body: "השווינו רק מוצרים שבשתי החנויות הם בדיוק אותו דבר: אותו שם, אותה אריזה, אותו יצרן. בכל אחד מהם חוץ מהחלב, החנות הקרובה יותר יקרה יותר.",
     columns: {
       item: "מוצר",
-      /** Full store names head the legend; the short forms head the table on narrow screens. */
+      /** Full store names head the legend; short forms head the table on narrow screens. */
       near: "שופרסל דיל תל אביב",
       nearShort: "שופרסל",
       nearMeta: "0.08 ק״מ",
@@ -111,7 +114,7 @@ export const he = {
     totals: { label: "חמישה מוצרים זהים", far: "₪63.92", near: "₪72.70", delta: "₪8.78" },
     deltaHeadline: "13.7%",
     deltaCaption: "יותר על אותם חמישה מוצרים, בשביל לחסוך 2 ק״מ הליכה",
-    footnote: `סל אחד שנמדד ב־${measurement.measuredOn} מול מחירונים שנטענו ב־${measurement.ingestedOn}. זו מדידה אחת, לא הבטחת חיסכון. מחירים זזים, ולכן כל מחיר אצלנו נושא את המועד שבו נראה לאחרונה.`,
+    footnote: `סל אחד שנמדד ב־${measurement.measuredOn} מול מחירונים שנטענו ב־${measurement.ingestedOn}. זו מדידה אחת ולא הבטחת חיסכון. מחירים זזים, ולכן כל מחיר אצלנו נושא את המועד שבו נראה לאחרונה.`,
   },
 
   integrity: {
@@ -119,37 +122,37 @@ export const he = {
     title: "למה אפשר לסמוך על המספר הזה",
     lead: "השוואת מחירים נשברת בשלוש נקודות, ובכל אחת מהן קל להחליק ניחוש שנראה כמו תשובה. בחרנו להגיד מה אנחנו לא יודעים.",
     question: {
-      label: "שאלה אמיתית שהסוכן החזיר",
+      label: "שאלה אמיתית שחזרה מהעוזר",
       text: "יש קולה בבקבוק 1.5 ליטר וגם בשישיית פחיות ליד הכתובת. מה להשוות?",
-      caption: "כשכמה מוצרים מתאימים, הסוכן שואל. הוא לא מחליף בשקט ומקווה שלא תשימו לב.",
+      caption: "כשכמה מוצרים מתאימים לרשימה, שואלים אתכם. לא מחליפים בשקט ומקווים שלא תשימו לב.",
     },
     points: [
       {
-        title: "מוצר זהה, לא מוצר דומה",
-        body: "אותו פריט מופיע בשם אחר בכל מחירון רשת. אנחנו מאחדים אותם לפריט אחד ומוודאים שהקטגוריה, הווריאנט וגודל האריזה תואמים. בשר טחון לא מושווה לקציצה צמחית, וקוטג׳ 5% לא מושווה ל־3%.",
+        title: "אותו מוצר, לא מוצר דומה",
+        body: "אותו פריט מופיע בשם אחר בכל רשת. אנחנו מחברים אותם לפריט אחד ובודקים שזה אותו סוג מוצר, אותו טעם ואותו גודל אריזה. בשר טחון לא מושווה לקציצה צמחית, וקוטג׳ 5% לא מושווה ל־3%.",
       },
       {
-        title: "חסר נשאר חסר",
-        body: "פריט שלא מופיע במחירון הסניף מסומן כחסר, והתוכנית אומרת כמה שורות תומחרו מתוך כמה. חנות לא תיראה זולה רק מפני שהיא לא מוכרת את הפריט היקר.",
+        title: "מה שחסר נשאר חסר",
+        body: "פריט שלא מופיע במחירון של החנות מסומן כחסר, והתשובה אומרת כמה פריטים תומחרו מתוך כמה. חנות לא תיראה זולה רק מפני שהיא לא מוכרת את הפריט היקר.",
       },
       {
-        title: "מרחק שנמדד, לא מרחק שנוח לנו",
-        body: "לסניף עם כתובת מלאה יש מרחק מדויק. סניף שפורסם עם שם עיר בלבד מסומן כמשוער ונושא את טווח אי הוודאות שלו, במקום להתחזות לחנות שנמצאת ליד הבית.",
+        title: "מרחק אמיתי, לא מרחק שנוח לנו",
+        body: "לחנות עם כתובת מלאה יש מרחק מדויק. חנות שהרשת פרסמה עם שם עיר בלבד מקבלת מרחק משוער ואנחנו אומרים את זה, במקום להציג אותה כאילו היא ליד הבית.",
       },
     ],
   },
 
   coverage: {
     id: "coverage",
-    eyebrow: "הנתונים",
+    eyebrow: "המחירים",
     title: "כל המחירונים הרשמיים, במקום אחד",
-    body: "רשתות השיווק בישראל מחויבות לפרסם מחירונים מלאים לפי חוק שקיפות המחירים. אנחנו טוענים אותם כל יום, מאחדים מוצרים וסניפים, ושומרים לכל מחיר את המועד שבו נראה לאחרונה. מחירון רשמי של הרשת, לא גרידה מאפליקציות.",
+    body: "רשתות השיווק בישראל חייבות לפרסם את המחירונים המלאים שלהן לפי חוק שקיפות המחירים. אנחנו טוענים אותם כל יום, מחברים בין אותם מוצרים בין הרשתות, ושומרים לכל מחיר את המועד שבו ראינו אותו. זה המחירון הרשמי של הרשת, לא מה שמישהו העתיק מאפליקציה.",
     stats: [
       { value: "10", label: "רשתות" },
       { value: "880", label: "סניפים" },
       { value: "156", label: "עיירות וערים" },
       { value: "122,575", label: "מוצרים" },
-      { value: "6.7M", label: "מחירי סניף" },
+      { value: "6.7M", label: "מחירים" },
       { value: "1.07M", label: "מבצעים" },
     ],
     statsFootnote: `נמדד ${measurement.measuredOn}. המחירונים נטענו לאחרונה ב־${measurement.ingestedOn}.`,
@@ -170,51 +173,74 @@ export const he = {
 
   connect: {
     id: "connect",
-    eyebrow: "חיבור",
-    title: "שתי דקות, בלי SDK",
-    body: "Super MCP הוא שרת MCP מרוחק. מדביקים בלוק אחד לקובץ ההגדרות של הלקוח, מחליפים את המפתח, והעוזר מקבל את הכלים. אין ספרייה להתקין ואין קוד לכתוב. אותה שכבה זמינה גם כ־REST.",
-    clientsLabel: "נבדק מול",
-    clients,
-    clientsNote: "וכל לקוח אחר שמדבר MCP.",
-    jsonLabel: "mcp.json",
-    urlLabel: "כתובת השרת",
-    copyJson: "העתקת JSON",
-    copyUrl: "העתקת כתובת",
-    secretWarning: "אל תדביקו כאן מפתח אמיתי. הבלוק מגיע עם מציין להחלפה.",
-    toolsLabel: "שמונה כלים, מפתח אחד",
-    toolsHint: "רשימה שלמה נכנסת בקריאה אחת ל־optimize_basket. שאר הכלים לשורות בודדות ולבירורים.",
-    groups: [
-      { title: "תכנון סל", tools: ["optimize_basket"] },
-      { title: "מוצרים", tools: ["search_products", "resolve_products", "get_product", "suggest_substitutes"] },
-      { title: "מחירים", tools: ["compare_prices"] },
-      { title: "חנויות ומבצעים", tools: ["list_stores", "get_promotions"] },
+    eyebrow: "איך מחברים",
+    title: "שלושה צעדים, פעם אחת",
+    body: "מחברים פעם אחת, ומאז פשוט כותבים רשימת קניות לעוזר כמו שכותבים לחבר. אין מה להתקין ואין באיזו אפליקציה חדשה להתרגל.",
+    steps: [
+      {
+        title: "משאירים אימייל",
+        body: "אנחנו שולחים לכם קוד חיבור אישי והוראות, תוך יום עסקים.",
+      },
+      {
+        title: "מדביקים פעם אחת",
+        body: "ההוראות הן העתק־הדבק לתוך ההגדרות של קלוד או ChatGPT. לוקח שתי דקות, ולא צריך לדעת לתכנת.",
+      },
+      {
+        title: "כותבים רשימה",
+        body: "״תכנן לי קנייה ליד הבית״, בעברית רגילה. התשובה חוזרת עם חנות, מחיר לכל פריט, ומה שחסר.",
+      },
     ],
-    proofCaption: "שיחה אמיתית בקלוד, בלי עריכה: 14 פריטים תומחרו, וחמישה סומנו כחסרים במקום להיעלם מהסל.",
+    assistantsLabel: "נבדק בתוך",
+    assistants,
+    assistantsNote: "ובכל עוזר אחר שיודע להתחבר לכלים חיצוניים.",
+    proofCaption: "שיחה אמיתית, בלי עריכה: 14 פריטים תומחרו, וחמישה סומנו כחסרים במקום להיעלם מהסל.",
     proofImageSrc: "/example-chat-table.webp",
-    proofImageAlt: "צילום מסך מקלוד: טבלת מחירים לכל פריט ורשימת פריטים שסומנו כחסרים",
-    rateLimit: "מגבלת קצב הוגנת לכל מפתח, שמספיקה לשימוש אישי ולפיתוח.",
+    proofImageAlt: "צילום מסך של שיחה: טבלת מחירים לכל פריט ורשימת פריטים שסומנו כחסרים",
+
+    /*
+     * Everything technical lives behind one disclosure. A shopper never opens it;
+     * someone wiring this into their own tooling finds it immediately.
+     */
+    dev: {
+      summary: "למפתחים: MCP, REST והרצה עצמאית",
+      body: "Super MCP הוא שרת MCP מרוחק. מדביקים את הבלוק לקובץ ההגדרות, מחליפים את המפתח, והכלים זמינים. אותה שכבה חשופה גם כ־REST, והפרויקט פתוח.",
+      jsonLabel: "mcp.json",
+      urlLabel: "כתובת השרת",
+      copyJson: "העתקת JSON",
+      copyUrl: "העתקת כתובת",
+      secretWarning: "אל תדביקו כאן מפתח אמיתי. הבלוק מגיע עם מציין להחלפה.",
+      toolsLabel: "שמונה כלים, מפתח אחד",
+      toolsHint: "רשימה שלמה נכנסת בקריאה אחת ל־optimize_basket. שאר הכלים לשורות בודדות ולבירורים.",
+      groups: [
+        { title: "תכנון סל", tools: ["optimize_basket"] },
+        { title: "מוצרים", tools: ["search_products", "resolve_products", "get_product", "suggest_substitutes"] },
+        { title: "מחירים", tools: ["compare_prices"] },
+        { title: "חנויות ומבצעים", tools: ["list_stores", "get_promotions"] },
+      ],
+      rateLimit: "מגבלת קצב הוגנת לכל מפתח, שמספיקה לשימוש אישי ולפיתוח.",
+      selfHost: "אירוח עצמי",
+      selfHostHint: "אפשר להריץ עותק משלכם עם הנתונים שלכם.",
+      selfHostCta: "להוראות ההרצה",
+    },
   },
 
   access: {
     id: "access",
-    title: "חברו את Super MCP לעוזר שלכם",
-    body: "השאירו אימייל ונחזור אליכם עם מפתח והוראות חיבור בשתי דקות, תוך יום עסקים.",
+    title: "רוצים לנסות על הקנייה הבאה?",
+    body: "משאירים אימייל, ואנחנו חוזרים אליכם עם קוד חיבור והוראות פשוטות, תוך יום עסקים.",
     form: {
       emailLabel: "אימייל",
       emailPlaceholder: "you@example.com",
-      useCaseLabel: "איך תשתמשו בזה? (לא חובה)",
-      useCasePlaceholder: "למשל: סוכן קניות לבית ב־Claude",
-      submit: "שלחו לי מפתח",
+      useCaseLabel: "איפה אתם קונים בדרך כלל? (לא חובה)",
+      useCasePlaceholder: "למשל: שופרסל בהרצליה, קנייה שבועית למשפחה",
+      submit: "שלחו לי הוראות",
       submitting: "שולחים...",
-      reassurance: "בלי כרטיס אשראי. אימייל אחד, ואפשר להפסיק מתי שתרצו.",
-      successTitle: "הבקשה התקבלה",
-      successBody: "נחזור אליכם עם מפתח והוראות חיבור תוך יום עסקים.",
+      reassurance: "חינם. בלי כרטיס אשראי, ואפשר להפסיק מתי שתרצו.",
+      successTitle: "קיבלנו, תודה",
+      successBody: "נחזור אליכם במייל עם קוד חיבור והוראות, תוך יום עסקים.",
       error: "משהו השתבש בשליחה. נסו שוב עוד רגע.",
       rateLimited: "נשלחו יותר מדי בקשות מכתובת זו. נסו שוב בעוד שעה.",
     },
-    selfHost: "אירוח עצמי",
-    selfHostHint: "הפרויקט פתוח. אפשר להריץ עותק משלכם עם הנתונים שלכם.",
-    selfHostCta: "להוראות ההרצה",
   },
 
   faq: {
@@ -222,39 +248,39 @@ export const he = {
     title: "שאלות נפוצות",
     items: [
       {
-        q: "באילו עוזרים זה עובד?",
-        a: "בכל לקוח שתומך בפרוטוקול MCP. בדקנו מול Claude, Cursor, ChatGPT ו־Gemini. אם ללקוח שלכם יש קובץ הגדרות של שרתי MCP, הבלוק שבסעיף החיבור מספיק. מי שמעדיף לא לעבור דרך MCP יכול לקרוא לאותם כלים ב־REST.",
+        q: "צריך לדעת לתכנת?",
+        a: "לא. החיבור הוא העתקה של בלוק אחד לתוך ההגדרות של העוזר, ואנחנו שולחים לכם בדיוק מה להעתיק ולאן. מהרגע הזה מדברים בעברית רגילה.",
+      },
+      {
+        q: "עם אילו עוזרים זה עובד?",
+        a: "בדקנו בתוך Claude, ChatGPT, Gemini ו־Cursor. באופן כללי זה עובד בכל עוזר שיודע להתחבר לכלים חיצוניים. אם לעוזר שלכם יש מסך של חיבורים או כלים, זה יעבוד.",
       },
       {
         q: "כמה זה עולה?",
-        a: "בשלב הזה הגישה חינמית למשתמשים מוקדמים. כשנוסיף תוכניות בתשלום, מי שכבר מחובר יקבל הודעה מראש ותקופת מעבר.",
+        a: "בשלב הזה חינם למשתמשים הראשונים. אם נוסיף בעתיד תוכניות בתשלום, מי שכבר מחובר יקבל הודעה מראש ותקופת מעבר.",
       },
       {
-        q: "עד כמה המחירים מעודכנים?",
-        a: "המחירונים הרשמיים נטענים כל יום, וכל מחיר נושא חותמת עדכון. שימו לב שיש הבדל בין המועד שבו ראינו את הפריט לאחרונה לבין המועד שבו הרשת שינתה את המחיר. מחיר שלא השתנה שבועות הוא מחיר יציב, לא מחיר מיושן.",
+        q: "המחירים באמת מעודכנים?",
+        a: "המחירונים הרשמיים נטענים כל יום, וכל מחיר נושא את המועד שבו ראינו אותו. שימו לב שיש הבדל בין המועד שראינו את הפריט לבין המועד שבו הרשת שינתה את המחיר: מחיר שלא השתנה שבועות הוא מחיר יציב, לא מחיר מיושן.",
       },
       {
         q: "מה עם מחירי מועדון וקופונים?",
-        a: "שורה שמתומחרת במחיר מועדון או בקופון מסומנת ככזו, והתוכנית אומרת כמה שורות תלויות בתנאי. אפשר גם לבקש תמחור בלי מועדון ובלי קופונים, כדי לקבל מחיר שכל אחד משלם.",
+        a: "פריט שהמחיר שלו תלוי בכרטיס מועדון או בקופון מסומן, והתשובה אומרת כמה פריטים תלויים בתנאי כזה. אפשר גם לבקש מחיר בלי מועדון ובלי קופונים, כדי לראות מה כל אחד משלם בקופה.",
       },
       {
         q: "מה קורה עם רשימת הקניות שלי?",
-        a: "הרשימה משמשת רק לבניית התוכנית. אנחנו שומרים לוגים תפעוליים לשיפור הדיוק, לא מוכרים נתונים ולא בונים פרופיל פרסומי.",
-      },
-      {
-        q: "אפשר להריץ לבד במקום להתחבר לשרת שלכם?",
-        a: "כן. הפרויקט פתוח, וה־README במאגר מסביר איך מריצים עותק עצמאי עם הנתונים שלכם.",
+        a: "היא משמשת רק כדי לבנות לכם את התשובה. אנחנו שומרים רשומות תפעוליות כדי לשפר את הדיוק, לא מוכרים נתונים ולא בונים עליכם פרופיל פרסומי.",
       },
     ],
   },
 
   footer: {
-    note: "Super MCP · מחירי הסופרמרקטים בישראל, דרך MCP",
+    note: "Super MCP · השוואת מחירי סופר לעוזרי AI",
     disclosure: "כל מחיר נושא את המועד שבו נראה לאחרונה במחירון הרשת. מה שלא תומחר מסומן כחסר.",
     links: [
-      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/DATA.md", label: "מקורות נתונים" },
-      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/SECURITY.md", label: "אבטחה" },
-      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/README.md", label: "אירוח עצמי" },
+      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/DATA.md", label: "מאיפה המחירים" },
+      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/SECURITY.md", label: "אבטחה ופרטיות" },
+      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/README.md", label: "למפתחים" },
     ],
   },
 } as const;
