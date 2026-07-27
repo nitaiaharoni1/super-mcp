@@ -1,4 +1,5 @@
 import { Container } from "@/components/shared/Container";
+import { Logo } from "@/components/shared/Logo";
 import { TrackedAnchor } from "@/components/shared/TrackedAnchor";
 import { Button } from "@/components/ui/button";
 import { he } from "@/content/he";
@@ -15,12 +16,8 @@ export function SiteHeader() {
         דלגו לתוכן
       </a>
       <Container className="flex h-full items-center gap-6">
-        <a
-          className="display text-lg text-[var(--color-ink)]"
-          href="#top"
-          aria-label={he.header.brand}
-        >
-          <span dir="ltr">{he.header.brand}</span>
+        <a href="#top" aria-label={he.header.brand}>
+          <Logo />
         </a>
 
         <nav

@@ -21,3 +21,11 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  # Public origin of this site. Sets metadataBase so og:image resolves to an
+  # absolute URL for link previews. Stored as a secret only because docs/DEPLOY.md
+  # keeps real hosts out of the public tree, not because the value is sensitive.
+  - variable: NEXT_PUBLIC_SITE_URL
+    secret: NEXT_PUBLIC_SITE_URL
+    availability:
+      - BUILD
+      - RUNTIME

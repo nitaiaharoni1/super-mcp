@@ -89,6 +89,8 @@ export function AccessRequestForm() {
           className="resize-y rounded-[var(--radius-lg)] border border-[var(--color-line-strong)] bg-[var(--color-paper-raised)] px-4 py-3 text-sm leading-6 text-[var(--color-ink)] placeholder:text-[var(--color-ink-faint)]"
         />
       </div>
+      <p className="text-xs leading-5 text-[var(--color-ink-muted)]">{copy.reassurance}</p>
+
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" size="lg" disabled={status === "submitting"}>
           {status === "submitting" ? copy.submitting : copy.submit}

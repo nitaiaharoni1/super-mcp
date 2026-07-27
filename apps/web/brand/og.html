@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Secular+One&family=Heebo:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --band: #00355a;
+    --band-raised: #0b4370;
+    --band-ink: #f5f9fc;
+    --band-muted: #a7bfcb;
+    --band-line: #2c6790;
+    --over: #fc9b6f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; }
+  body {
+    background: var(--band);
+    color: var(--band-ink);
+    font-family: "Heebo", sans-serif;
+    display: grid;
+    grid-template-columns: 1.04fr 0.96fr;
+    align-items: center;
+    gap: 56px;
+    padding: 64px 72px;
+    overflow: hidden;
+    position: relative;
+  }
+  /* Same soft wash as the site hero, so the card feels like the page. */
+  body::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(120% 90% at 88% 8%, rgba(120,190,235,.18), transparent 60%);
+    pointer-events: none;
+  }
+  .lockup { display: flex; align-items: center; gap: 14px; }
+  .wordmark {
+    direction: ltr;
+    font-family: "Secular One", sans-serif;
+    font-size: 30px;
+    letter-spacing: -0.02em;
+  }
+  h1 {
+    font-family: "Secular One", sans-serif;
+    font-size: 68px;
+    line-height: 1.04;
+    letter-spacing: -0.025em;
+    margin-top: 34px;
+  }
+  h1 .answer { color: #7fc4ea; display: block; }
+  .proof {
+    margin-top: 30px;
+    padding-top: 22px;
+    border-top: 1px solid var(--band-line);
+    font-size: 21px;
+    line-height: 1.5;
+    color: var(--band-muted);
+    max-width: 30ch;
+  }
+  /* The comparison, which is also what the mark in the corner is a picture of. */
+  .compare { display: grid; gap: 26px; }
+  .row { display: grid; gap: 10px; }
+  .row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+  .store { font-size: 22px; font-weight: 500; }
+  .total {
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+    font-size: 40px;
+    letter-spacing: -0.01em;
+  }
+  .bar { height: 16px; border-radius: 999px; }
+  .bar-win { background: var(--band-ink); width: 62%; }
+  .bar-lose { background: rgba(245,249,252,.42); width: 100%; }
+  .meta { font-size: 17px; color: var(--band-muted); }
+  .delta {
+    margin-top: 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding-top: 22px;
+    border-top: 1px solid var(--band-line);
+  }
+  .delta-figure {
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+    font-size: 52px;
+    line-height: 1;
+    color: var(--over);
+  }
+  .delta-caption { font-size: 17px; line-height: 1.45; color: var(--band-muted); }
+  .caveat { margin-top: 16px; font-size: 14px; color: var(--band-muted); opacity: .78; }
+</style>
+</head>
+<body>
+  <div>
+    <div class="lockup">
+      <!-- The accent tile (#006598) is lighter than the band (#00355a), so it
+           reads here and stays identical to the favicon. -->
+      <svg width="40" height="40" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7.5" fill="#006598"/>
+        <rect x="7" y="10.25" width="18" height="3.5" rx="1.75" fill="#fff" opacity=".45"/>
+        <rect x="14" y="18.25" width="11" height="3.5" rx="1.75" fill="#fff"/>
+      </svg>
+      <span class="wordmark">Super MCP</span>
+    </div>
+
+    <h1>
+      אותו מוצר.<br>שני מחירים.
+      <span class="answer">אנחנו אומרים איזה.</span>
+    </h1>
+
+    <p class="proof">שרת MCP למחירי הסופרמרקטים בישראל. 10 רשתות, 880 סניפים, 6.7 מיליון מחירים עם חותמת עדכון.</p>
+  </div>
+
+  <div class="compare">
+    <div class="row">
+      <div class="row-head">
+        <span class="store">יוחננוף יד אליהו</span>
+        <span class="total">₪63.92</span>
+      </div>
+      <div class="bar bar-win"></div>
+      <span class="meta">2.14 ק״מ</span>
+    </div>
+
+    <div class="row">
+      <div class="row-head">
+        <span class="store">שופרסל דיל תל אביב</span>
+        <span class="total">₪72.70</span>
+      </div>
+      <div class="bar bar-lose"></div>
+      <span class="meta">0.08 ק״מ</span>
+    </div>
+
+    <div class="delta">
+      <span class="delta-figure">+13.7%</span>
+      <span class="delta-caption">על חמישה מוצרים זהים,<br>בסניף הקרוב יותר</span>
+    </div>
+
+    <!-- The card gets shared without the page, so the caveat travels with it. -->
+    <p class="caveat">מדידה אחת, 26.7.2026. לא הבטחת חיסכון.</p>
+  </div>
+</body>
+</html>

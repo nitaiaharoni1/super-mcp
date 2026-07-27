@@ -19,8 +19,8 @@ export function Coverage() {
     <>
       <div className="relative aspect-[21/6] w-full overflow-hidden bg-[var(--color-paper-sunk)] md:aspect-[24/5]">
         <Image
-          src="/story-market-fresh.webp"
-          alt="דוכן ירקות ופירות טריים בשוק"
+          src="/shelf-prices.webp"
+          alt="מדפי סופרמרקט עמוסים עם פסי תגי מחיר לאורך כל מדף"
           fill
           sizes="100vw"
           className="object-cover object-center"

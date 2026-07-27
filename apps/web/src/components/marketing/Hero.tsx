@@ -57,6 +57,8 @@ export function Hero() {
             </Button>
           </div>
 
+          <p className="mt-3.5 text-xs text-[var(--color-ink-muted)]">{hero.ctaReassurance}</p>
+
           <div className="mt-9 border-t border-[var(--color-line)] pt-5">
             <p className="text-xs text-[var(--color-ink-muted)]">{hero.clientsLabel}</p>
             <ul className="mt-2.5 flex flex-wrap items-baseline gap-x-5 gap-y-2">

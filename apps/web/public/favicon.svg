@@ -1,4 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#009DE0"/>
-  <path d="M9 22V10h7.2c2.7 0 4.4 1.5 4.4 3.7 0 1.5-.8 2.7-2.2 3.3 1.7.5 2.7 1.9 2.7 3.6 0 2.5-1.9 4.4-5 4.4H9zm3.1-9.7v2.8h3.6c1.1 0 1.8-.6 1.8-1.4s-.7-1.4-1.8-1.4h-3.6zm0 5.3v3.3h4.2c1.3 0 2.1-.7 2.1-1.7s-.8-1.6-2.1-1.6h-4.2z" fill="#ffffff"/>
+<!--
+  Super MCP mark: the same product at two prices, and which one we pick.
+
+  Two right-aligned bars (right-aligned because the product is Hebrew RTL). The
+  long faint bar is what the nearer shop charges; the short solid bar is the
+  answer. That is the whole product in two rectangles, and unlike a letterform
+  it still reads at 16px.
+
+  Geometry is mirrored in src/components/shared/Logo.tsx. Keep them in step.
+  Colours are literal hex, not oklch: favicon renderers are not full browsers.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Super MCP">
+  <rect width="32" height="32" rx="7.5" fill="#006598"/>
+  <rect x="7" y="10.25" width="18" height="3.5" rx="1.75" fill="#fff" opacity=".45"/>
+  <rect x="14" y="18.25" width="11" height="3.5" rx="1.75" fill="#fff"/>
 </svg>

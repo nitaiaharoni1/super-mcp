@@ -39,7 +39,7 @@ export const he = {
       { href: "#coverage", label: "הנתונים" },
       { href: "#connect", label: "חיבור" },
     ],
-    cta: "בקשו מפתח",
+    cta: "קבלו מפתח",
   },
 
   hero: {
@@ -48,8 +48,14 @@ export const he = {
     titleAccent: "אנחנו אומרים איזה.",
     subtitle:
       "מחברים את Super MCP לעוזר שאתם כבר עובדים איתו, כותבים רשימת קניות בעברית, ומקבלים תוכנית קנייה אמיתית: איפה לקנות, כמה זה עולה, ומה שאין במחירון מסומן כחסר במקום להיעלם.",
-    primaryCta: "בקשו מפתח",
-    secondaryCta: "איך מתחברים",
+    primaryCta: "קבלו מפתח",
+    /*
+     * The button asks for an email, which raises two objections on the spot:
+     * what does it cost, and how long am I waiting. Both are answered here
+     * rather than stuffed into the label, which keeps the label a clean verb.
+     */
+    ctaReassurance: "חינם למשתמשים מוקדמים. תשובה תוך יום עסקים.",
+    secondaryCta: "ראו איך מחברים",
     secondaryHref: "#connect",
     clientsLabel: "עובד בכל לקוח שתומך ב־MCP",
     clients,
@@ -191,15 +197,16 @@ export const he = {
 
   access: {
     id: "access",
-    title: "חברו את זה לעוזר שלכם",
-    body: "השאירו אימייל ונחזור אליכם עם מפתח והוראות חיבור, תוך יום עסקים.",
+    title: "חברו את Super MCP לעוזר שלכם",
+    body: "השאירו אימייל ונחזור אליכם עם מפתח והוראות חיבור בשתי דקות, תוך יום עסקים.",
     form: {
       emailLabel: "אימייל",
       emailPlaceholder: "you@example.com",
       useCaseLabel: "איך תשתמשו בזה? (לא חובה)",
       useCasePlaceholder: "למשל: סוכן קניות לבית ב־Claude",
-      submit: "בקשו מפתח",
+      submit: "שלחו לי מפתח",
       submitting: "שולחים...",
+      reassurance: "בלי כרטיס אשראי. אימייל אחד, ואפשר להפסיק מתי שתרצו.",
       successTitle: "הבקשה התקבלה",
       successBody: "נחזור אליכם עם מפתח והוראות חיבור תוך יום עסקים.",
       error: "משהו השתבש בשליחה. נסו שוב עוד רגע.",
@@ -207,7 +214,7 @@ export const he = {
     },
     selfHost: "אירוח עצמי",
     selfHostHint: "הפרויקט פתוח. אפשר להריץ עותק משלכם עם הנתונים שלכם.",
-    selfHostCta: "לתיעוד במאגר",
+    selfHostCta: "להוראות ההרצה",
   },
 
   faq: {
