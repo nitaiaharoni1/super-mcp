@@ -23,6 +23,11 @@ function intentTierRank(tier: BasketCandidate["intentTier"]): number {
   return tier;
 }
 
+/** The everyday form. An unlabeled candidate counts as regular, as in ranking. */
+function isRegularVariant(candidate: BasketCandidate): boolean {
+  return candidate.variant == null || candidate.variant === "regular";
+}
+
 function compareQuestionCandidates(
   a: BasketCandidate,
   b: BasketCandidate,
@@ -33,6 +38,15 @@ function compareQuestionCandidates(
   return (
     intentTierRank(a.intentTier) - intentTierRank(b.intentTier) ||
     Number(bAvailability.pricedStoreCount > 0) - Number(aAvailability.pricedStoreCount > 0) ||
+    // Same local-then-regular order the resolution ranking uses, and for the same
+    // reason: a bare "טייסטרס צ׳ויס" means the ordinary jar, so a labeled premium
+    // or decaf must not head the shortlist just because it is stocked more widely.
+    // Only the resolution path had this. The question shortlist is a separate
+    // ranking, and it offered the agent a `premium` barista pack ahead of every
+    // `regular` one the moment two more chains made the barista the most widely
+    // stocked Taster's nearby. Availability still outranks it, so a regular that
+    // nobody nearby carries does not win.
+    Number(isRegularVariant(b)) - Number(isRegularVariant(a)) ||
     bAvailability.chainCount - aAvailability.chainCount ||
     (aAvailability.minPrice ?? Number.POSITIVE_INFINITY) -
       (bAvailability.minPrice ?? Number.POSITIVE_INFINITY) ||

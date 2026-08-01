@@ -178,3 +178,72 @@ describe("buildBasketQuestions", () => {
     expect(questions[0]?.selectionEffect).toBe("pin");
   });
 });
+
+describe("question shortlist keeps the everyday variant in front", () => {
+  // The resolution ranking already prefers `regular` over a labeled variant, on
+  // the principle that a bare product word means the ordinary household version.
+  // The question shortlist is a separate ranking and did not, so as soon as two
+  // more chains made the `premium` barista pack the most widely stocked Taster's
+  // nearby it headed the options list and every caller that takes the first
+  // locally-priced option got the specialty jar.
+  const tasters: BasketItemStatus = {
+    index: 0,
+    qty: 1,
+    qtyMode: "packs",
+    amount: null,
+    unit: null,
+    productId: null,
+    name: "טייסטרס צ׳ויס",
+    resolved: false,
+    resolvedBy: "query",
+    resolutionStatus: "needs_confirmation",
+    confidence: null,
+    lowConfidence: true,
+    candidates: [
+      candidate({
+        productId: "barista",
+        name: "קפה טייסטרס צ`ויס בריסטה נסקפה (200 גרם)",
+        productClass: "instant_coffee",
+        variant: "premium",
+        score: 0.8,
+      }),
+      candidate({
+        productId: "original",
+        name: "נסקפה טייסטרס צויס 100 גר אוריגנל",
+        productClass: "instant_coffee",
+        variant: "regular",
+        score: 0.8,
+      }),
+    ],
+  };
+
+  it("puts the regular jar ahead of a premium one that is stocked more widely", () => {
+    const questions = buildBasketQuestions(
+      [{ query: "טייסטרס צ׳ויס", packQty: 1 }],
+      [tasters],
+      new Map([
+        // The premium pack leads on every availability signal, which is exactly
+        // the case that used to decide the order on its own.
+        ["barista", { pricedStoreCount: 43, chainCount: 7, minPrice: 25 }],
+        ["original", { pricedStoreCount: 30, chainCount: 4, minPrice: 30 }],
+      ]),
+      3,
+    );
+    expect(questions[0]?.options.map((o) => o.productId)).toEqual(["original", "barista"]);
+  });
+
+  it("still puts a locally stocked premium ahead of a regular nobody nearby carries", () => {
+    // Availability outranks the variant preference: offering a jar no nearby
+    // store sells would trade one wrong answer for a worse one.
+    const questions = buildBasketQuestions(
+      [{ query: "טייסטרס צ׳ויס", packQty: 1 }],
+      [tasters],
+      new Map([
+        ["barista", { pricedStoreCount: 43, chainCount: 7, minPrice: 25 }],
+        ["original", { pricedStoreCount: 0, chainCount: 0, minPrice: null }],
+      ]),
+      3,
+    );
+    expect(questions[0]?.options.map((o) => o.productId)).toEqual(["barista", "original"]);
+  });
+});
