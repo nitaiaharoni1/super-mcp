@@ -362,8 +362,16 @@ pnpm ingest:fixture   # offline fixtures (no FTP/portal)
 pnpm ingest -- --source=il-cerberus
 pnpm ingest -- --source=il-shufersal
 pnpm ingest -- --source=il-carrefour
+pnpm ingest -- --source=il-laibcatalog   # Victory, Machsanei Hashuk, H. Cohen
 pnpm ingest -- --source=all
 ```
+
+`il-laibcatalog` walks back up to 14 Israel days per chain and stops at the first
+day with filings, because that portal stalls for stretches without erroring:
+Victory and Machsanei Hashuk filed no prices at all between 2026-07-24 and
+2026-08-01, while H. Cohen kept posting a Stores file every morning. The run
+ingests the newest copy it can find and logs `laibcatalog_stale_filing` with the
+lag in days, so behind-but-serving never looks the same as up to date.
 
 Price/promo files are limited to stores in **Gush Dan–Sharon (Rishon–Netanya), Jerusalem, Haifa, Beersheva**.  
 Disable with `SUPER_MCP_REGION_FILTER=0`. Use `SUPER_MCP_FULL=1` for more stores *within* that region, or `SUPER_MCP_NO_CAP=1` for **all** in-region stores (no per-chain count cap; implies all Cerberus chains). Without those flags, the Cerberus adapter covers only its first 2 chains (Rami Levy, Yohananof), so a default local ingest is 2 chains x 2 stores.
@@ -415,7 +423,7 @@ public host.
 |------|---------|------|
 | `packages/shared` | `@super-mcp/shared` | Types, units, promo math, embeddings, env config, concurrency |
 | `packages/db` | `@super-mcp/db` | Schema, migrations, upserts |
-| `services/ingestion` | `@super-mcp/ingestion` | Cerberus FTP + Shufersal + Carrefour (PublishPrice) adapters |
+| `services/ingestion` | `@super-mcp/ingestion` | Cerberus FTP + Shufersal + Carrefour (PublishPrice) + laibcatalog adapters |
 | `services/api` | `@super-mcp/api` | REST + MCP + auth/metering |
 
 See [docs/folder-conventions.md](./docs/folder-conventions.md) for target folder layout and dedup rules.

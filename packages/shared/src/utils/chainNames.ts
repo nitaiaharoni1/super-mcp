@@ -12,6 +12,7 @@ const CHAIN_NAMES: Record<string, ChainDisplayNames> = {
   "7290700100008": { he: "חצי חינם", en: "Hazi Hinam" },
   "7290696200003": { he: "ויקטורי", en: "Victory" },
   "7290661400001": { he: "מחסני השוק", en: "Machsanei Hashuk" },
+  "7290455000004": { he: "ח. כהן", en: "H. Cohen" },
   "7290055700007": { he: "קרפור", en: "Carrefour" },
   "7290526500006": { he: "סלח דבאח", en: "Salach Dabach" },
   "7290876100000": { he: "פרשמרקט", en: "Fresh Market" },

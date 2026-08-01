@@ -6,6 +6,7 @@ import {
 } from "./cerberus/adapter.js";
 import { createCarrefourAdapter } from "./carrefour/adapter.js";
 import { createPublishPriceAdapter, PUBLISHPRICE_PORTALS } from "./publishprice/index.js";
+import { createLaibcatalogAdapter } from "./laibcatalog/index.js";
 import { createFixtureAdapter } from "./fixture/adapter.js";
 import { createShufersalAdapter } from "./shufersal/adapter.js";
 
@@ -14,6 +15,7 @@ export {
   createShufersalAdapter,
   createCarrefourAdapter,
   createPublishPriceAdapter,
+  createLaibcatalogAdapter,
   createFixtureAdapter,
   PUBLISHPRICE_PORTALS,
 };
@@ -59,15 +61,18 @@ export function getAdapters(selection: string, chains: string[] = []): SourceAda
       return [createShufersalAdapter()];
     case "il-carrefour":
       return [createCarrefourAdapter()];
+    case "il-laibcatalog":
+      return [createLaibcatalogAdapter()];
     case "all":
       return [
         createShufersalAdapter(),
         createCerberusAdapter(selectCerberusChains(chains)),
         ...PUBLISHPRICE_PORTALS.map((p) => createPublishPriceAdapter(p)),
+        createLaibcatalogAdapter(),
       ];
     default: {
       throw new Error(
-        `Unknown source '${selection}'. Use fixture|il-cerberus|il-shufersal|il-carrefour|all`,
+        `Unknown source '${selection}'. Use fixture|il-cerberus|il-shufersal|il-carrefour|il-laibcatalog|all`,
       );
     }
   }

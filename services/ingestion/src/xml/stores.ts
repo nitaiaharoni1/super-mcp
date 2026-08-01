@@ -44,7 +44,20 @@ export function parseStoresXml(xml: string, chainId: string): RawStoreRecord[] {
     }
   } else {
     const storesNode = root.Stores as Record<string, unknown> | undefined;
-    for (const s of asArray(root.Store ?? storesNode?.Store)) {
+    // H. Cohen files <Store><Branches><Branch>… : the document root is a single
+    // <Store> element that carries no store of its own, so the usual root.Store
+    // lookup finds one entry with no StoreID and yields nothing. Branches win
+    // only when present, to leave every other shape alone.
+    const branches = [
+      ...asArray(root.Store).flatMap((s) =>
+        asArray(
+          ((s as Record<string, unknown>).Branches as Record<string, unknown> | undefined)?.Branch,
+        ),
+      ),
+      ...asArray((root.Branches as Record<string, unknown> | undefined)?.Branch),
+    ];
+    const entries = branches.length ? branches : asArray(root.Store ?? storesNode?.Store);
+    for (const s of entries) {
       pushStore(s as Record<string, unknown>);
     }
   }

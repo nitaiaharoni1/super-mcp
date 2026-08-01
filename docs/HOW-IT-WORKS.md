@@ -161,6 +161,13 @@ Because most Israeli chains publish through a few shared portals, **~3 adapters 
   FTP logins via a per-chain connection pool.
 - **`shufersal`** — Shufersal's own web portal.
 - **`carrefour`** — Carrefour IL (the stor.ai / PublishPrice platform).
+- **`laibcatalog`** — `laibcatalog.co.il`, the Nibit portal, and the only public
+  filing point for **Victory**, **Machsanei Hashuk** and **H. Cohen**. It is an
+  ASP.NET WebForms page, so discovery replays the search postback rather than
+  reading an index. Worth the extra machinery because those chains were
+  previously read off their storefronts, where nothing carries a barcode; the
+  filings here are ~90% `ItemType` 1, which is what puts them in the cross-chain
+  GTIN index at all.
 - **`fixture`** — offline canned files for tests and local dev (no network).
 
 ### Normalization: the actually-hard part
