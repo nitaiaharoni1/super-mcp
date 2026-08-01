@@ -73,7 +73,20 @@ function parseArgs(argv: string[]): OnlineArgs {
 }
 
 async function main(): Promise<void> {
-  const { sources, options } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  // Delivery terms change on their own schedule, and re-deriving them costs a
+  // handful of venue fetches against a full catalogue scrape of every storefront.
+  // Splitting them out also makes the terms half runnable straight after the
+  // curated catalogue changes, which is when the two syncs have to agree on who
+  // owns which storefront.
+  if (argv.includes("--fulfillment-only")) {
+    const fulfillment = await syncScrapedFulfillment();
+    console.log(JSON.stringify({ event: "scraped_fulfillment_sync", ...fulfillment }, null, 2));
+    return;
+  }
+
+  const { sources, options } = parseArgs(argv);
   const adapters = getOnlineAdapters(sources, options);
 
   console.log(

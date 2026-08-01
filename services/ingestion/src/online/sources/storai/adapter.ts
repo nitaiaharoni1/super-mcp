@@ -1,4 +1,5 @@
 import type {
+  DeliveryTariffBand,
   FeedFile,
   RawBlob,
   RawRecord,
@@ -63,6 +64,25 @@ export interface StorAiRetailer {
   chainId: string;
   name: string;
   storefrontUrl: string;
+  /**
+   * Delivery terms, when the retailer publishes them.
+   *
+   * The storefront API itself carries none, so these are read from the chain's
+   * own terms page the same way the curated catalogue is, and they are optional
+   * because "we have not established it" has to stay expressible. Without them
+   * the sync writes `national` at confidence `estimated`, which reads as "ships
+   * anywhere in Israel" for a chain that in fact serves five settlements.
+   */
+  terms?: {
+    minimumOrder: number;
+    tariffs: DeliveryTariffBand[];
+    /** Settlements the chain publishes, exactly as it spells them. */
+    cities: readonly string[];
+    confidence: "verified" | "reported";
+    verifiedAt: string;
+    sourceUrl: string;
+    notes: string;
+  };
 }
 
 /**
@@ -94,13 +114,48 @@ export const STORAI_RETAILERS: readonly StorAiRetailer[] = [
     retailerId: 1492,
     chainId: "IL-SUPER-YUDA",
     name: "סופר יודה",
-    storefrontUrl: "https://www.superyuda.co.il",
+    storefrontUrl: "https://www.yuda.co.il",
+    terms: {
+      minimumOrder: 150,
+      tariffs: [
+        { slotType: "standard", minSubtotal: 150, maxSubtotal: 499, fee: 35, membership: null, feeIsFloor: false },
+        { slotType: "standard", minSubtotal: 499, maxSubtotal: null, fee: 0, membership: null, feeIsFloor: false },
+      ],
+      cities: ["תל אביב", "רמת השרון", "חולון", "ראשון לציון", "צור יצחק"],
+      confidence: "reported",
+      verifiedAt: "2026-08-02",
+      sourceUrl: "https://www.yuda.co.il",
+      notes:
+        "Five settlements, not the country: the branch-level rates differ (₪32 around Holon and west " +
+        "Rishon LeZion) but are not modelled, because the storefront picks the branch and we cannot " +
+        "tell which one a basket would be picked from. The ₪35 band is therefore the safe one to quote. " +
+        "Free delivery above ₪499 is a promotion running to 2026-12-31, which is inside the 90-day " +
+        "terms TTL, so it will lapse into a re-read rather than outlive itself.",
+    },
   },
   {
     retailerId: 1450,
     chainId: "IL-POLITZER",
     name: "פוליצר",
     storefrontUrl: "https://www.politzer.co.il",
+    terms: {
+      minimumOrder: 150,
+      tariffs: [
+        { slotType: "standard", minSubtotal: 150, maxSubtotal: null, fee: 40, membership: null, feeIsFloor: false },
+      ],
+      cities: [
+        "קיסריה", "שדות ים", "נאות גולף", "אור עקיבא", "אור ים",
+        "חדרה", "חוגלה", "חיבת ציון", "אליכין", "חרב לאת",
+      ],
+      confidence: "verified",
+      verifiedAt: "2026-08-02",
+      sourceUrl: "https://www.politzer.co.il",
+      notes:
+        "A single-region grocer around Caesarea and Hadera, previously recorded as delivering " +
+        "nationwide. Two published rates, ₪35.90 around Caesarea/Hadera and ₪40 for Or Akiva and Or " +
+        "Yam; the higher one is stored because the area a basket resolves to is not known at ranking " +
+        "time, and over-quoting a fee costs a shopper nothing while under-quoting it misranks the shop.",
+    },
   },
 ];
 

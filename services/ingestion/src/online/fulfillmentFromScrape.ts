@@ -1,9 +1,14 @@
-import { listScrapedOnlineStores, upsertFulfillmentService } from "@super-mcp/db";
+import {
+  deactivateFulfillmentServicesExcept,
+  listScrapedOnlineStores,
+  upsertFulfillmentService,
+} from "@super-mcp/db";
 import type { CoverageRule, DeliveryTariffBand } from "@super-mcp/shared";
 import { fetchAllowedFeed } from "../sources/common/allowedFetch.js";
 import { WOLT_HOSTS } from "./sources/wolt/adapter.js";
 import { WOLT_CHAIN_ID } from "./sources/wolt/parse.js";
 import { STORAI_RETAILERS } from "./sources/storai/adapter.js";
+import { FULFILLMENT_CATALOG } from "../fulfillment/catalog.js";
 
 /**
  * Delivery terms that maintain themselves.
@@ -24,6 +29,8 @@ export interface ScrapedFulfillmentResult {
   woltServices: number;
   storAiServices: number;
   skipped: string[];
+  /** Scraped storefronts retired because this run no longer writes them. */
+  deactivated: number;
 }
 
 function objectContaining(html: string, key: string): Record<string, unknown> | null {
@@ -98,12 +105,36 @@ export function woltCoverage(venue: Record<string, unknown>): CoverageRule[] {
   return [];
 }
 
+/**
+ * Chains whose online storefront is already priced from a regulated feed.
+ *
+ * Once a chain files a `<StoreType>2` endpoint with prices, the curated
+ * catalogue points at that store and the scraped storefront becomes a worse
+ * duplicate of the same shop: Victory's stor.ai catalogue is 2,228 items with no
+ * barcode at all, against 8,525 items and 7,563 barcodes in its filing. Two
+ * services on one storefront also let a basket count the same shop twice.
+ *
+ * A second line of defence, not the first. `listScrapedOnlineStores` already
+ * filters on the CHAIN's `source_id`, so a chain that starts arriving from a
+ * feed stops being returned here at all: Victory and Machsanei Hashuk dropped
+ * out the moment the laibcatalog adapter took ownership of their chain rows, and
+ * their stale services were retired by the sweep below rather than by this
+ * check. It stays because that ownership is incidental to this file. A chain
+ * scraped and filed at once would otherwise get two live storefronts, and the
+ * failure is silent: both price, both rank, and the basket sees one shop twice.
+ */
+function chainsCoveredByCuratedCatalogue(): Set<string> {
+  return new Set(FULFILLMENT_CATALOG.map((entry) => entry.chainId));
+}
+
 export async function syncScrapedFulfillment(): Promise<ScrapedFulfillmentResult> {
   const skipped: string[] = [];
+  const writtenSlugs: string[] = [];
   let woltServices = 0;
   let storAiServices = 0;
 
   const stores = await listScrapedOnlineStores(["il-wolt", "il-storai"]);
+  const curatedChains = chainsCoveredByCuratedCatalogue();
 
   for (const store of stores) {
     if (store.chainId === WOLT_CHAIN_ID) {
@@ -170,6 +201,7 @@ export async function syncScrapedFulfillment(): Promise<ScrapedFulfillmentResult
         tariffs: woltTariffs(venue),
         coverage: woltCoverage(venue),
       });
+      writtenSlugs.push(`wolt-${store.storeCode}`);
       woltServices += 1;
       continue;
     }
@@ -179,6 +211,17 @@ export async function syncScrapedFulfillment(): Promise<ScrapedFulfillmentResult
       skipped.push(`${store.chainId}/${store.storeCode} (no source mapping)`);
       continue;
     }
+    // A Wolt venue is a genuinely different shop from the chain's own storefront
+    // and keeps its own service. A stor.ai storefront is the SAME shop the chain
+    // now files, so it yields to the filing.
+    if (curatedChains.has(store.chainId)) {
+      skipped.push(
+        `${store.chainId}/${store.storeCode} (storefront is priced from the regulated feed; ` +
+          `the curated catalogue owns it)`,
+      );
+      continue;
+    }
+    const terms = retailer.terms;
     await upsertFulfillmentService({
       slug: `${retailer.chainId.toLowerCase()}-${store.storeCode}`,
       chainId: store.chainId,
@@ -187,26 +230,49 @@ export async function syncScrapedFulfillment(): Promise<ScrapedFulfillmentResult
       serviceType: "delivery",
       marketplace: null,
       storefrontUrl: retailer.storefrontUrl,
-      minimumOrder: null,
-      // The storefront API carries no terms at all, so this is a real gap rather
-      // than a value we have not got round to: the optimiser will report the fee
-      // as unknown and rank on a labelled assumption.
-      minimumOrderKnown: false,
+      minimumOrder: terms?.minimumOrder ?? null,
+      // Without terms this is a real gap rather than a value we have not got
+      // round to: the optimiser reports the fee as unknown and ranks on a
+      // labelled assumption instead of a number nobody checked.
+      minimumOrderKnown: terms != null,
       serviceFee: null,
-      termsConfidence: "estimated",
-      termsVerifiedAt: null,
-      termsSourceUrl: retailer.storefrontUrl,
+      termsConfidence: terms?.confidence ?? "estimated",
+      termsVerifiedAt: terms?.verifiedAt ?? null,
+      termsSourceUrl: terms?.sourceUrl ?? retailer.storefrontUrl,
       termsSource: "scraped",
       notes:
+        terms?.notes ??
         "Catalogue and prices scraped from the chain's stor.ai storefront; delivery terms are NOT " +
-        "published there and remain unknown. Products from this source carry no barcode, so they " +
-        "are chain-scoped and do not take part in cross-chain comparison.",
+          "published there and remain unknown. Products from this source carry no barcode, so they " +
+          "are chain-scoped and do not take part in cross-chain comparison.",
       active: true,
-      tariffs: [],
-      coverage: [{ scope: "national", confidence: "estimated" }],
+      tariffs: terms?.tariffs ?? [],
+      // A published settlement list when the chain has one. `national` is the
+      // fallback for a chain whose area we have not established, and is NOT a
+      // claim that it ships everywhere: `estimated` carries the doubt, and the
+      // ranking treats it as a labelled assumption rather than an offer. Left
+      // unqualified it told an Eilat shopper that a Caesarea grocer delivers.
+      coverage:
+        terms != null
+          ? terms.cities.map((cityKey) => ({
+              scope: "city" as const,
+              cityKey,
+              confidence: terms.confidence,
+            }))
+          : [{ scope: "national", confidence: "estimated" }],
     });
+    writtenSlugs.push(`${retailer.chainId.toLowerCase()}-${store.storeCode}`);
     storAiServices += 1;
   }
 
-  return { woltServices, storAiServices, skipped };
+  // Retire scraped storefronts this run did not write, scoped to `scraped` so the
+  // curated chains are untouched. Without this a venue Wolt delisted, or a chain
+  // that moved to the regulated feed, kept an active delivery option forever:
+  // Victory alone had a service pointing at a scraped store holding zero prices.
+  const deactivated =
+    writtenSlugs.length > 0
+      ? await deactivateFulfillmentServicesExcept(writtenSlugs, "scraped")
+      : 0;
+
+  return { woltServices, storAiServices, skipped, deactivated };
 }

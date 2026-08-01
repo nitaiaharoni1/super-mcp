@@ -88,10 +88,14 @@ export async function syncFulfillmentCatalog(
   // skipped because its store row was momentarily unresolvable is still defined,
   // and deactivating it would drop a live option from every answer until the next
   // successful run.
+  //
+  // Scoped to `curated`: the Wolt and stor.ai storefronts belong to the online
+  // scrape, and retiring them from here made the number of delivery options a
+  // function of which sync ran most recently.
   const definedSlugs = FULFILLMENT_CATALOG.map((entry) => entry.slug);
   const deactivated = options.dryRun
     ? 0
-    : await deactivateFulfillmentServicesExcept(definedSlugs);
+    : await deactivateFulfillmentServicesExcept(definedSlugs, "curated");
 
   return { written: writtenSlugs.length, skippedMissingStore, deactivated };
 }

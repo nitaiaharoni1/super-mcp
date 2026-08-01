@@ -308,9 +308,13 @@ export async function findStoreIdByCode(
 }
 
 /**
- * Mark services absent from the catalogue inactive rather than deleting history.
+ * Mark services absent from the caller's own catalogue inactive rather than
+ * deleting history.
  *
- * `slugs` MUST be every slug the catalogue defines, not the subset this run
+ * `termsSource` names which sync is speaking. Each one owns only the rows it
+ * writes: the curated file owns `curated`, the online scrape owns `scraped`.
+ *
+ * `slugs` MUST be every slug that source defines, not the subset this run
  * managed to write. Passing the successes turns a transient lookup miss into a
  * deactivation: a storefront whose `store` row is briefly unresolvable (renumbered
  * code, Stores XML not yet re-ingested) would vanish from every answer despite
@@ -325,6 +329,7 @@ export async function findStoreIdByCode(
  */
 export async function deactivateFulfillmentServicesExcept(
   slugs: string[],
+  termsSource: "curated" | "scraped",
 ): Promise<number> {
   if (slugs.length === 0) {
     throw new Error(
@@ -332,10 +337,15 @@ export async function deactivateFulfillmentServicesExcept(
         "deactivate every fulfillment service. Pass every slug the catalogue defines.",
     );
   }
+  // Scoped to the caller's own rows. Two independent syncs write this table: the
+  // curated catalogue file and the online scrape. Without the scope each one
+  // retired the other's storefronts, so `/mcp/online` listed 13 or 24 delivery
+  // options purely according to which command had run last, and re-running the
+  // pair in the other order silently changed the answer.
   const res = await query(
     `UPDATE fulfillment_service SET active = false, updated_at = now()
-     WHERE active AND NOT (slug = ANY($1::text[]))`,
-    [slugs],
+     WHERE active AND terms_source = $2 AND NOT (slug = ANY($1::text[]))`,
+    [slugs, termsSource],
   );
   return res.rowCount ?? 0;
 }
