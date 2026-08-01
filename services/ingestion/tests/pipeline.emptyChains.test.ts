@@ -148,6 +148,28 @@ describe("configured chain that yields nothing", () => {
     expect(result.chainsWithNoRows).toContain(YOHANANOF);
   });
 
+  it("degrades when a chain hands over its stores file and no prices", async () => {
+    // The real shape of the failure, seen on 2026-08-02: Osher Ad's FTP stayed up
+    // long enough to serve its Stores file, then timed out on every price file.
+    // Counting the 24 store rows as "rows" made the chain look alive from every
+    // angle, so the run reported no empty chains while that chain's prices sat a
+    // fortnight stale. Store rows are metadata; the prices are the coverage.
+    delete process.env.SUPER_MCP_NO_CAP;
+    const { runPipeline } = await import("../src/pipeline.js");
+
+    const result = await runPipeline(
+      cerberusAdapter([
+        file("stores", RAMI_LEVY),
+        file("pricesfull", RAMI_LEVY),
+        // Yohananof: a stores file landed, no price file was ever discovered.
+        file("stores", YOHANANOF),
+      ]),
+    );
+
+    expect(result.chainsWithNoRows).toContain(YOHANANOF);
+    expect(result.status).toBe("degraded");
+  });
+
   it("applies no chain expectation to single-chain sources", async () => {
     const { runPipeline } = await import("../src/pipeline.js");
     const shufersal = {

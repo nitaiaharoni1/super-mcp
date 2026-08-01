@@ -51,8 +51,12 @@ function absorb(result: PipelineResult, stats: FileProcessStats): void {
 
 /**
  * Chains we expected data from that produced nothing. Split into "no files at
- * all" (discovery yielded none) and "files but no usable rows" so the alert
- * names the actual failure mode.
+ * all" (discovery yielded none) and "files but no usable PRICE rows" so the
+ * alert names the actual failure mode.
+ *
+ * The second case is the common one and the easiest to miss: a chain whose FTP
+ * answers well enough to hand over its Stores file, then times out on every
+ * price file, looks alive from every angle except the only one that matters.
  */
 function findEmptyChains(
   adapter: SourceAdapter,
@@ -155,8 +159,15 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
       }),
     );
 
-    // Per-chain row tally so a chain that yields nothing can't hide behind the
-    // healthy chains' totals.
+    // Per-chain PRICE row tally so a chain that yields nothing can't hide behind
+    // the healthy chains' totals.
+    //
+    // Prices only, deliberately. Counting store rows here made the gate blind to
+    // the failure it exists for: Osher Ad published its Stores file and not one
+    // price file on 2026-08-02, and because its 24 store rows landed, the chain
+    // both appeared in `discoveredChainIds` and had a non-zero tally. The run
+    // reported no empty chains while that chain's prices stayed a fortnight
+    // stale. A chain's store list is metadata; the prices are the coverage.
     const rowsByChain = new Map<string, number>();
     const noteChainRows = (chainId: string, rows: number): void => {
       rowsByChain.set(chainId, (rowsByChain.get(chainId) ?? 0) + rows);
@@ -167,7 +178,6 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
     for (const file of storeFiles) {
       const stats = await processFeedFile(adapter, file, archiveRoot);
       if (stats.fatal) failedStoreChains.add(file.chainId);
-      noteChainRows(file.chainId, stats.ok);
       absorb(result, stats);
     }
 
