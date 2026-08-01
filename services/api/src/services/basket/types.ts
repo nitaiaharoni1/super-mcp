@@ -148,11 +148,23 @@ export interface BasketContinuationQuestion {
   allowedProductIds: string[];
 }
 
-export interface BasketContinuationV1 {
+/**
+ * Generic over the input it carries so the delivery surface can resume its own
+ * request shape through the same signed token.
+ *
+ * The alternative was a second copy of the HMAC and answer-validation code. That
+ * code decides whether a client-supplied token is trustworthy and whether an
+ * answer was actually offered; two copies of it drift, and the drift is a
+ * security bug rather than a formatting one. The default type parameter keeps
+ * every existing basket call site unchanged.
+ */
+export interface BasketContinuationV1<
+  TInput extends { items: BasketItemInput[] } = BasketInitialInput,
+> {
   version: 1;
   issuedAt: number;
   expiresAt: number;
-  input: BasketInitialInput;
+  input: TInput;
   questions: BasketContinuationQuestion[];
   /**
    * Opaque nonce for the in-process resolution snapshot (resolutionCache). Lets a

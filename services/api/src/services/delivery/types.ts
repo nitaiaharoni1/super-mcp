@@ -1,0 +1,221 @@
+import type {
+  CoverageConfidence,
+  CoverageScope,
+  FeeBreak,
+  TermsConfidence,
+} from "@super-mcp/shared";
+import type { LocationOriginMeta } from "../../lib/locationInput.js";
+import type {
+  BasketAssumption,
+  BasketItemInput,
+  BasketItemStatus,
+  BasketLine,
+  BasketMissingItem,
+  BasketQuestion,
+  BasketResolutionMode,
+  BasketResponseDetail,
+  BasketTotalScope,
+} from "../basket/types.js";
+
+/**
+ * What the shopper is optimising for.
+ *
+ * Deliberately NOT the physical surface's cheapest/balanced/closest. There is no
+ * "closest" online — a storefront either delivers to you or it does not — and the
+ * axis that replaces distance is how much of the price we can actually stand
+ * behind. `balanced` prefers a storefront whose terms we verified over one whose
+ * fee we had to assume, when the money is close; `cheapest` takes the lowest
+ * number and lets the caller read the confidence itself.
+ */
+export type DeliveryPreference = "cheapest" | "balanced";
+
+export interface DeliveryAddressInput {
+  /** Free text, e.g. "מנדלסון 1, תל אביב". Geocoded like the physical surface. */
+  address?: string;
+  city?: string;
+  near?: { lat: number; lng: number };
+}
+
+export interface DeliveryOptimizeInput extends DeliveryAddressInput {
+  items: BasketItemInput[];
+  preference?: DeliveryPreference;
+  /** standard | pickup | express — selects which tariff bands apply. */
+  slotType?: string;
+  /** Memberships the shopper holds, e.g. ["club", "credit_card"]. */
+  memberships?: string[];
+  includeClub?: boolean;
+  includeCoupon?: boolean;
+  resolutionMode?: BasketResolutionMode;
+  responseDetail?: BasketResponseDetail;
+  /** Also price the basket at nearby physical branches, for comparison. */
+  compareInStore?: boolean;
+  locationOrigin?: LocationOriginMeta;
+  geocodeMs?: number;
+}
+
+export interface DeliveryResumeInput {
+  continuation: string;
+  answers: Array<{ itemIndex: number; productId: string }>;
+}
+
+export type DeliveryOptimizeRequest = DeliveryOptimizeInput | DeliveryResumeInput;
+
+export interface DeliveryTermsProvenance {
+  /**
+   * verified  read from the retailer's own binding terms on `verifiedAt`
+   * reported  a cited secondary source
+   * estimated a category default
+   * unknown   no tariff recorded — the fee is genuinely not known
+   */
+  confidence: TermsConfidence | "unknown";
+  verifiedAt: string | null;
+  sourceUrl: string | null;
+  /**
+   * True when the terms are older than the catalogue's TTL. A stale row is
+   * reported as unknown rather than quoted, because the observed failure is a
+   * fee that sat unchanged for years and then moved 20% in a month.
+   */
+  stale: boolean;
+}
+
+export interface DeliveryCoverageReport {
+  serves: boolean;
+  matchedScope: CoverageScope | null;
+  confidence: CoverageConfidence | null;
+  reason: "outside_service_area" | "address_too_vague" | "coverage_unknown" | null;
+}
+
+export interface DeliveryPlan {
+  serviceSlug: string;
+  brand: string;
+  serviceType: "delivery" | "pickup" | "marketplace";
+  marketplace: string | null;
+  storefrontUrl: string | null;
+  chainId: string;
+  chainName: string;
+  storeId: string;
+  currency: string;
+
+  /** Money for goods at this storefront, over the lines it prices. */
+  itemsSubtotal: number;
+  /** Same-basket item figure: adds a market reference price for missing lines. */
+  itemsComparableSubtotal: number;
+  totalScope: BasketTotalScope;
+
+  /** null means not known — never treat as zero. */
+  deliveryFee: number | null;
+  /** Ranking-only stand-in used when `deliveryFee` is null. Never a quote. */
+  assumedDeliveryFee: number | null;
+  /**
+   * True when `deliveryFee` is a published LOWER BOUND, not the charge.
+   *
+   * Wolt sets its fee at checkout from the courier route and publishes only the
+   * zero-distance base, so ₪10 is the best case and never the worst. Quote it as
+   * "from ₪10" — and note deliveredTotal is a lower bound too.
+   */
+  deliveryFeeIsFloor: boolean;
+  serviceFee: number;
+  /** itemsSubtotal + deliveryFee + serviceFee. null when the fee is unknown. */
+  deliveredTotal: number | null;
+  /** The figure storefronts are ranked on. Always present. */
+  deliveredComparableTotal: number;
+  deliveryTerms: DeliveryTermsProvenance;
+
+  meetsMinimum: boolean;
+  minimumOrder: number | null;
+  amountToMinimum: number | null;
+  minimumKnown: boolean;
+  requiresMembership: string | null;
+
+  coverage: DeliveryCoverageReport;
+
+  freeDeliveryThreshold: number | null;
+  /** A cheaper fee tier the shopper could reach by spending more. */
+  nextFeeBreak: FeeBreak | null;
+
+  pricedLines: number;
+  resolvableLines: number;
+  requestedLines: number;
+  coverageRatio: number;
+  imputedTotal: number;
+  imputedLines: number;
+  clubOnlyLines: number;
+  couponOnlyLines: number;
+  lines: BasketLine[];
+  linesTruncated?: boolean;
+  missingItems: BasketMissingItem[];
+}
+
+export interface UnavailableStorefront {
+  serviceSlug: string;
+  brand: string;
+  chainName: string;
+  reason:
+    | "outside_service_area"
+    | "address_too_vague"
+    | "coverage_unknown"
+    | "below_minimum_order"
+    | "no_lines_priced"
+    | "no_pickup_option";
+  /** Human-readable detail, e.g. "add ₪27.50 to reach the ₪99 minimum". */
+  detail: string | null;
+}
+
+/** What ordering the same basket in person would cost, when asked for. */
+export interface InStoreComparison {
+  storeName: string;
+  chainName: string;
+  distanceKm: number | null;
+  comparableTotal: number;
+  /** deliveredComparableTotal of the best delivery plan minus this. */
+  deliveryPremium: number;
+}
+
+export interface DeliveryOptimizeCompleteResult {
+  status: "complete";
+  currency: string;
+  address: {
+    requested: string | null;
+    city: string | null;
+    lat: number | null;
+    lng: number | null;
+    /**
+     * How precisely the address was located.
+     *
+     * Load-bearing on this surface in a way it is not on the physical one. A
+     * branch placed at a city centroid is reported with an inflated distance and
+     * the shopper can still judge it; a delivery polygon tested against a city
+     * centroid returns a confident yes or no about an address that was never
+     * actually located. Anything coarser than `street` means a coverage verdict
+     * should be hedged.
+     */
+    precision: string | null;
+    /** Geocoder caveat, e.g. that the point fell back to the city centre. */
+    warning: string | null;
+  };
+  preference: DeliveryPreference;
+  slotType: string;
+  /** Lowest deliveredComparableTotal among orderable plans. */
+  cheapestDelivered: DeliveryPlan | null;
+  /** Best plan whose delivery fee we can actually stand behind. */
+  bestVerifiedTerms: DeliveryPlan | null;
+  plans: DeliveryPlan[];
+  unavailableStores: UnavailableStorefront[];
+  inStoreComparison: InStoreComparison | null;
+  items: BasketItemStatus[];
+  assumptions: BasketAssumption[];
+  storefrontsCompared: number;
+  notes: string[];
+}
+
+export interface DeliveryNeedsConfirmationResult {
+  status: "needs_confirmation";
+  continuation: string;
+  questions: BasketQuestion[];
+  items: BasketItemStatus[];
+  storefrontsCompared: number;
+}
+
+export type DeliveryOptimizeResult =
+  | DeliveryOptimizeCompleteResult
+  | DeliveryNeedsConfirmationResult;

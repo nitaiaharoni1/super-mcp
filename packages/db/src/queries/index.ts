@@ -67,3 +67,11 @@ export {
   type MissKind,
   type TopMissRow,
 } from "./misses.js";
+export {
+  deactivateFulfillmentServicesExcept,
+  findStoreIdByCode,
+  listFulfillmentServices,
+  upsertFulfillmentService,
+  type FulfillmentServiceRow,
+  type UpsertFulfillmentServiceInput,
+} from "./fulfillment.js";

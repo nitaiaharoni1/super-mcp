@@ -480,7 +480,8 @@ export class Normalizer {
           zip: scrubOptionalText(record.zip),
           lat: record.geo?.lat,
           lng: record.geo?.lng,
-          storeKind: classifyStoreKind(name, address),
+          feedStoreType: record.storeType,
+          storeKind: classifyStoreKind(name, address, record.storeType),
         });
         this.storeIds.set(`${record.chainId}:${storeCode}`, id);
         return true;

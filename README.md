@@ -46,7 +46,8 @@ pnpm db:seed          # demo catalog + writes API key to .local/api-key.txt
 pnpm dev
 # http://localhost:8787/health
 # http://localhost:8787/openapi.json
-# MCP (Streamable HTTP): http://localhost:8787/mcp
+# MCP — physical stores:   http://localhost:8787/mcp
+# MCP — online delivery:   http://localhost:8787/mcp/online
 ```
 
 Auth: `Authorization: Bearer $(cat .local/api-key.txt)`
@@ -60,7 +61,66 @@ curl -s -H "Authorization: Bearer $KEY" 'http://localhost:8787/v1/products?q=ח�
 curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"items":[{"query":"חלב","pack_qty":2},{"gtin":"7290112490463","pack_qty":1}],"city":"תל אביב"}' \
   http://localhost:8787/v1/basket/optimize
+curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -d '{"items":[{"query":"חלב","pack_qty":4},{"query":"קוטג","pack_qty":4}],"address":"מנדלסון 1, תל אביב"}' \
+  http://localhost:8787/v1/delivery/optimize
 ```
+
+## Two MCP surfaces: driving there, and having it delivered
+
+A shopper asks two different questions, and one tool answering both has to guess which one they meant.
+
+| | `/mcp` — **super-mcp** | `/mcp/online` — **super-mcp-online** |
+| --- | --- | --- |
+| lead tool | `optimize_basket` | `optimize_delivery` |
+| minimises | basket **+ travel** | basket **+ delivery fee + service fee** |
+| cost of distance | ₪/km, a smooth estimate | a published fee, a **step function** of the subtotal |
+| feasibility | a branch inside the radius | the storefront delivers to the address **and** the basket clears its minimum |
+| "buy the rest elsewhere" | another trip, worth roughly ₪20 | another delivery fee, worth exactly what it says |
+| location input | `city` / `near` / `location` + `radius_km` | `address` / `city` / `near` — **no radius** |
+
+They share everything below the objective function: catalogue identity, Hebrew search, line resolution,
+unit normalisation, promotion maths, freshness. That is why this is one codebase and one database rather
+than a fork — and it is what lets `optimize_delivery` answer `compare_in_store`, which prices the same
+basket at nearby branches and reports the delivery premium.
+
+Both surfaces are served by one process by default. `SUPER_MCP_SURFACES=stores` or `=online` splits them
+across separate deployments from the same image.
+
+### Where online prices and delivery terms come from
+
+**Prices: the same regulated feeds, not a scraper.** The price-transparency Stores file carries
+`<StoreType>` — 1 physical, 2 online, 3 both — and every chain populates it. Thirteen online storefronts
+publish full priced catalogues that way: שופרסל ONLINE (15,896 items), רמי לוי מרלוג אינטרנט (15,790),
+seven Tiv Taam picking depots, קרפור אונליין / קוויק / יהלומים ביתן, and a Keshet storefront operating
+through Wolt. About 139k price rows in all.
+
+**Online prices are not shelf prices, and the gap is not a constant.** Measured against each chain's own
+branches: Tiv Taam's depots are 99% identical, שופרסל ONLINE 84.6% identical (and undercuts the שלי
+format on ~85% of shared items), רמי לוי is repriced item by item at 22% identical, קרפור אונליין runs
+**7.8% below** its own shelves, and the Wolt storefront runs **+25%**. So a storefront's own feed rows
+are always used; a nearby branch's price is never substituted.
+
+**Delivery terms: a curated table, because there is no feed for them.** Fee, minimum order,
+free-delivery threshold and service area live in
+[`services/ingestion/src/fulfillment/catalog.ts`](./services/ingestion/src/fulfillment/catalog.ts),
+with the source URL and the date each number was read. Refresh with `pnpm ingest:fulfillment`.
+
+Every fee therefore carries a **confidence** and a **`verifiedAt`**, and decays to `unknown` after 90
+days rather than being quoted. This is not ceremony: Rami Levy held ₪29.90 for fifteen years and then
+raised it 20% in a single month. A table nobody has re-read since spring looks fine, parses fine, and
+quietly lies. Where a fee is unknown the plan reports `deliveryFee: null` and ranks on a clearly labelled
+`assumedDeliveryFee` — never a quote.
+
+**We deliberately do not scrape retailer storefronts.** Six chains run Cloudflare bot management on
+their own domains, Shufersal publishes a crawl window a real catalogue crawl cannot honour, and Rami
+Levy's robots.txt disallows its API path. The regulated feeds give us the prices legally and daily,
+which is the whole basis of the project; routing around a control a retailer deliberately deployed
+would trade that for nothing we need.
+
+**Known gaps, stated plainly:** Victory, Yochananof (pickup only), Osher Ad, Hazi Hinam, Machsanei
+Hashuk, am:pm, Stop Market and Fresh Market file no priced online storefront in the feeds, so they
+cannot be compared here.
 
 ### Semantic retrieval V2 (generic ontology + pgvector)
 

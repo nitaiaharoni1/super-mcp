@@ -10,6 +10,24 @@ import { registerTool } from "../register.js";
 import { locationShape, resolveToolLocation } from "../shared/location.js";
 
 export function registerStoreTools(server: McpServer): void {
+  registerListStoresTool(server);
+  registerGetPromotionsTool(server);
+}
+
+/**
+ * The delivery surface gets promotions but not the branch directory.
+ *
+ * A promotion is a fact about a chain's prices and applies whether the goods are
+ * carried out of a shop or driven to a door, so `get_promotions` is registered
+ * unchanged. `list_stores` is the physical surface's whole premise — branches
+ * within a radius — and its online counterpart is `list_delivery_options`, which
+ * answers the same question in the terms that apply here.
+ */
+export function registerOnlineStoreTools(server: McpServer): void {
+  registerGetPromotionsTool(server);
+}
+
+function registerListStoresTool(server: McpServer): void {
   registerTool(
     server,
     "list_stores",
@@ -39,6 +57,9 @@ export function registerStoreTools(server: McpServer): void {
     },
   );
 
+}
+
+function registerGetPromotionsTool(server: McpServer): void {
   registerTool(
     server,
     "get_promotions",

@@ -8,57 +8,36 @@ import {
 } from "../analytics/context.js";
 import { authenticate, recordUsage } from "../auth.js";
 import { beginPrivilegedAudit, finalizePrivilegedAudit } from "../services/privilegedAudit.js";
-import { protocolIdentityLine, resolveBuildRevision } from "./protocolIdentity.js";
-import { registerTools } from "./tools/index.js";
+import { resolveBuildRevision } from "./protocolIdentity.js";
+import { buildStoresInstructions, enabledSurfaces, type McpSurface } from "./surfaces.js";
 
+/**
+ * Instructions for the physical-stores surface.
+ *
+ * Kept as a named export because the deployed-contract canary and its tests read
+ * it directly; the text itself now lives with the surface definition, beside the
+ * online one it has to stay distinguishable from.
+ */
 export function buildMcpServerInstructions(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return (
-    "Shopping list → call optimize_basket exactly once with all items and location. " +
-    "Accept the default fast best-effort choices unless the user explicitly requests " +
-    "exact products; then set resolution_mode=strict. " +
-    "Never search or compare each basket line separately. " +
-    "Canonical Israeli supermarket product, price, and promotion data. Every price carries freshness: " +
-    "ingested_at is when the feed last showed us the item (the staleness signal), source_ts is when " +
-    "the chain last CHANGED that price — an old source_ts is normal for a stable price, not stale data. " +
-    "Call optimize_basket with items[{query|gtin|product_id, pack_qty|amount+unit}] " +
-    "and city (Hebrew/English), near=lat,lng, or location (free-text neighborhood/address, e.g. " +
-    "'נווה עמל, הרצליה'). Prefer location for neighborhoods; near remains coordinates. Do not combine " +
-    "near with location. If status is needs_confirmation, answer every required question and call again " +
-    "with only {continuation, answers}. If status is complete, use bestSingleStore / cheapestCompleteStore " +
-    "/ closestStore / multiStore. Compare stores on comparableTotal (same-basket figure that adds a " +
-    "market reference price for lines a store does not stock); raw total covers priced lines only, so " +
-    "check totalScope. Set preference=cheapest when the shopper says distance does not matter, " +
-    "preference=closest when they say price is not a big factor, else leave it balanced. " +
-    "Conditional prices are flagged: clubOnly needs the chain loyalty card and couponOnly " +
-    "needs a clipped coupon (plans report clubOnlyLines / couponOnlyLines) — say so rather " +
-    "than quoting them as the price anyone pays. " +
-    "Use search_products / resolve_products only for unresolved or missing lines. " +
-    "Use pack_qty alone for pack counts (3 milk cartons: pack_qty=3). " +
-    "Use amount+unit for natural counts and weighed goods " +
-    "(20 pitas: amount=20, unit=יח; 1.5kg: amount=1.5, unit=kg). " +
-    "If pack_qty is paired with a count unit (unit/יח), the unit is ignored. " +
-    "Location filters default to 10km when a " +
-    "point is resolved. Use get_promotions to explain discounts. " +
-    protocolIdentityLine(env)
-  );
+  return buildStoresInstructions(env);
 }
 
 /** Snapshot at module load for tests; recreate via buildMcpServerInstructions in createMcpServer. */
 export const MCP_SERVER_INSTRUCTIONS = buildMcpServerInstructions();
 
-function createMcpServer(analyticsCtx: AnalyticsRequestContext): McpServer {
-  const instructions = buildMcpServerInstructions();
+function createMcpServer(
+  surface: McpSurface,
+  analyticsCtx: AnalyticsRequestContext,
+): McpServer {
   const server = new McpServer(
-    { name: "super-mcp", version: resolveBuildRevision() },
-    {
-      instructions,
-    },
+    { name: surface.serverName, version: resolveBuildRevision() },
+    { instructions: surface.buildInstructions(process.env) },
   );
   // Bind before registerTools so every tool closure can resolve auth for capture.
   bindAnalyticsContext(server, analyticsCtx);
-  registerTools(server);
+  surface.registerTools(server);
   return server;
 }
 
@@ -69,18 +48,32 @@ const METHOD_NOT_ALLOWED = {
 };
 
 /**
- * Mounts a remote MCP server (Streamable HTTP, stateless) at /mcp on the same Fastify instance
- * as the REST API, sharing Bearer API-key auth. Query-string ?api_key= is accepted only when
- * SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 (legacy MCP escape hatch).
+ * Mounts every enabled MCP surface (Streamable HTTP, stateless) on the same Fastify
+ * instance as the REST API, sharing Bearer API-key auth. Query-string ?api_key= is
+ * accepted only when SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 (legacy MCP escape hatch).
+ *
+ * `/mcp` stays the physical-stores surface it has always been, so every key and
+ * client configured against it keeps working; the delivery surface is additive at
+ * `/mcp/online`. See `enabledSurfaces` for splitting them across deployments.
  */
 export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/mcp", async (request, reply) => {
+  for (const surface of enabledSurfaces()) {
+    registerSurfaceRoutes(app, surface);
+  }
+}
+
+function registerSurfaceRoutes(app: FastifyInstance, surface: McpSurface): void {
+  app.post(surface.path, async (request, reply) => {
     // Throws AppError on missing/invalid/rate-limited key; caught by the global error handler.
     const auth = await authenticate(request);
     const startedAt = Date.now();
     const auditId =
       auth.role === "master"
-        ? await beginPrivilegedAudit({ apiKeyId: auth.apiKeyId, method: request.method, route: "/mcp" })
+        ? await beginPrivilegedAudit({
+            apiKeyId: auth.apiKeyId,
+            method: request.method,
+            route: surface.path,
+          })
         : null;
     let auditErrorCode: string | null = null;
     let auditFinalized = false;
@@ -93,7 +86,7 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
       apiKeyId: auth.apiKeyId,
       role: auth.role,
     };
-    const server = createMcpServer(analyticsCtx);
+    const server = createMcpServer(surface, analyticsCtx);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     const finalizeAudit = async (statusCode: number, errorCode: string | null): Promise<void> => {
@@ -108,7 +101,7 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
       void finalizeAudit(statusCode, auditErrorCode).catch((err: unknown) => {
         request.log.error({ err }, "failed to finalize MCP privileged audit");
       });
-      recordUsage(auth.apiKeyId, "/mcp", statusCode, latency);
+      recordUsage(auth.apiKeyId, surface.path, statusCode, latency);
       void transport.close();
       void server.close();
     });
@@ -141,11 +134,11 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Stateless transport: no session to stream (GET) or terminate (DELETE).
-  app.get("/mcp", async (_request, reply) => {
+  app.get(surface.path, async (_request, reply) => {
     void reply.code(405).send(METHOD_NOT_ALLOWED);
   });
 
-  app.delete("/mcp", async (_request, reply) => {
+  app.delete(surface.path, async (_request, reply) => {
     void reply.code(405).send(METHOD_NOT_ALLOWED);
   });
 }

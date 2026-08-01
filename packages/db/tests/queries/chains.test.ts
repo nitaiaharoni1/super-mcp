@@ -28,7 +28,23 @@ describe("upsertStore coordinate integrity", () => {
       null,
       null, // geo_source: no valid feed coords → left for the geocoder
       "branch", // store_kind: derived from name+address
+      null, // feed_store_type: this caller supplied no <StoreType>
     ]);
+  });
+
+  it("persists the chain's declared <StoreType> and classifies from it", async () => {
+    // The feed's own answer outranks the name. "מרלוג אינטרנט" reads as a
+    // warehouse and is Rami Levy's online store; type 2 says so directly.
+    await upsertStore({
+      chainId: "7290058140886",
+      storeCode: "039",
+      name: "מרלוג אינטרנט",
+      feedStoreType: 2,
+    });
+
+    const params = query.mock.calls[0]?.[1] as unknown[];
+    expect(params[9]).toBe("online");
+    expect(params[10]).toBe(2);
   });
 
   it("tags valid incoming feed coordinates with geo_source 'feed'", async () => {

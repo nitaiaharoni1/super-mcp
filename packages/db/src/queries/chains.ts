@@ -54,6 +54,8 @@ export interface UpsertStoreInput {
   lng?: number;
   /** branch | online | pickup | warehouse — see classifyStoreKind in shared. */
   storeKind?: StoreKind;
+  /** The feed's own `<StoreType>`: 1 physical, 2 online, 3 both. */
+  feedStoreType?: number;
 }
 
 export async function upsertStore(input: UpsertStoreInput, client?: PoolClient): Promise<string> {
@@ -61,7 +63,8 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
   const geo = normalizeStoreCoordinates(input.lat, input.lng);
   // Derived here rather than trusted from the caller so no ingestion path can
   // forget it and leave an online storefront ranked as a shoppable branch.
-  const storeKind = input.storeKind ?? classifyStoreKind(input.name, input.address);
+  const storeKind =
+    input.storeKind ?? classifyStoreKind(input.name, input.address, input.feedStoreType);
   // Price/promo files may stub a branch before (or after) Stores XML lands.
   // Never let a "Store NNN" placeholder clobber a real branch name, and never
   // let a reingest erase or downgrade a hard-won geocoded point: coordinates are
@@ -69,8 +72,8 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
   // untouched except to (a) mark real feed coords 'feed' or (b) reset to NULL so
   // the address geocoder re-runs when a branch's street address actually changes.
   const res = await q.query<{ id: string }>(
-    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng, geo_source, store_kind)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng, geo_source, store_kind, feed_store_type)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      ON CONFLICT (chain_id, store_code) DO UPDATE SET
        name = CASE
          WHEN EXCLUDED.name ~ '^Store[[:space:]]' THEN store.name
@@ -79,11 +82,18 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
        -- Positive evidence (a non-branch kind) always wins. A "Store NNN"
        -- placeholder stubbed from a price file classifies as 'branch' and must
        -- never downgrade a storefront already identified from the Stores XML.
+       --
+       -- A row carrying the chain's own <StoreType> outranks even that, in BOTH
+       -- directions: only the Stores XML sets it, and it is the one source
+       -- entitled to say "this really is a branch" and undo an earlier guess.
        store_kind = CASE
+         WHEN EXCLUDED.feed_store_type IS NOT NULL THEN EXCLUDED.store_kind
          WHEN EXCLUDED.store_kind <> 'branch' THEN EXCLUDED.store_kind
          WHEN EXCLUDED.name ~ '^Store[[:space:]]' THEN store.store_kind
          ELSE EXCLUDED.store_kind
        END,
+       -- Price-file stubs carry no <StoreType>; never let one erase the real value.
+       feed_store_type = COALESCE(EXCLUDED.feed_store_type, store.feed_store_type),
        address = COALESCE(EXCLUDED.address, store.address),
        city = COALESCE(EXCLUDED.city, store.city),
        zip = COALESCE(EXCLUDED.zip, store.zip),
@@ -114,6 +124,7 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
       geo?.lng ?? null,
       geo ? "feed" : null,
       storeKind,
+      input.feedStoreType ?? null,
     ],
   );
   return res.rows[0]!.id;

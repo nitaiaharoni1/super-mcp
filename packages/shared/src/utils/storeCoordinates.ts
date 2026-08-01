@@ -32,3 +32,28 @@ export function hasValidStoreCoordinates(value: {
 }): boolean {
   return normalizeStoreCoordinates(value.lat, value.lng) != null;
 }
+
+const EARTH_RADIUS_KM = 6371;
+
+/**
+ * Great-circle distance in km, in TypeScript.
+ *
+ * Store ranking measures distance in SQL (`haversineKmSql`) because it filters
+ * hundreds of rows inside the query. Delivery coverage is the opposite shape: a
+ * handful of service areas already in memory, tested against one address. Same
+ * formula, deliberately kept in step with the SQL version.
+ */
+export function haversineKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const toRad = (deg: number): number => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(a)));
+}

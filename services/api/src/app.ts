@@ -11,6 +11,7 @@ import {
   registerAccessRoutes,
   registerAdminRoutes,
   registerBasketRoutes,
+  registerDeliveryRoutes,
   registerProductRoutes,
   registerPromotionRoutes,
   registerReadinessRoute,
@@ -163,6 +164,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerStoreRoutes(app);
   await registerPromotionRoutes(app);
   await registerBasketRoutes(app);
+  await registerDeliveryRoutes(app);
   await registerAdminRoutes(app);
   await registerAccessRoutes(app);
   await registerMcpRoutes(app);

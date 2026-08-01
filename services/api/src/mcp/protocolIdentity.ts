@@ -1,6 +1,16 @@
 /** Machine-checkable basket protocol identity for deployed MCP parity. */
 export const BASKET_PROTOCOL_ID = "basket-optimize-fast-v2";
 
+/**
+ * The delivery surface's own identity.
+ *
+ * Deliberately a separate id rather than a suffix on the basket one: the two
+ * surfaces version independently, and a canary that accepted either could not
+ * tell "the online server is deployed at the wrong revision" from "the online
+ * server is not deployed at all".
+ */
+export const DELIVERY_PROTOCOL_ID = "delivery-optimize-v1";
+
 const DEV_FALLBACK_REVISION = "dev";
 
 /**
@@ -20,8 +30,9 @@ export function resolveBuildRevision(
 /** Single machine-parseable line embedded in MCP server instructions. */
 export function protocolIdentityLine(
   env: NodeJS.ProcessEnv = process.env,
+  protocolId: string = BASKET_PROTOCOL_ID,
 ): string {
-  return `protocol=${BASKET_PROTOCOL_ID}; build=${resolveBuildRevision(env)}`;
+  return `protocol=${protocolId}; build=${resolveBuildRevision(env)}`;
 }
 
 export function parseProtocolIdentityLine(

@@ -34,7 +34,10 @@ export function extractApiKey(request: FastifyRequest): string | null {
     if (token) return token;
   }
   const path = request.url.split("?")[0];
-  if (path === "/mcp" && process.env.SUPER_MCP_ALLOW_MCP_QUERY_API_KEY === "1") {
+  // Every MCP surface, not just /mcp: clients that need the escape hatch on one
+  // need it on the other, and leaving it off silently breaks only the new URL.
+  const isMcpPath = path === "/mcp" || path?.startsWith("/mcp/");
+  if (isMcpPath && process.env.SUPER_MCP_ALLOW_MCP_QUERY_API_KEY === "1") {
     const q = (request.query as Record<string, unknown> | undefined)?.["api_key"];
     if (typeof q === "string" && q.trim().length > 0) return q.trim();
   }

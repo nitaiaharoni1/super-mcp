@@ -39,6 +39,12 @@ export type RawStoreRecord = {
   city?: string;
   zip?: string;
   geo?: GeoPoint;
+  /**
+   * The feed's own `<StoreType>`: 1 = physical branch, 2 = online endpoint,
+   * 3 = both. Undefined when the chain omits the element. This is the chain's
+   * own declaration and outranks any guess made from the store's name.
+   */
+  storeType?: number;
   raw?: Record<string, unknown>;
 };
 

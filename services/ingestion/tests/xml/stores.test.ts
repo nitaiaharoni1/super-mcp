@@ -29,3 +29,26 @@ describe("parseStoresXml coordinate integrity", () => {
     });
   });
 });
+
+describe("parseStoresXml <StoreType>", () => {
+  /** Shufersal's own file, byte for byte apart from the wrapper. */
+  const shufersal = `<Chain><ChainID>7290027600007</ChainID><SubChains><SubChain>
+    <SubChainID>2</SubChainID><Stores>
+      <Store><StoreID>413</StoreID><StoreType>2</StoreType>
+        <StoreName>שופרסל ONLINE</StoreName><Address>WWW.SHUFERSAL.CO.IL</Address></Store>
+      <Store><StoreID>374</StoreID><StoreType>1</StoreType>
+        <StoreName>שלי הרצליה- הבנים</StoreName><Address>הבנים 46</Address></Store>
+    </Stores></SubChain></SubChains></Chain>`;
+
+  it("reads the chain's declared endpoint type", () => {
+    const stores = parseStoresXml(shufersal, "7290027600007");
+    expect(stores.map((s) => [s.storeId, s.storeType])).toEqual([
+      ["413", 2],
+      ["374", 1],
+    ]);
+  });
+
+  it("leaves it undefined when the chain omits the element", () => {
+    expect(parseStoresXml(storesXml("32.16", "34.84"), "chain-1")[0]?.storeType).toBeUndefined();
+  });
+});

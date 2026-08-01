@@ -23,6 +23,26 @@ export type StoreKind = "branch" | "online" | "pickup" | "warehouse";
 /** Every kind a shopper can physically walk into and buy at shelf prices. */
 export const SHOPPABLE_STORE_KINDS: readonly StoreKind[] = ["branch"];
 
+/** Every kind that fulfils an order placed on a website rather than at a till. */
+export const ONLINE_STORE_KINDS: readonly StoreKind[] = ["online", "pickup"];
+
+/**
+ * The `<StoreType>` codes the price-transparency schema defines.
+ *
+ * The regulations' Stores file carries the chain's OWN declaration of what each
+ * endpoint is, and every chain we ingest populates it. It was being dropped at
+ * parse time, which is why `store_kind` had to be guessed from the store's name
+ * and then patched by three separate migrations (023, 024, 028).
+ */
+export const FEED_STORE_TYPE = {
+  /** Physical branch. */
+  physical: 1,
+  /** Online / e-commerce endpoint: no till, no shopper walks in. */
+  online: 2,
+  /** Both: a real branch that also fulfils web orders. Shoppable in person. */
+  both: 3,
+} as const;
+
 /**
  * Store-name-only city abbreviations. Feeds compress the locality inside the
  * branch name ("דיל פ\"ת- אליעזר פרדימן", "שלי ת\"א- נורדאו"). Keys are
@@ -155,18 +175,45 @@ function isUrlOnlyAddress(address: string | null | undefined): boolean {
 /**
  * Classify a store row as a shoppable branch or a fulfilment endpoint.
  *
- * Order matters: "מרלוג אינטרנט" is a warehouse that also says internet, and a
- * pickup point is more specific than the generic online marker its name may
- * carry. Warehouse → pickup → online → branch.
+ * `feedStoreType` is the chain's own `<StoreType>` and outranks the name, which
+ * is only ever a guess. Measured across every Stores file we hold, the two
+ * disagree in both directions:
+ *
+ *   - "מרלוג אינטרנט" (Rami Levy 039) reads as a warehouse and was classified
+ *     one, so its 15,790 prices sat behind the wrong label. The feed calls it
+ *     type 2: it is Rami Levy's online store, and belongs in the online product.
+ *   - "קולינריק חורב" (Keshet 103) files a URL as part of its address and needed
+ *     a hand-written exception in migration 024 to stay a branch. The feed calls
+ *     it type 3 — both — which says the same thing without the exception.
+ *
+ * Precedence within a type-2 endpoint still comes from the name, because the
+ * schema has no code for "collect it yourself": a pickup point and a delivery
+ * storefront are both type 2 but are different services to a shopper.
+ *
+ * Type 1 and 3 both mean "a person can walk in", so they suppress the online
+ * guess entirely. They do NOT suppress the warehouse guess: the schema has no
+ * warehouse code, so a chain filing a distribution centre has to call it type 1,
+ * and ranking one as a branch is the exact wasted-trip bug this all exists to
+ * prevent.
+ *
+ * With no feed type, behaviour is unchanged: warehouse → pickup → online → branch.
  */
 export function classifyStoreKind(
   name: string | null | undefined,
   address?: string | null | undefined,
+  feedStoreType?: number | null | undefined,
 ): StoreKind {
   const haystack = `${scrubNullChars(name ?? "")} ${scrubNullChars(address ?? "")}`.trim();
+  const walkIn =
+    feedStoreType === FEED_STORE_TYPE.physical || feedStoreType === FEED_STORE_TYPE.both;
+
+  if (feedStoreType === FEED_STORE_TYPE.online) {
+    return PICKUP_STORE_PATTERN.test(haystack) ? "pickup" : "online";
+  }
   if (!haystack) return "branch";
   if (WAREHOUSE_STORE_PATTERN.test(haystack)) return "warehouse";
   if (PICKUP_STORE_PATTERN.test(haystack)) return "pickup";
+  if (walkIn) return "branch";
   if (ONLINE_STORE_PATTERN.test(haystack)) return "online";
   if (isUrlOnlyAddress(address)) return "online";
   return "branch";

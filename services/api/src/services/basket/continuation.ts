@@ -4,7 +4,11 @@ import type {
   BasketAnswer,
   BasketContinuationV1,
   BasketInitialInput,
+  BasketItemInput,
 } from "./types.js";
+
+/** Any request shape a signed continuation can carry: basket, delivery, future. */
+type ContinuableInput = { items: BasketItemInput[] };
 
 const TOKEN_TTL_MS = 30 * 60 * 1000;
 
@@ -18,17 +22,17 @@ function signature(payload: string, secret: string): Buffer {
   return createHmac("sha256", secret).update(payload).digest();
 }
 
-export function createBasketContinuationPayload(
-  input: BasketContinuationV1["input"],
+export function createBasketContinuationPayload<TInput extends ContinuableInput = BasketInitialInput>(
+  input: TInput,
   questions: BasketContinuationV1["questions"],
   now = Date.now(),
   resolutionKey?: string,
-): BasketContinuationV1 {
+): BasketContinuationV1<TInput> {
   return { version: 1, issuedAt: now, expiresAt: now + TOKEN_TTL_MS, input, questions, resolutionKey };
 }
 
-export function encodeBasketContinuation(
-  payload: BasketContinuationV1,
+export function encodeBasketContinuation<TInput extends ContinuableInput = BasketInitialInput>(
+  payload: BasketContinuationV1<TInput>,
   secret: string,
 ): string {
   assertBasketContinuationSecret(secret);
@@ -37,11 +41,11 @@ export function encodeBasketContinuation(
   return `${body}.${mac}`;
 }
 
-export function decodeBasketContinuation(
+export function decodeBasketContinuation<TInput extends ContinuableInput = BasketInitialInput>(
   token: string,
   secret: string,
   now = Date.now(),
-): BasketContinuationV1 {
+): BasketContinuationV1<TInput> {
   assertBasketContinuationSecret(secret);
   const [body, suppliedMac, extra] = token.split(".");
   if (!body || !suppliedMac || extra) {
@@ -52,11 +56,11 @@ export function decodeBasketContinuation(
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
     throw new AppError("invalid_basket_continuation", "invalid basket continuation", 400);
   }
-  let parsed: BasketContinuationV1;
+  let parsed: BasketContinuationV1<TInput>;
   try {
     parsed = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8"),
-    ) as BasketContinuationV1;
+    ) as BasketContinuationV1<TInput>;
   } catch {
     throw new AppError("invalid_basket_continuation", "invalid basket continuation", 400);
   }
@@ -77,10 +81,10 @@ export function decodeBasketContinuation(
  * Apply confirmed option answers onto the original initial input. Preserves the
  * free-text query and quantity fields; sets intentModeOverride from selectionEffect.
  */
-export function applyBasketAnswers(
-  payload: BasketContinuationV1,
+export function applyBasketAnswers<TInput extends ContinuableInput = BasketInitialInput>(
+  payload: BasketContinuationV1<TInput>,
   answers: BasketAnswer[],
-): BasketInitialInput {
+): TInput {
   const answersByIndex = new Map<number, BasketAnswer>();
   for (const answer of answers) {
     if (answersByIndex.has(answer.itemIndex)) {

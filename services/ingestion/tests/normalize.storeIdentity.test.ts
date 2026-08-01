@@ -132,6 +132,7 @@ describe("store kind at ingest", () => {
   });
 
   it("marks a logistics warehouse ahead of its online marker", async () => {
+    // Only when the chain does not say otherwise — see the <StoreType> suite below.
     await ingest(
       storeRecord({ chainId: "7290058140886", storeId: "039", name: "מרלוג אינטרנט" }),
     );
@@ -175,6 +176,83 @@ describe("store kind at ingest", () => {
     await ingest(storeRecord({ name: "רמת השרון" }));
     expect(upsertStore).toHaveBeenCalledWith(
       expect.objectContaining({ storeKind: "branch" }),
+    );
+  });
+});
+
+/**
+ * The Stores feed carries <StoreType>, the chain's own answer to the question
+ * every rule above is trying to guess. It was parsed away for months.
+ */
+describe("<StoreType> from the feed", () => {
+  withoutRegionFilter();
+
+  it("stores the declared type so the guess can be audited against it", async () => {
+    await ingest(storeRecord({ storeId: "413", name: "שופרסל ONLINE", storeType: 2 }));
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ feedStoreType: 2, storeKind: "online" }),
+    );
+  });
+
+  it("believes the chain over the name: מרלוג אינטרנט is Rami Levy's online store", async () => {
+    // 15,790 prices, and the storefront behind rami-levy.co.il. "מרלוג" is the
+    // right word for a depot that restocks branches and the wrong one for a shop
+    // that ships to customers. Read as a warehouse, Rami Levy is simply absent
+    // from every online query.
+    await ingest(
+      storeRecord({
+        chainId: "7290058140886",
+        storeId: "039",
+        name: "מרלוג אינטרנט",
+        storeType: 2,
+      }),
+    );
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ storeKind: "online" }),
+    );
+  });
+
+  it("keeps a type-3 shop shoppable without a hand-carved exception", async () => {
+    // Keshet 103 files "חורב 15 | www.kulinarik.co.il/|" and is a real branch.
+    // Migration 024 had to spell out that a URL inside an address is not proof
+    // of an online store. Type 3 — both — says it directly.
+    await ingest(
+      storeRecord({
+        chainId: "7290785400000",
+        storeId: "103",
+        name: "קולינריק חורב",
+        address: "חורב 15 | www.kulinarik.co.il/|",
+        storeType: 3,
+      }),
+    );
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ storeKind: "branch" }),
+    );
+  });
+
+  it("still calls a type-2 collection point a pickup, not a delivery storefront", async () => {
+    // The schema has no code for "collect it yourself", so both arrive as type 2
+    // — but a shopper has to drive to one of them.
+    await ingest(storeRecord({ storeId: "150", name: "הדרים פיקאפ", storeType: 2 }));
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ storeKind: "pickup" }),
+    );
+  });
+
+  it("does not let a type-1 declaration turn a distribution centre into a shop", async () => {
+    // There is no warehouse code, so a chain filing a depot has to call it
+    // type 1. Ranking one as a branch is the wasted-trip bug this all exists
+    // to prevent.
+    await ingest(storeRecord({ storeId: "900", name: "מרכז הפצה ראשל\"צ", storeType: 1 }));
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ storeKind: "warehouse" }),
+    );
+  });
+
+  it("leaves the type unset when the chain omits the element", async () => {
+    await ingest(storeRecord({ name: "רמת השרון" }));
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ feedStoreType: undefined, storeKind: "branch" }),
     );
   });
 });

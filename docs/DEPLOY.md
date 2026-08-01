@@ -23,6 +23,7 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `CORS_ORIGINS` | server (required for the marketing access form; comma-separated browser origins) |
 | `SUPER_MCP_READY_REQUIRE_AUTH` | server (`1` recommended on public hosts) |
 | `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY` | server (must stay unset/`0`) |
+| `SUPER_MCP_SURFACES` | server (optional). Unset serves both MCP surfaces; `stores` or `online` splits them across deployments. See below. |
 | `NOMINATIM_USER_AGENT` | **server (required)**. OSM returns 403 to the placeholder default, so address geocoding silently degrades to city centroids. See below. |
 | `SUPER_MCP_NO_CAP` | **ingest job (required, `1`)**. Without it the ingest silently covers ~1% of stores. See below. |
 | `NEXT_PUBLIC_MCP_URL` | web hosting only |
@@ -160,3 +161,38 @@ throttles CPU outside a request unless CPU-always-on is set, so that warm-up may
 not complete there; the request path is unaffected (it never awaits it), but
 addresses will keep resolving at city precision until the cache is warmed some
 other way.
+
+## Two MCP surfaces, one image
+
+`/mcp` (physical stores) and `/mcp/online` (delivery) are served by the same process by default, so a
+single Cloud Run service answers both URLs and nothing changes for existing clients: `/mcp` keeps its
+path, its tool set, and its `basket-optimize-fast-v2` protocol id.
+
+`SUPER_MCP_SURFACES` splits them without a second codebase. Deploy the same image twice:
+
+```bash
+gcloud run deploy super-mcp        --set-env-vars SUPER_MCP_SURFACES=stores  ...
+gcloud run deploy super-mcp-online --set-env-vars SUPER_MCP_SURFACES=online  ...
+```
+
+Both still need the same `DATABASE_URL`: the surfaces share one catalogue, and the online surface's
+`compare_in_store` option prices the basket at physical branches too. Splitting them is a scaling and
+blast-radius decision, not a data one.
+
+A typo in the variable throws at boot rather than serving no MCP at all.
+
+### Delivery terms need their own refresh
+
+Item prices arrive with the normal ingest. Delivery fees, minimums and service areas do not: they live
+in `services/ingestion/src/fulfillment/catalog.ts` and reach the database only via
+
+```bash
+pnpm ingest:fulfillment            # --dry-run to see what would change
+```
+
+Run it after any deploy that changes the catalogue, and after the first Stores ingest on a fresh
+database (the sync skips a storefront whose `store` row does not exist yet and exits non-zero saying so).
+
+Terms decay deliberately: a figure older than 90 days reports `confidence: "unknown"` and stops being
+quoted. If `/v1/delivery/options` starts returning `unknown` across the board, the catalogue is overdue
+for a human re-read, not broken.

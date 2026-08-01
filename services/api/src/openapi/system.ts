@@ -25,7 +25,10 @@ export const readinessReportSchema = {
   },
 };
 
-export function systemPaths(mcpToolList: string): Record<string, unknown> {
+export function systemPaths(
+  storesMcpToolList: string,
+  onlineMcpToolList: string,
+): Record<string, unknown> {
   return {
     "/health": {
       get: {
@@ -117,13 +120,29 @@ export function systemPaths(mcpToolList: string): Record<string, unknown> {
     },
     "/mcp": {
       post: {
-        summary: "MCP Streamable HTTP endpoint (JSON-RPC 2.0)",
+        summary: "MCP Streamable HTTP endpoint — physical stores (JSON-RPC 2.0)",
         description:
-          `Remote MCP server exposing ${mcpToolList}. For shopping lists: call optimize_basket with ` +
-          "items and location; if status is needs_confirmation, resume once with continuation and answers. " +
-          "Use pack_qty for shelf packs and amount+unit for physical need. Auth is Bearer by default; " +
-          "query-string ?api_key= is accepted only on /mcp when SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 " +
-          "(legacy escape hatch).",
+          `Remote MCP server for shops a shopper drives to, exposing ${storesMcpToolList}. ` +
+          "For shopping lists: call optimize_basket with items and location; if status is " +
+          "needs_confirmation, resume once with continuation and answers. " +
+          "Use pack_qty for shelf packs and amount+unit for physical need. " +
+          "For groceries delivered to an address, use /mcp/online instead. " +
+          "Auth is Bearer by default; query-string ?api_key= is accepted only on the MCP paths when " +
+          "SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 (legacy escape hatch).",
+        responses: { "200": { description: "JSON-RPC response or SSE stream" } },
+      },
+    },
+    "/mcp/online": {
+      post: {
+        summary: "MCP Streamable HTTP endpoint — online delivery (JSON-RPC 2.0)",
+        description:
+          `Remote MCP server for groceries delivered to an address, exposing ${onlineMcpToolList}. ` +
+          "Ranks storefronts on what the ORDER costs (items + delivery fee + service fee), not what the " +
+          "goods cost, because a ₪35.90 delivery fee outweighs most price differences between chains. " +
+          "Online prices are not shelf prices: each storefront's own regulated feed rows are used. " +
+          "Delivery fees carry a confidence and a verifiedAt — a fee marked unknown must not be quoted. " +
+          "Served by the same process as /mcp by default; set SUPER_MCP_SURFACES to split them across " +
+          "deployments.",
         responses: { "200": { description: "JSON-RPC response or SSE stream" } },
       },
     },

@@ -17,6 +17,9 @@ export function parseStoresXml(xml: string, chainId: string): RawStoreRecord[] {
     const lat = num(s.Latitude ?? s.Lat ?? s.StoreLatitude);
     const lng = num(s.Longitude ?? s.Lng ?? s.Lon ?? s.StoreLongitude);
     const geo = normalizeStoreCoordinates(lat, lng);
+    // The chain's own declaration of physical (1) / online (2) / both (3).
+    // Every chain we ingest populates it; it just was not being read.
+    const storeType = num(s.StoreType ?? s.StoreTypeId ?? s.STORETYPE);
     stores.push({
       kind: "store",
       chainId: text(s.ChainId ?? s.ChainID ?? root.ChainId ?? root.ChainID) || chainId,
@@ -26,6 +29,7 @@ export function parseStoresXml(xml: string, chainId: string): RawStoreRecord[] {
       city: text(s.City) || undefined,
       zip: text(s.ZipCode ?? s.ZIPCode) || undefined,
       geo: geo ?? undefined,
+      storeType: storeType ?? undefined,
       raw: s,
     });
   };

@@ -53,6 +53,71 @@ Be the **canonical, queryable, agent-native layer** over supermarket data: inges
 **Operator (internal)**
 - As the operator, I want per-adapter ingestion health (last run, files processed, parse errors, row deltas) so that a silently broken feed is caught within one cycle.
 
+## Two surfaces: physical stores and online delivery
+
+**Decision (2026-08-01): split the MCP in two, over one codebase and one database.**
+
+### Why two
+
+Physical and online look like the same product and are not. They optimise different things:
+
+| | physical (`/mcp`) | online (`/mcp/online`) |
+| --- | --- | --- |
+| objective | basket + travel | basket + delivery fee + service fee |
+| cost of distance | ₪/km, a smooth estimate we invented | a fee the retailer publishes, and a **step function** of the subtotal |
+| feasibility | a branch inside the radius | serves this address **and** clears the minimum order |
+| second stop | another trip, worth roughly ₪20 | another delivery fee, worth exactly what it says |
+
+Three consequences the physical engine has no way to express:
+
+1. **Minimum order is eligibility, not a penalty.** Below ₪300 at Tiv Taam there is no order. Folding that
+   into a cost would let an unplaceable order win on price.
+2. **Free-delivery thresholds make the cost non-convex.** Spending more can cost less, and saying so
+   ("₪22 more and delivery drops from ₪29.90 to ₪0") is advice no shelf-price comparison can produce.
+3. **Confidence is a ranking axis.** A fee we verified and a fee we assumed are not comparable numbers.
+
+### Why not two repos
+
+Everything below the objective function is shared and hard-won: GTIN identity, Hebrew search, the
+deterministic-first line resolver, product classes, unit normalisation, promotion mechanics, freshness.
+Forking it doubles the maintenance and guarantees drift. One codebase also buys a feature neither half
+could have alone: `compare_in_store` prices the same basket at nearby branches and reports the delivery
+premium in shekels.
+
+`SUPER_MCP_SURFACES` splits the two across deployments from one image when that becomes a scaling or
+blast-radius question.
+
+### Where online data comes from
+
+**Prices: the same regulated feeds.** The Stores file carries `<StoreType>` (1 physical, 2 online,
+3 both) and every chain populates it. We had been ignoring it and guessing `store_kind` from store names,
+which mislabelled רמי לוי's מרלוג אינטרנט as a warehouse and hid the second-largest online catalogue in
+the database. Thirteen storefronts publish full priced catalogues this way, about 139k price rows.
+
+**Online prices are not shelf prices.** Measured per storefront against the same chain's branches:
+Tiv Taam depots 99% identical, שופרסל ONLINE 84.6%, רמי לוי 22%, קרפור אונליין 7.8% *below* its own
+shelves, the Wolt storefront +25%. There is no rule to derive one from the other, so each storefront is
+priced from its own feed rows.
+
+**Delivery terms: a curated table with provenance.** No feed carries them and no chain exposes a stable
+endpoint. They live in `services/ingestion/src/fulfillment/catalog.ts` with a source URL and a read date
+per number, and decay to `unknown` after 90 days. Rami Levy held ₪29.90 for fifteen years and then moved
+20% in a month; the failure mode to design against is a table that looks fine and is silently stale.
+
+**Retailer-site scraping is out, deliberately.** Six chains run bot management on their own domains,
+Shufersal publishes a crawl window a catalogue crawl cannot honour, and Rami Levy's robots.txt disallows
+its API path. The regulated feeds are the project's whole legal basis; routing around a control a
+retailer deployed on purpose would trade that away for data we can already get.
+
+### Non-goals for this split
+
+- **Live stock.** The feeds carry price, not availability. `not_carried_by_chain` means the storefront
+  does not list the item, not that it is out of stock today.
+- **Slot booking or real-time ETAs.** Behind an address and usually a login at every chain.
+- **Marketplace catalogues (Wolt, Yango) beyond what the feeds carry.** Exactly one Wolt storefront files
+  a regulated price feed; the rest would require scraping.
+- **Placing the order.** Unchanged from the v1 non-goals below.
+
 ## System Design (engineering plan)
 
 ### Stack decision
