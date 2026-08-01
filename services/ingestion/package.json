@@ -6,6 +6,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "sync-fulfillment": "tsx src/scripts/syncFulfillment.ts",
+    "start:online": "tsx src/online/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

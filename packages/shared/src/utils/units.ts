@@ -21,6 +21,14 @@ const UNIT_ALIASES: Record<string, { unit: CanonicalUnit; factorToCanonical: num
   g: { unit: "g", factorToCanonical: 1 },
   גרם: { unit: "g", factorToCanonical: 1 },
   גרמים: { unit: "g", factorToCanonical: 1 },
+  // Abbreviated forms. Marketplace listings write "900 ג׳" where a feed writes
+  // "900 גרם", and cleanUnit has already folded the geresh to an apostrophe.
+  // The name-parsing regexes further down this file have always read a bare ג
+  // as grams; the alias table simply had not caught up.
+  "ג'": { unit: "g", factorToCanonical: 1 },
+  ג: { unit: "g", factorToCanonical: 1 },
+  גר: { unit: "g", factorToCanonical: 1 },
+  "גר'": { unit: "g", factorToCanonical: 1 },
   gram: { unit: "g", factorToCanonical: 1 },
   grams: { unit: "g", factorToCanonical: 1 },
   kg: { unit: "g", factorToCanonical: 1000 },

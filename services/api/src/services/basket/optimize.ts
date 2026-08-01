@@ -148,6 +148,11 @@ export async function resolveBasketLines(
       near: input.near,
       radiusKm,
       storeIds: signalStoreIds.length > 0 ? signalStoreIds : undefined,
+      // This surface can only sell what a branch stocks. Without it, products
+      // that exist solely online win candidate slots on name score and are then
+      // carried through class equivalence and pricing before being dropped for
+      // having no branch price.
+      branchStockedOnly: true,
     }),
     reuse,
   );

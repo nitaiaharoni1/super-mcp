@@ -1,5 +1,10 @@
 import type { PoolClient } from "pg";
-import { classifyStoreKind, normalizeStoreCoordinates, type StoreKind } from "@super-mcp/shared";
+import {
+  classifyStoreKind,
+  normalizeStoreCoordinates,
+  type PriceSource,
+  type StoreKind,
+} from "@super-mcp/shared";
 import { getPool } from "../client/index.js";
 
 export interface UpsertChainInput {
@@ -56,6 +61,8 @@ export interface UpsertStoreInput {
   storeKind?: StoreKind;
   /** The feed's own `<StoreType>`: 1 physical, 2 online, 3 both. */
   feedStoreType?: number;
+  /** feed (regulated filing) or scraped (read off a website). */
+  priceSource?: PriceSource;
 }
 
 export async function upsertStore(input: UpsertStoreInput, client?: PoolClient): Promise<string> {
@@ -72,8 +79,8 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
   // untouched except to (a) mark real feed coords 'feed' or (b) reset to NULL so
   // the address geocoder re-runs when a branch's street address actually changes.
   const res = await q.query<{ id: string }>(
-    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng, geo_source, store_kind, feed_store_type)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `INSERT INTO store (chain_id, store_code, name, address, city, zip, lat, lng, geo_source, store_kind, feed_store_type, price_source)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (chain_id, store_code) DO UPDATE SET
        name = CASE
          WHEN EXCLUDED.name ~ '^Store[[:space:]]' THEN store.name
@@ -94,6 +101,21 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
        END,
        -- Price-file stubs carry no <StoreType>; never let one erase the real value.
        feed_store_type = COALESCE(EXCLUDED.feed_store_type, store.feed_store_type),
+       -- A store keeps the provenance of whichever source is writing it now. A
+       -- chain can have both (Victory files branches AND runs a scraped
+       -- storefront), and each row must say which it is.
+       --
+       -- 'scraped' is sticky against a bare 'feed' write, because 'feed' is the
+       -- column default and therefore also what an unrelated caller that forgot
+       -- to pass provenance would send. Losing the flag that way is silent and
+       -- makes a scraped price indistinguishable from a filed one; a store that
+       -- genuinely moves onto a regulated feed is a deliberate reingest, and it
+       -- gets its own store row from the Stores file anyway.
+       price_source = CASE
+         WHEN store.price_source = 'scraped' AND EXCLUDED.price_source = 'feed'
+              AND EXCLUDED.name ~ '^Store[[:space:]]' THEN store.price_source
+         ELSE EXCLUDED.price_source
+       END,
        address = COALESCE(EXCLUDED.address, store.address),
        city = COALESCE(EXCLUDED.city, store.city),
        zip = COALESCE(EXCLUDED.zip, store.zip),
@@ -125,6 +147,7 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
       geo ? "feed" : null,
       storeKind,
       input.feedStoreType ?? null,
+      input.priceSource ?? "feed",
     ],
   );
   return res.rows[0]!.id;

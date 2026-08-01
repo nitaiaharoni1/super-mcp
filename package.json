@@ -19,6 +19,7 @@
     "db:semantic-index": "pnpm --filter @super-mcp/shared build && pnpm --filter @super-mcp/db semantic-index",
     "db:benchmark-semantic": "pnpm --filter @super-mcp/shared build && pnpm --filter @super-mcp/db benchmark-semantic",
     "ingest": "pnpm --filter @super-mcp/db build && pnpm --filter @super-mcp/shared build && pnpm --filter @super-mcp/ingestion start",
+    "ingest:online": "pnpm --filter @super-mcp/db build && pnpm --filter @super-mcp/shared build && pnpm --filter @super-mcp/ingestion start:online",
     "ingest:fulfillment": "pnpm --filter @super-mcp/db build && pnpm --filter @super-mcp/shared build && pnpm --filter @super-mcp/ingestion sync-fulfillment",
     "ingest:fixture": "pnpm --filter @super-mcp/db build && pnpm --filter @super-mcp/shared build && pnpm --filter @super-mcp/ingestion start -- --fixture",
     "create-key": "pnpm --filter @super-mcp/api create-key",

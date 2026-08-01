@@ -22,6 +22,14 @@ export interface SearchProductsParams {
   semanticExpand?: boolean;
   /** When true and location is set, drop products with no local price. Default false. */
   inStockOnly?: boolean;
+  /**
+   * Restrict to products at least one physical branch stocks. Default false.
+   *
+   * This is the catalogue half of the physical/online split: an online-only
+   * product is not a thing the drive-to-the-shop surface can offer, and letting
+   * it into the candidate pool costs real time for a result that is discarded.
+   */
+  branchStockedOnly?: boolean;
 }
 
 export type SearchMatchedVia = "product" | "listing" | "gtin" | "vector" | "alias";

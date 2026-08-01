@@ -71,6 +71,7 @@ export {
   deactivateFulfillmentServicesExcept,
   findStoreIdByCode,
   listFulfillmentServices,
+  listScrapedOnlineStores,
   upsertFulfillmentService,
   type FulfillmentServiceRow,
   type UpsertFulfillmentServiceInput,

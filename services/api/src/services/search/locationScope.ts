@@ -6,6 +6,8 @@ export interface SearchLocationScope {
   near?: GeoPoint;
   radiusKm?: number;
   storeIds?: string[];
+  /** Catalogue scope, not location: see ResolveLocationScope. */
+  branchStockedOnly?: boolean;
 }
 
 /**
@@ -14,10 +16,12 @@ export interface SearchLocationScope {
  * stricter and more expensive without changing the intended scope.
  */
 export function toSearchLocationParams(scope: SearchLocationScope): SearchLocationScope {
+  // branchStockedOnly rides along on both paths: it is a catalogue predicate, not
+  // a location one, so the storeIds short-circuit must not drop it.
   if (scope.storeIds && scope.storeIds.length > 0) {
-    return { storeIds: scope.storeIds };
+    return { storeIds: scope.storeIds, branchStockedOnly: scope.branchStockedOnly };
   }
-  const out: SearchLocationScope = {};
+  const out: SearchLocationScope = { branchStockedOnly: scope.branchStockedOnly };
   if (scope.city) out.city = scope.city;
   if (scope.near) out.near = scope.near;
   if (scope.radiusKm != null) out.radiusKm = scope.radiusKm;

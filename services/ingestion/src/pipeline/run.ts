@@ -118,8 +118,22 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
   try {
     const files = await adapter.discover();
     result.filesDiscovered = files.length;
+    // Any file that carries prices counts, not just full snapshots.
+    //
+    // The check asks "did this run find anything priced at all", and a source
+    // that publishes incremental files answers yes. Counting only the *full
+    // variants marked every such run `degraded` with "no price/promo files
+    // selected" while it was in fact writing thousands of rows without a single
+    // error, which is an alert that fires on healthy runs and therefore trains
+    // people to ignore it. The online sources hit this first because a Wolt
+    // category page and a stor.ai search result are genuinely partial, but the
+    // regulated `Price`/`Promo` files have always been in the same position.
     result.priceFilesDiscovered = files.filter(
-      (f) => f.kind === "pricesfull" || f.kind === "promosfull",
+      (f) =>
+        f.kind === "pricesfull" ||
+        f.kind === "promosfull" ||
+        f.kind === "prices" ||
+        f.kind === "promos",
     ).length;
     if (files.length === 0) {
       result.status = "empty";

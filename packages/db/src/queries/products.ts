@@ -155,17 +155,29 @@ export interface StoreCountRefreshResult {
  * to rule out. Idempotent, and never fatal to an ingest.
  */
 export async function refreshProductStoreCounts(): Promise<StoreCountRefreshResult> {
+  // Both counts in one pass: they scan the same join, and computing them apart
+  // lets them disagree, which is worse than either being briefly stale.
+  //
+  // branch_store_count counts ONLY shoppable branches. It is what the physical
+  // surface filters on, because a product sold solely online cannot be bought by
+  // walking in — and letting such products win candidate slots cost that surface
+  // roughly 9 seconds a basket the first time an online ingest ran.
   const res = await query(
     `UPDATE product p
-        SET store_count = COALESCE(c.n, 0)
+        SET store_count = COALESCE(c.n, 0),
+            branch_store_count = COALESCE(c.branch_n, 0)
        FROM (
-         SELECT l.product_id, count(DISTINCT sp.store_id) AS n
+         SELECT l.product_id,
+                count(DISTINCT sp.store_id) AS n,
+                count(DISTINCT sp.store_id) FILTER (WHERE s.store_kind = 'branch') AS branch_n
            FROM listing l
            JOIN store_price sp ON sp.listing_id = l.id
+           JOIN store s ON s.id = sp.store_id
           GROUP BY l.product_id
        ) c
       WHERE c.product_id = p.id
-        AND p.store_count IS DISTINCT FROM c.n`,
+        AND (p.store_count IS DISTINCT FROM c.n
+             OR p.branch_store_count IS DISTINCT FROM c.branch_n)`,
   );
   return { updated: res.rowCount ?? 0 };
 }

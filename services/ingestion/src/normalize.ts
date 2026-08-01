@@ -1,6 +1,7 @@
 import {
   canonicalItemCode,
   classifyStoreKind,
+  priceSourceForIngestSource,
   computeUnitPrice,
   inferPackSizeFromName,
   isGtinItem,
@@ -482,6 +483,7 @@ export class Normalizer {
           lng: record.geo?.lng,
           feedStoreType: record.storeType,
           storeKind: classifyStoreKind(name, address, record.storeType),
+          priceSource: priceSourceForIngestSource(this.sourceId),
         });
         this.storeIds.set(`${record.chainId}:${storeCode}`, id);
         return true;
@@ -500,6 +502,7 @@ export class Normalizer {
             chainId: scrubNullChars(record.chainId),
             storeCode,
             name: `Store ${storeCode}`,
+            priceSource: priceSourceForIngestSource(this.sourceId),
           });
           this.storeIds.set(storeKey, storeUuid);
         }
@@ -588,6 +591,7 @@ export class Normalizer {
             chainId: scrubNullChars(record.chainId),
             storeCode,
             name: `Store ${storeCode}`,
+            priceSource: priceSourceForIngestSource(this.sourceId),
           });
           this.storeIds.set(storeKey, storeUuid);
         }

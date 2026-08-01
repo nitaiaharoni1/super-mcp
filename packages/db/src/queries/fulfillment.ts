@@ -21,6 +21,7 @@ export interface FulfillmentServiceRow {
   termsConfidence: TermsConfidence;
   termsVerifiedAt: Date | null;
   termsSourceUrl: string | null;
+  termsSource: "curated" | "scraped";
   notes: string | null;
   tariffs: DeliveryTariffBand[];
   coverage: CoverageRule[];
@@ -46,6 +47,7 @@ interface ServiceSqlRow {
   terms_confidence: TermsConfidence;
   terms_verified_at: Date | null;
   terms_source_url: string | null;
+  terms_source: "curated" | "scraped";
   notes: string | null;
   tariffs: unknown;
   coverage: unknown;
@@ -83,6 +85,7 @@ function mapService(row: ServiceSqlRow): FulfillmentServiceRow {
     termsConfidence: row.terms_confidence,
     termsVerifiedAt: row.terms_verified_at,
     termsSourceUrl: row.terms_source_url,
+    termsSource: row.terms_source,
     notes: row.notes,
     tariffs: Array.isArray(row.tariffs) ? (row.tariffs as DeliveryTariffBand[]) : [],
     coverage: Array.isArray(row.coverage) ? (row.coverage as CoverageRule[]) : [],
@@ -125,7 +128,7 @@ export async function listFulfillmentServices(options: {
             fs.store_id, s.name AS store_name,
             fs.minimum_order, fs.minimum_order_known,
             fs.service_fee_percent, fs.service_fee_min, fs.service_fee_max,
-            fs.currency, fs.terms_confidence, fs.terms_verified_at, fs.terms_source_url, fs.notes,
+            fs.currency, fs.terms_confidence, fs.terms_verified_at, fs.terms_source_url, fs.terms_source, fs.notes,
             COALESCE((
               SELECT json_agg(json_build_object(
                        'slotType', dt.slot_type,
@@ -175,6 +178,8 @@ export interface UpsertFulfillmentServiceInput {
   termsConfidence: TermsConfidence;
   termsVerifiedAt?: string | null;
   termsSourceUrl?: string | null;
+  /** curated = hand-read and TTL'd; scraped = re-derived every ingest. */
+  termsSource?: "curated" | "scraped";
   notes?: string | null;
   active: boolean;
   tariffs: DeliveryTariffBand[];
@@ -200,8 +205,8 @@ export async function upsertFulfillmentService(
          slug, chain_id, store_id, brand, service_type, marketplace, storefront_url,
          minimum_order, minimum_order_known,
          service_fee_percent, service_fee_min, service_fee_max,
-         terms_confidence, terms_verified_at, terms_source_url, notes, active
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         terms_confidence, terms_verified_at, terms_source_url, terms_source, notes, active
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
        ON CONFLICT (slug) DO UPDATE SET
          chain_id = EXCLUDED.chain_id,
          store_id = EXCLUDED.store_id,
@@ -217,6 +222,7 @@ export async function upsertFulfillmentService(
          terms_confidence = EXCLUDED.terms_confidence,
          terms_verified_at = EXCLUDED.terms_verified_at,
          terms_source_url = EXCLUDED.terms_source_url,
+         terms_source = EXCLUDED.terms_source,
          notes = EXCLUDED.notes,
          active = EXCLUDED.active,
          updated_at = now()
@@ -237,6 +243,7 @@ export async function upsertFulfillmentService(
         input.termsConfidence,
         input.termsVerifiedAt ?? null,
         input.termsSourceUrl ?? null,
+        input.termsSource ?? "curated",
         input.notes ?? null,
         input.active,
       ],
@@ -331,4 +338,36 @@ export async function deactivateFulfillmentServicesExcept(
     [slugs],
   );
   return res.rowCount ?? 0;
+}
+
+/** Online stores created by a scrape, with the raw payload the adapter stored. */
+export async function listScrapedOnlineStores(
+  sourceIds: string[],
+): Promise<Array<{ storeId: string; chainId: string; chainName: string; storeCode: string; name: string; city: string | null; lat: number | null; lng: number | null }>> {
+  const res = await query<{
+    id: string;
+    chain_id: string;
+    chain_name: string;
+    store_code: string;
+    name: string;
+    city: string | null;
+    lat: number | null;
+    lng: number | null;
+  }>(
+    `SELECT s.id, s.chain_id, c.name_he AS chain_name, s.store_code, s.name, s.city, s.lat, s.lng
+       FROM store s JOIN chain c ON c.id = s.chain_id
+      WHERE c.source_id = ANY($1::text[])
+        AND s.store_kind IN ('online', 'pickup')`,
+    [sourceIds],
+  );
+  return res.rows.map((r) => ({
+    storeId: r.id,
+    chainId: r.chain_id,
+    chainName: r.chain_name,
+    storeCode: r.store_code,
+    name: r.name,
+    city: r.city,
+    lat: r.lat,
+    lng: r.lng,
+  }));
 }

@@ -13,6 +13,16 @@ export type LexicalRankedCteOptions = {
    * Default true for backward compat. Set false on first-pass to skip listing ILIKE scan.
    */
   includeListing?: boolean;
+  /**
+   * Drop products no physical branch stocks. Default false.
+   *
+   * The drive-to-the-shop surface cannot buy an online-only product, but such a
+   * product still competes for candidate slots on name score and then drags the
+   * class-equivalence and pricing passes behind it before being discarded. When
+   * the first online ingest added 8,639 online-only products (+7% of catalogue),
+   * a 6-line Tel Aviv basket went from ~1.3s to ~11s on exactly that path.
+   */
+  branchStockedOnly?: boolean;
   /** Threshold for alias trigram similarity when includeFuzzy is on. */
   trigramThreshold?: number;
 };
@@ -128,6 +138,7 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
   const includeFuzzy = options.includeFuzzy === true;
   const includeListing = options.includeListing !== false;
   const trigramThreshold = options.trigramThreshold ?? 0.4;
+  const branchStockedOnly = options.branchStockedOnly === true;
 
   const evidenceCtes: string[] = [];
   if (includeListing) {
@@ -221,6 +232,7 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
       WHERE ($2::text IS NULL OR p.category_l1 = $2 OR p.category_l2 = $2)
         AND ($3::text IS NULL OR p.brand ILIKE '%' || $3 || '%' ESCAPE '\\')
         AND ($4::text IS NULL OR p.gtin = $4)
+        ${branchStockedOnly ? "AND p.branch_store_count > 0" : ""}
       -- Score first, then how widely the product is actually stocked.
       -- A leading whole-word match scores a flat 0.95, so a one-word staple
       -- query ties hundreds of rows; breaking that tie on p.name made the pool

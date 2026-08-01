@@ -181,6 +181,28 @@ blast-radius decision, not a data one.
 
 A typo in the variable throws at boot rather than serving no MCP at all.
 
+### The online ingest is a separate job
+
+`pnpm ingest:online` is deliberately not part of the feed ingest and should be scheduled
+separately, less often, and with its own alerting. It reads other people's websites: it runs its
+sources sequentially on purpose, and a failure there means a page changed shape, not that a
+regulated feed went dark.
+
+After any run that adds products, two follow-ups are required or the PHYSICAL surface slows down:
+
+```bash
+# 1. Classify the new products. Unclassified products fall into the expensive
+#    equivalence fallback and cost seconds per basket.
+pnpm --filter @super-mcp/db exec tsx src/scripts/classifyProducts.ts \
+  --scope=all --only-missing --project="$GCP_PROJECT" --account="$GCP_ACCOUNT"
+
+# 2. Refresh the popularity + branch-stock signals, then ANALYZE.
+#    refreshProductStoreCounts maintains branch_store_count, which the physical
+#    surface filters on. It runs at the end of the ingest but is non-fatal, so
+#    verify it did not time out.
+psql "$DATABASE_URL" -c "ANALYZE product; ANALYZE listing; ANALYZE store_price; ANALYZE store;"
+```
+
 ### Delivery terms need their own refresh
 
 Item prices arrive with the normal ingest. Delivery fees, minimums and service areas do not: they live

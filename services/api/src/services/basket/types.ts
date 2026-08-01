@@ -605,6 +605,14 @@ export interface ResolveLocationScope {
   near?: GeoPoint;
   radiusKm?: number;
   storeIds?: string[];
+  /**
+   * Restrict resolution to products a physical branch stocks.
+   *
+   * Set by the drive-to-the-shop surface and left off by the delivery one. The
+   * two surfaces genuinely shop different catalogues: online-only items are the
+   * delivery product's whole point and are unbuyable on the physical side.
+   */
+  branchStockedOnly?: boolean;
 }
 
 export interface ListingRow {

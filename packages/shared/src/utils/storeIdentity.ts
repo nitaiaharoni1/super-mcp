@@ -26,6 +26,24 @@ export const SHOPPABLE_STORE_KINDS: readonly StoreKind[] = ["branch"];
 /** Every kind that fulfils an order placed on a website rather than at a till. */
 export const ONLINE_STORE_KINDS: readonly StoreKind[] = ["online", "pickup"];
 
+/** How a store's prices were acquired. */
+export type PriceSource = "feed" | "scraped";
+
+/**
+ * Sources that read a website rather than a regulated filing.
+ *
+ * Declared here, once, so provenance is a property of the source rather than
+ * something inferred later from the chain. Inferring it breaks the moment a
+ * chain has both: Victory files under the transparency law AND runs a stor.ai
+ * storefront, so its scraped online store and its filed branches share a chain
+ * id and must still be distinguishable.
+ */
+const SCRAPED_SOURCE_IDS = new Set(["il-wolt", "il-storai"]);
+
+export function priceSourceForIngestSource(sourceId: string): PriceSource {
+  return SCRAPED_SOURCE_IDS.has(sourceId) ? "scraped" : "feed";
+}
+
 /**
  * The `<StoreType>` codes the price-transparency schema defines.
  *

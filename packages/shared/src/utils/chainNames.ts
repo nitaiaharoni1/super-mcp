@@ -17,6 +17,11 @@ const CHAIN_NAMES: Record<string, ChainDisplayNames> = {
   "7290876100000": { he: "פרשמרקט", en: "Fresh Market" },
   "7290639000004": { he: "סטופ מרקט", en: "Stop Market" },
   "7290785400000": { he: "קשת טעמים", en: "Keshet Taamim" },
+  // Marketplaces are chains in their own right here, because they set their own
+  // prices rather than passing a chain's through. See the Wolt adapter.
+  "IL-WOLT": { he: "וולט", en: "Wolt" },
+  "IL-SUPER-YUDA": { he: "סופר יודה", en: "Super Yuda" },
+  "IL-POLITZER": { he: "פוליצר", en: "Politzer" },
 };
 
 export function lookupChainNames(chainId: string): ChainDisplayNames {

@@ -106,6 +106,58 @@ free-delivery threshold and service area live in
 [`services/ingestion/src/fulfillment/catalog.ts`](./services/ingestion/src/fulfillment/catalog.ts),
 with the source URL and the date each number was read. Refresh with `pnpm ingest:fulfillment`.
 
+### A separate ingest for online stores
+
+Chains that publish no priced online storefront under the transparency law are reached by a
+**second, separate ingestion flow**:
+
+```bash
+pnpm ingest:online                                   # every online source
+pnpm ingest:online -- --sources=wolt --max-venues=8  # Wolt only
+pnpm ingest:online -- --sources=storai               # Victory, Machsanei Hashuk, Yuda, Politzer
+```
+
+It shares normalisation and persistence with the feed ingest (product identity and units are the
+same problem whatever the source) but nothing else: its own schedule, its own health status, and
+its own provenance. A regulated feed going quiet is an incident; a website changing its markup is
+a Tuesday, and mixing the two makes the alert on the first one useless. Every store it writes is
+stamped `price_source = 'scraped'`, so no caller can mistake a best-effort read of a website for a
+price filed under the law.
+
+| source | chains | barcodes? | delivery terms |
+| --- | --- | --- | --- |
+| `wolt` | Wolt Market, am:pm, Victory-on-Wolt, and the other grocery venues | **yes** (`barcode_gtin`, normalised from GTIN-14 to EAN-13) | derived automatically from the venue payload, including a real ~124-vertex service polygon |
+| `storai` | ויקטורי, מחסני השוק, סופר יודה, פוליצר | **no** | not published; reported as unknown |
+
+Two limitations, stated rather than buried. Stor.ai exposes **no barcode at any endpoint**, so
+those products are chain-scoped and do not join to the same product at Shufersal, which means they
+can be searched and priced within their own chain but cannot take part in cross-chain comparison.
+And its product endpoint cannot be paged (a query is mandatory, `limit` caps at 20, `offset` is
+ignored), so coverage is whatever
+[the query vocabulary](./services/ingestion/src/online/sources/storai/vocabulary.ts) reaches:
+a few thousand commonly-shopped items per store, not a full catalogue.
+
+Victory and several others do publish under the transparency law, via portals this repo does not
+ingest yet (`laibcatalog.co.il`, the binaprojects family). Adding those as feed adapters would
+deliver the same chains **with** barcodes, physical branches and legal footing. The scrapers are
+the stopgap, not the destination.
+
+### The two surfaces shop different catalogues
+
+`product.branch_store_count` counts only the physical branches stocking a product, and the
+drive-to-the-shop surface filters on it. An online-only item is not something that surface can
+offer, and letting it into the candidate pool is not free: the first online ingest added 8,639
+online-only products (+7% of catalogue) and a six-line Tel Aviv basket went from ~1.3s to ~11s,
+because those products won candidate slots on name score and were then carried through class
+equivalence and pricing before being discarded for having no branch price.
+
+Newly ingested products must also be classified, or they fall into the same expensive fallback:
+
+```bash
+pnpm --filter @super-mcp/db exec tsx src/scripts/classifyProducts.ts \
+  --scope=all --only-missing --project=<gcp-project> --account=<you@example.com>
+```
+
 Every fee therefore carries a **confidence** and a **`verifiedAt`**, and decays to `unknown` after 90
 days rather than being quoted. This is not ceremony: Rami Levy held ₪29.90 for fifteen years and then
 raised it 20% in a single month. A table nobody has re-read since spring looks fine, parses fine, and

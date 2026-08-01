@@ -283,6 +283,7 @@ async function searchLexicalOnce(
       includeFuzzy,
       includeListing,
       trigramThreshold: config.trigramThreshold,
+      branchStockedOnly: params.branchStockedOnly === true,
     })}
     ${buildDedupedFromRankedCte()}
     ${buildSearchResultsSelect(

@@ -29,7 +29,34 @@ describe("upsertStore coordinate integrity", () => {
       null, // geo_source: no valid feed coords → left for the geocoder
       "branch", // store_kind: derived from name+address
       null, // feed_store_type: this caller supplied no <StoreType>
+      "feed", // price_source: a regulated filing unless a scraper says otherwise
     ]);
+  });
+
+  it("records that a store's prices were scraped rather than filed", async () => {
+    // A scraped price and a price filed under the transparency law are not the
+    // same claim, and a chain can have both: Victory files branches AND runs a
+    // stor.ai storefront we read off the web.
+    await upsertStore({
+      chainId: "7290696200003",
+      storeCode: "2930",
+      name: "אינטרנט",
+      feedStoreType: 2,
+      priceSource: "scraped",
+    });
+    const params = query.mock.calls[0]?.[1] as unknown[];
+    expect(params[9]).toBe("online");
+    expect(params[11]).toBe("scraped");
+  });
+
+  it("does not let a price-file stub silently downgrade a scraped store", async () => {
+    // 'feed' is the column default, so it is also what a caller that forgot to
+    // pass provenance sends. Losing the flag that way is silent and makes a
+    // scraped price indistinguishable from a filed one.
+    await upsertStore({ chainId: "c", storeCode: "1", name: "Store 1" });
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(sql).toContain("WHEN store.price_source = 'scraped' AND EXCLUDED.price_source = 'feed'");
+    expect(sql).toContain("EXCLUDED.name ~ '^Store[[:space:]]' THEN store.price_source");
   });
 
   it("persists the chain's declared <StoreType> and classifies from it", async () => {
