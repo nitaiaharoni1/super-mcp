@@ -13,6 +13,7 @@ import {
 } from "../basket/continuation.js";
 import { applyBasketAnswers } from "../basket/continuation.js";
 import { loadBasketPricingData, loadCandidateAvailability } from "../basket/loadPricingData.js";
+import { buildItemStatuses } from "../basket/optimize.js";
 import { priceStoreBasket } from "../basket/priceStoreBasket.js";
 import {
   DEFAULT_QUESTION_OPTIONS_LIMIT,
@@ -22,6 +23,7 @@ import {
 } from "../basket/questionAvailability.js";
 import { resolveItems } from "../basket/resolve.js";
 import { applyFastResolutionPolicy } from "../basket/resolutionPolicy.js";
+import { getActiveOntology } from "../search/ontology.js";
 import type {
   BasketAssumption,
   BasketCandidate,
@@ -358,8 +360,18 @@ async function runDeliveryOptimization(
 
   // Same fast policy the physical surface uses: turn a low-confidence line into a
   // priced best-effort choice and record what was assumed, rather than stopping to
-  // ask. Reused verbatim — nothing about it is specific to walking into a shop.
-  const fastPolicy = applyFastResolutionPolicy(input.items, resolvedItems, availability);
+  // ask. Reused verbatim — nothing about it is specific to walking into a shop,
+  // ontology included: that fourth argument is what feeds hard query attributes
+  // (brand, variant) into the candidate filter, and omitting it here quietly gave
+  // the delivery surface a weaker resolver than the one the accuracy benchmark
+  // measures.
+  const ontology = await getActiveOntology();
+  const fastPolicy = applyFastResolutionPolicy(
+    input.items,
+    resolvedItems,
+    availability,
+    ontology,
+  );
   const pricingItems = fastPolicy.items;
   const assumptions: BasketAssumption[] = fastPolicy.assumptions;
 
@@ -507,7 +519,16 @@ async function runDeliveryOptimization(
     plans: ranked,
     unavailableStores: unavailable,
     inStoreComparison,
-    items: itemStatuses.map((item) => ({ ...item, candidates: [] as BasketCandidate[] })),
+    // Rebuilt from the items that were actually priced, not from the pre-policy
+    // snapshot. The fast policy swaps products (a bare "קוטג 5%" resolved to a
+    // garlic-and-dill tub, then upgraded to the plain one every storefront
+    // stocks) and fills lines that first came back unresolved, so reporting the
+    // earlier statuses named one product while `plans[].lines` priced another,
+    // and called an olive oil unresolved that four storefronts had quoted.
+    items: buildItemStatuses(pricingItems).map((item) => ({
+      ...item,
+      candidates: [] as BasketCandidate[],
+    })),
     assumptions,
     storefrontsCompared: plans.length,
     notes,
@@ -526,31 +547,6 @@ function describeAddress(
     precision: input.locationOrigin?.precision ?? null,
     warning: input.locationOrigin?.warning ?? null,
   };
-}
-
-/** Mirrors the basket surface's status projection; kept local to avoid exporting it. */
-function buildItemStatuses(resolvedItems: ResolvedItem[]): BasketItemStatus[] {
-  return resolvedItems.map((r) => ({
-    index: r.index,
-    qty: r.qty,
-    qtyMode: r.qtyMode,
-    amount: r.amount,
-    unit: r.unit,
-    productId: r.productId,
-    name: r.name,
-    resolved: r.productId !== null,
-    resolvedBy: r.resolvedBy,
-    resolutionStatus: classifyStatus(r),
-    confidence: r.confidence,
-    lowConfidence: r.lowConfidence,
-    candidates: r.candidates,
-    substitution: r.substitution,
-  }));
-}
-
-function classifyStatus(item: ResolvedItem): BasketItemStatus["resolutionStatus"] {
-  if (item.productId == null) return "unresolved";
-  return item.lowConfidence ? "needs_confirmation" : "resolved";
 }
 
 export type { DeliveryOptimizeCompleteResult };
