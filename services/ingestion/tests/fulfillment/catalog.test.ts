@@ -164,3 +164,34 @@ describe("published delivery areas resolve to places", () => {
     expect(expandDeliveryArea("דרום הר חברון")).toEqual([]);
   });
 });
+
+describe("towns a spelling difference had quietly removed", () => {
+  it("serves each of them again", () => {
+    // Found by diffing every published label against the gazetteer. Each stored
+    // a rule that could never match, so the town read as covered and behaved as
+    // uncovered. Fixed in the city alias table, so the check belongs here: it is
+    // this file's labels that have to reach a real place.
+    const expected: Record<string, string> = {
+      "טירת כרמל": "carrefour-online",
+      "פרדס חנה": "rami-levy-online",
+      "חצור הגלילית": "rami-levy-online",
+      "שערי תקווה": "victory-online",
+      "קריית אונו": "carrefour-online",
+    };
+    for (const [city, slug] of Object.entries(expected)) {
+      const service = FULFILLMENT_CATALOG.find((s) => s.slug === slug);
+      expect(service, slug).toBeDefined();
+      const verdict = evaluateCoverage(
+        service!.coverage.map((c) => ({ ...c, cityKey: c.cityKey ?? null })),
+        { city },
+      );
+      expect(verdict.serves, `${slug} must serve ${city}`).toBe(true);
+    }
+  });
+
+  it("claims a valley as its principal town only", () => {
+    // Naming every settlement in the Ono valley would assert coverage the
+    // retailer's own label does not spell out.
+    expect(expandDeliveryArea("בקעת אונו")).toEqual(["קריית אונו"]);
+  });
+});

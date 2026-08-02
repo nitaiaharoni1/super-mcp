@@ -939,6 +939,11 @@ const ZONE_EXPANSIONS: Record<string, readonly string[]> = {
   "כוכב יאיר אלישמע": ["כוכב יאיר", "אלישמע"],
   "אורנית שערי תקווה אלקנה": ["אורנית", "שערי תקווה", "אלקנה"],
   "גני תקווה וקרית אונו": ["גני תקווה", "קריית אונו"],
+  // A valley, not a town. Claimed as its principal settlement only: naming the
+  // whole valley would assert coverage of Yehud, Savyon and Or Yehuda that the
+  // retailer's own label does not spell out, and over-claiming a delivery
+  // promise is the one direction this file must not be wrong in.
+  "בקעת אונו": ["קריית אונו"],
 
   // Krayot shorthand. קרית חיים is a Haifa quarter, not a town of its own.
   "ק.עקרון": ["קריית עקרון"],

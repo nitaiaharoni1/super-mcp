@@ -95,3 +95,40 @@ describe("a street named after a place is not that place", () => {
     expect(extractCityFromLocation("שדרות ירושלים 5, ירושלים")).toBe("ירושלים");
   });
 });
+
+describe("Hebrew glues its prepositions onto the street word", () => {
+  it("still reads past ברחוב / לשדרות / בשדרות", () => {
+    // Matching only the bare street word left the preposition forms wide open,
+    // so "ברחוב ירושלים 3, רמת גן" resolved to Jerusalem.
+    expect(extractCityFromLocation("ברחוב ירושלים 3, רמת גן")).toBe("רמת גן");
+    expect(extractCityFromLocation("לשדרות ירושלים 5, בת ים")).toBe("בת ים");
+    expect(extractCityFromLocation("בשדרות רוטשילד 5, תל אביב")).toBe("תל אביב-יפו");
+  });
+
+  it("prefers a real locality but does not throw the town away for nothing", () => {
+    // The street-word test is a preference, not a veto. Vetoing outright made
+    // the town Sderot unresolvable the moment any word followed it.
+    expect(extractCityFromLocation("שדרות מערב")).toBe("שדרות");
+    expect(extractCityFromLocation("שדרות ישראל")).toBe("שדרות");
+    // ...but a real locality named in the same string still wins.
+    expect(extractCityFromLocation("שדרות התמרים 1, אילת")).toBe("אילת");
+  });
+});
+
+describe("spellings the retailers use that the gazetteer did not know", () => {
+  it("collapses each onto one place", () => {
+    // Every one of these silently cost a whole town: the coverage rule was
+    // stored, matched nothing, and still counted as coverage.
+    const pairs: Array<[string, string]> = [
+      ["טירת הכרמל", "טירת כרמל"],
+      ["פרדס חנה כרכור", "פרדס חנה"],
+      ["פרדס חנה-כרכור", "פרדס חנה"],
+      ["חצור הגלילת", "חצור הגלילית"],
+      ["קרית מלאכי", "קריית מלאכי"],
+      ["שערי תקוה", "שערי תקווה"],
+    ];
+    for (const [written, canonical] of pairs) {
+      expect(canonicalizeCity(written), written).toBe(canonicalizeCity(canonical));
+    }
+  });
+});

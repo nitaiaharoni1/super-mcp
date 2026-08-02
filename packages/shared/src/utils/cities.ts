@@ -284,6 +284,19 @@ const CITY_ALIASES: Record<string, string> = {
   "נצרת עילית": "נוף הגליל",
   "נצרת עלית": "נוף הגליל",
   איירפורט: "איירפורט סיטי",
+  // Spellings the retailers' own delivery pages use that the gazetteer did not
+  // know, found by diffing every published coverage label against it. Each one
+  // silently cost a whole town: the rule was stored, matched nothing, and read
+  // as coverage in every count. Aliases rather than fixes local to the delivery
+  // file, because the same spellings turn up in store rows and typed addresses.
+  "טירת הכרמל": "טירת כרמל",
+  "פרדס חנה כרכור": "פרדס חנה",
+  "פרדס חנה-כרכור": "פרדס חנה",
+  "חצור הגלילת": "חצור הגלילית",
+  "חצור הגלילי": "חצור הגלילית",
+  // Neither spelling was canonical, so the two never met each other.
+  "קרית מלאכי": "קריית מלאכי",
+  "שערי תקוה": "שערי תקווה",
 };
 
 /**
@@ -421,7 +434,10 @@ const STREET_PREFIXES = [
  */
 function isStreetNameMatch(haystack: string, phrase: string): boolean {
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const prefixes = STREET_PREFIXES.join("|");
+  // Hebrew glues its one-letter prepositions onto the next word, so the street
+  // word arrives as ברחוב / לשדרות / בשדרות just as often as bare. Matching only
+  // the bare form let "ברחוב ירושלים 3, רמת גן" resolve to Jerusalem.
+  const prefixes = STREET_PREFIXES.map((p) => `[בהלמושכ]?${p}`).join("|");
   const afterStreetWord = new RegExp(
     `(?:^|[^\\p{L}\\p{N}])(?:${prefixes})\\.?\\s+${escaped}(?:$|[^\\p{L}\\p{N}])`,
     "u",
@@ -429,8 +445,14 @@ function isStreetNameMatch(haystack: string, phrase: string): boolean {
   if (afterStreetWord.test(haystack)) {
     // Only a street name if every occurrence is one; "שדרות ירושלים, ירושלים"
     // still names the city.
+    // The lookbehind needs its own left boundary, or the TAIL of an unrelated
+    // word satisfies it: "מזרח" ends in "רח", "למעלה" ends in "מעלה". Without
+    // this, "דרך חיפה 3, מזרח חיפה" found no standalone occurrence and the whole
+    // string resolved to nothing. Widening the prefix list to carry Hebrew's
+    // one-letter prepositions makes an unanchored version strictly worse, since
+    // "הרח" and "במעלה" would satisfy it too.
     const standalone = new RegExp(
-      `(?:^|[^\\p{L}\\p{N}])(?<!(?:${prefixes})\\.?\\s)${escaped}(?:$|[^\\p{L}\\p{N}])`,
+      `(?:^|[^\\p{L}\\p{N}])(?<!(?:^|[^\\p{L}\\p{N}])(?:${prefixes})\\.?\\s)${escaped}(?:$|[^\\p{L}\\p{N}])`,
       "u",
     );
     if (!standalone.test(haystack)) return true;
@@ -474,13 +496,25 @@ export function cityForNeighborhood(text: string): string | null {
 export function extractCityFromLocation(location: string): string | null {
   const normalized = normalizeCityKey(location);
   if (!normalized) return null;
+
+  // Two passes, and the street-word test is a PREFERENCE rather than a veto.
+  //
+  // Vetoing outright lost the town: "שדרות" is a street word AND a real place,
+  // so anything following it made the whole string unresolvable, and
+  // "שדרות מערב" returned null where it used to return Sderot. A street reading
+  // should only lose to a better candidate, not to nothing. So the first pass
+  // skips street-name matches, and the second accepts them when no other
+  // locality is named anywhere in the string.
+  let streetNameFallback: string | null = null;
   for (const candidate of LOCATION_CITY_CANDIDATES) {
     if (!containsCityPhrase(normalized, candidate.alias)) continue;
-    // A street named after a place is not that place.
-    if (isStreetNameMatch(normalized, candidate.alias)) continue;
+    if (isStreetNameMatch(normalized, candidate.alias)) {
+      streetNameFallback ??= candidate.canonical;
+      continue;
+    }
     return candidate.canonical;
   }
-  return cityForNeighborhood(normalized);
+  return cityForNeighborhood(normalized) ?? streetNameFallback;
 }
 
 /**
