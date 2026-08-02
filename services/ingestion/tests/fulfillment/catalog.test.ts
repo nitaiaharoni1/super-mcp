@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { evaluateCoverage } from "@super-mcp/shared";
 import { FULFILLMENT_CATALOG } from "../../src/fulfillment/catalog.js";
+import { expandDeliveryArea } from "../../src/fulfillment/deliveryAreas.js";
 import { STORAI_RETAILERS } from "../../src/online/sources/storai/adapter.js";
 
 describe("the delivery catalogue holds together", () => {
@@ -108,5 +110,57 @@ describe("regional chains are not sold as national", () => {
       expect(retailer.terms.verifiedAt, retailer.chainId).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(retailer.terms.sourceUrl, retailer.chainId).toMatch(/^https:\/\//);
     }
+  });
+});
+
+describe("published delivery areas resolve to places", () => {
+  // The bug this guards: retailers publish SALES AREAS, not settlements, and a
+  // coverage rule naming a sales area matches nothing. It reads as coverage in
+  // the table and behaves as none, so it is invisible in every count.
+  const SEPARATORS = /[,/]/;
+
+  it("leaves no rule holding more than one place", () => {
+    const packed = FULFILLMENT_CATALOG.flatMap((s) =>
+      s.coverage
+        .filter((c) => c.scope === "city" && SEPARATORS.test(c.cityKey ?? ""))
+        .map((c) => `${s.slug}: ${c.cityKey ?? ""}`),
+    );
+    expect(packed).toEqual([]);
+  });
+
+  it("puts the big cities back where their retailers said they were", () => {
+    // Every one of these was reported unserved. Tel Aviv is the country's
+    // largest online-grocery market and saw neither Rami Levy, Tiv Taam nor
+    // Victory; Jerusalem saw neither Carrefour, Quik nor Yeinot Bitan.
+    const expected: Record<string, string[]> = {
+      "תל אביב-יפו": ["rami-levy-online", "tiv-taam-519", "victory-online"],
+      ירושלים: ["carrefour-online", "quik", "yeinot-bitan-online", "victory-online"],
+      רמלה: ["carrefour-online", "quik"],
+      לוד: ["carrefour-online", "quik"],
+      "קריית אתא": ["carrefour-online", "quik"],
+      "ראשון לציון": ["carrefour-online", "quik"],
+    };
+    for (const [city, slugs] of Object.entries(expected)) {
+      for (const slug of slugs) {
+        const service = FULFILLMENT_CATALOG.find((s) => s.slug === slug);
+        expect(service, slug).toBeDefined();
+        const verdict = evaluateCoverage(
+          service!.coverage.map((c) => ({ ...c, cityKey: c.cityKey ?? null })),
+          { city },
+        );
+        expect(verdict.serves, `${slug} must serve ${city}`).toBe(true);
+      }
+    }
+  });
+
+  it("expands a sales area onto the settlements it reaches", () => {
+    expect(expandDeliveryArea("רמלה לוד")).toEqual(["רמלה", "לוד"]);
+    expect(expandDeliveryArea("מרכז וצפון תל אביב (עד ארלוזורוב)")).toEqual(["תל אביב-יפו"]);
+    expect(expandDeliveryArea("חולון , בת ים")).toEqual(["חולון", "בת ים"]);
+    // A real settlement is left exactly as the retailer wrote it.
+    expect(expandDeliveryArea("מעלה אדומים")).toEqual(["מעלה אדומים"]);
+    // A region naming no settlement yields nothing rather than a rule that
+    // can never match.
+    expect(expandDeliveryArea("דרום הר חברון")).toEqual([]);
   });
 });

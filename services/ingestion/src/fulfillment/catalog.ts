@@ -42,6 +42,7 @@
  * a fresh number is worse than either alone.
  */
 import type { TermsConfidence } from "@super-mcp/shared";
+import { normalizeCityKey } from "@super-mcp/shared";
 import {
   CARREFOUR_SETTLEMENTS,
   MACHSANEI_SETTLEMENTS,
@@ -57,6 +58,7 @@ import {
   TIV_TAAM_RISHON,
   VICTORY_SETTLEMENTS,
   YEINOT_BITAN_SETTLEMENTS,
+  expandDeliveryArea,
 } from "./deliveryAreas.js";
 
 export interface CatalogTariffBand {
@@ -120,19 +122,37 @@ const MACHSANEI_HASHUK = "7290661400001";
 export const SERVICE_TERMS_TTL_DAYS = 90;
 
 /**
- * A retailer's published settlement list as one coverage rule per name.
+ * A retailer's published settlement list as one coverage rule per settlement.
  *
  * `evaluateCoverage` ORs the rules and keeps the strongest confidence that
  * matched, so a list behaves as "serves any of these" without needing a new
- * scope. Storing the retailer's own spelling is deliberate: matching runs
- * through `canonicalizeCity`, which already knows "תל אביב-יפו" and "תל אביב"
- * are one place.
+ * scope.
+ *
+ * Each label goes through `expandDeliveryArea` first. Storing the retailer's own
+ * spelling verbatim was the original design, on the theory that
+ * `canonicalizeCity` already knows "תל אביב-יפו" and "תל אביב" are one place.
+ * It does — but retailers publish sales areas, not settlements, so what actually
+ * needed collapsing was "מרכז וצפון תל אביב (עד ארלוזורוב)" and
+ * "תל אביב - רמת החייל", which no alias table will ever cover. Tel Aviv was
+ * reported unserved by the three chains that publish it.
  */
 function servedSettlements(
   cities: readonly string[],
   confidence: TermsConfidence,
 ): CatalogCoverage[] {
-  return cities.map((cityKey) => ({ scope: "city" as const, cityKey, confidence }));
+  const seen = new Set<string>();
+  const out: CatalogCoverage[] = [];
+  for (const published of cities) {
+    for (const cityKey of expandDeliveryArea(published)) {
+      const key = normalizeCityKey(cityKey);
+      // One label expanding onto a settlement another already named would
+      // otherwise write the same rule twice.
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ scope: "city" as const, cityKey, confidence });
+    }
+  }
+  return out;
 }
 
 /**

@@ -28,6 +28,8 @@
  * those villages, which is the safe direction to be wrong about a delivery
  * promise. Each list notes how many phrases were dropped.
  */
+import { normalizeCityKey } from "@super-mcp/shared";
+
 
 /** רמי לוי שיווק השקמה (רמי לוי אונליין): 270 settlements, read 2026-08-02 from https://www.rami-levy.co.il/he/orders-and-deliveries. */
 export const RAMI_LEVY_SETTLEMENTS: readonly string[] = [
@@ -875,3 +877,110 @@ export const TIV_TAAM_BEER_SHEVA: readonly string[] = [
   "אופקים",
   "נתיבות",
 ];
+
+/**
+ * Published zone labels, and the settlements each one actually reaches.
+ *
+ * WHY THIS EXISTS
+ *
+ * The header above claims a retailer's own spelling needs no normalising because
+ * `canonicalizeCity` collapses the variants. That was wrong, and it was wrong in
+ * the one direction that costs coverage. Retailers do not publish settlement
+ * names; they publish SALES AREAS, and a sales area is named for the convenience
+ * of the depot: "מרכז וצפון תל אביב (עד ארלוזורוב)", "רמלה לוד", "מזרח ירושלים",
+ * "ק.אתא ביאליק". None of those is a place, so none of them ever matched, and a
+ * rule that never matches reads as coverage in the table and behaves as none.
+ *
+ * The damage was concentrated exactly where it hurt most: Tel Aviv saw five
+ * storefronts and not Rami Levy, Tiv Taam or Victory, all three of which publish
+ * it; Jerusalem saw three and not Carrefour, Quik, Yeinot Bitan or Victory.
+ *
+ * Anything that is genuinely a single settlement is left alone: names the
+ * canonical table has never heard of still match by identity when the shopper
+ * types the same name, which is how ~450 small moshavim work.
+ */
+const ZONE_EXPANSIONS: Record<string, readonly string[]> = {
+  // Tel Aviv, written six ways by four retailers, never as the city's own name.
+  "מרכז וצפון תל אביב (עד ארלוזורוב)": ["תל אביב-יפו"],
+  "תל אביב דרום/יפו": ["תל אביב-יפו"],
+  "תל אביב צפון": ["תל אביב-יפו"],
+  "תל אביב יפו מרכז דרום": ["תל אביב-יפו"],
+  "תל אביב - רמת אביב": ["תל אביב-יפו"],
+  "תל אביב - רמת החייל": ["תל אביב-יפו"],
+  "תל אביב - אפקה": ["תל אביב-יפו"],
+  "תל אביב - מרכז": ["תל אביב-יפו"],
+  "תל אביב - דרום": ["תל אביב-יפו"],
+  // רמת אביב is a Tel Aviv neighbourhood sharing a label with a real town.
+  "רמת השרון, רמת אביב": ["רמת השרון", "תל אביב-יפו"],
+
+  // Jerusalem, cut into sales areas by two retailers.
+  "מזרח ירושלים": ["ירושלים"],
+  "מערב ירושלים": ["ירושלים"],
+  "צפון ירושלים": ["ירושלים"],
+  "ירושלים 2": ["ירושלים"],
+  "ירושלים צפון חדש": ["ירושלים"],
+  "ירושלים צפון קצה למעלה": ["ירושלים"],
+
+  // One city under a zone qualifier.
+  "ראשון לציון מערב": ["ראשון לציון"],
+  "ראשון לציון (מערב)": ["ראשון לציון"],
+  "בני ברק עסקי": ["בני ברק"],
+  "חיפה עיר תחתית": ["חיפה"],
+  "רמת גן 1": ["רמת גן"],
+  "אקים דימונה": ["דימונה"],
+  "פארק התעשייה קיסריה": ["קיסריה"],
+  "גן יבנה וסביבה": ["גן יבנה"],
+  "שדרות הסביבה ועוטף": ["שדרות"],
+
+  // Two or more cities sharing one delivery run.
+  "רמלה לוד": ["רמלה", "לוד"],
+  "נתיבות אופקים": ["נתיבות", "אופקים"],
+  "רמת גן גבעתיים": ["רמת גן", "גבעתיים"],
+  "כוכב יאיר אלישמע": ["כוכב יאיר", "אלישמע"],
+  "אורנית שערי תקווה אלקנה": ["אורנית", "שערי תקווה", "אלקנה"],
+  "גני תקווה וקרית אונו": ["גני תקווה", "קריית אונו"],
+
+  // Krayot shorthand. קרית חיים is a Haifa quarter, not a town of its own.
+  "ק.עקרון": ["קריית עקרון"],
+  "ק.אתא ביאליק": ["קריית אתא", "קריית ביאליק"],
+  "ק.מוצקין ים חיים": ["קריית מוצקין", "קריית ים", "חיפה"],
+  "חיפה והקריות": [
+    "חיפה",
+    "קריית אתא",
+    "קריית ביאליק",
+    "קריית מוצקין",
+    "קריית ים",
+    "נשר",
+  ],
+};
+
+/**
+ * Labels that name a region rather than any settlement, kept out of the table on
+ * the same rule the header states: a rule that can never match is worse than an
+ * absent one. Listed rather than silently skipped so the count is auditable.
+ */
+const UNMATCHABLE_REGIONS: readonly string[] = ["דרום הר חברון"];
+
+const ZONE_BY_KEY = new Map<string, readonly string[]>(
+  Object.entries(ZONE_EXPANSIONS).map(([label, cities]) => [normalizeCityKey(label), cities]),
+);
+const DROPPED_BY_KEY = new Set(UNMATCHABLE_REGIONS.map((label) => normalizeCityKey(label)));
+
+/**
+ * One published delivery-area label into the settlement names it serves.
+ *
+ * Explicit table first, then a plain comma/slash split, because several lists
+ * pack a whole delivery run into one cell ("חולון, בת ים, בית דגן, אזור"). The
+ * split has to come second: "רמת השרון, רמת אביב" would otherwise yield the
+ * neighbourhood רמת אביב, which matches nothing.
+ */
+export function expandDeliveryArea(published: string): string[] {
+  const key = normalizeCityKey(published);
+  const mapped = ZONE_BY_KEY.get(key);
+  if (mapped) return [...mapped];
+  if (DROPPED_BY_KEY.has(key)) return [];
+  return published
+    .split(/[,/]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}

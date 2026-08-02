@@ -9,6 +9,7 @@ import { WOLT_HOSTS } from "./sources/wolt/adapter.js";
 import { WOLT_CHAIN_ID } from "./sources/wolt/parse.js";
 import { STORAI_RETAILERS } from "./sources/storai/adapter.js";
 import { FULFILLMENT_CATALOG } from "../fulfillment/catalog.js";
+import { expandDeliveryArea } from "../fulfillment/deliveryAreas.js";
 
 /**
  * Delivery terms that maintain themselves.
@@ -254,11 +255,15 @@ export async function syncScrapedFulfillment(): Promise<ScrapedFulfillmentResult
       // unqualified it told an Eilat shopper that a Caesarea grocer delivers.
       coverage:
         terms != null
-          ? terms.cities.map((cityKey) => ({
-              scope: "city" as const,
-              cityKey,
-              confidence: terms.confidence,
-            }))
+          ? terms.cities.flatMap((published) =>
+              // Same expansion the curated catalogue uses: Super Yuda publishes
+              // "ראשון לציון (מערב)", which is a sales area and not a place.
+              expandDeliveryArea(published).map((cityKey) => ({
+                scope: "city" as const,
+                cityKey,
+                confidence: terms.confidence,
+              })),
+            )
           : [{ scope: "national", confidence: "estimated" }],
     });
     writtenSlugs.push(`${retailer.chainId.toLowerCase()}-${store.storeCode}`);
