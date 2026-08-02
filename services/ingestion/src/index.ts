@@ -7,6 +7,7 @@ import {
   healSizeUnitFamily,
   refreshProductStoreCounts,
 } from "@super-mcp/db";
+import { syncFulfillmentCatalog } from "./fulfillment/sync.js";
 import { getAdapters } from "./sources/index.js";
 import { runPipeline } from "./pipeline.js";
 
@@ -65,6 +66,36 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ event: "product_store_counts", ...counts }));
   } catch (err) {
     console.error("product_store_counts refresh failed (non-fatal):", err);
+  }
+
+  // Re-attach the curated delivery terms, because THIS run is what creates the
+  // store rows they point at.
+  //
+  // The catalogue keys each storefront on (chainId, storeCode) and skips any
+  // whose store row does not exist yet, so a chain whose online endpoint arrives
+  // for the first time gets its prices here and its delivery terms never. That
+  // is not hypothetical: after laibcatalog was connected, Victory and Machsanei
+  // Hashuk had priced online storefronts and no fee, no minimum and no coverage
+  // until `pnpm ingest:fulfillment` was run by hand. On the deployed job nobody
+  // would have run it, and `evaluateCoverage` reads an absent coverage row as
+  // "we do not know", which reports the storefront as unavailable at every
+  // address in the country.
+  //
+  // Idempotent and cheap (a dozen upserts against a static file), non-fatal like
+  // its neighbours: a terms sync must never fail an ingest that has already
+  // written its prices.
+  try {
+    const fulfillment = await syncFulfillmentCatalog({ dryRun: false });
+    console.log(
+      JSON.stringify({
+        event: "fulfillment_catalog_sync",
+        written: fulfillment.written,
+        deactivated: fulfillment.deactivated,
+        skippedMissingStore: fulfillment.skippedMissingStore,
+      }),
+    );
+  } catch (err) {
+    console.error("fulfillment_catalog_sync failed (non-fatal):", err);
   }
 
   // Stamp any store still missing coordinates (new branches, or ones whose

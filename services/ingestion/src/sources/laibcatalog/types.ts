@@ -11,12 +11,20 @@ export interface LaibChainConfig {
   chainId: string;
   /** Hebrew label as the portal's own dropdown spells it. */
   name: string;
+  /**
+   * Publishes a Stores document and no prices, as a matter of record rather than
+   * as a fault. Exempts the chain from the empty-price-row alarm only; it is
+   * still expected to file SOMETHING, so going fully silent still alerts.
+   */
+  storesOnly?: boolean;
 }
 
 /** Chains the portal's `MainContent_chain` dropdown offers, read 2026-08-01. */
 export const LAIB_CHAINS: LaibChainConfig[] = [
   { chainId: "7290696200003", name: "ויקטורי" },
-  { chainId: "7290455000004", name: "ח. כהן" },
+  // Files a Stores document daily and has never filed a price. Flagged so the
+  // empty-price gate does not report it on every healthy run.
+  { chainId: "7290455000004", name: "ח. כהן", storesOnly: true },
   { chainId: "7290661400001", name: "מחסני השוק" },
 ];
 

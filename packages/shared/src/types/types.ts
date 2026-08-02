@@ -110,6 +110,20 @@ export interface SourceAdapter {
    * deliberately skipped as missing.
    */
   expectedChainIds?: string[];
+  /**
+   * Chains expected to file STORES but not prices, so their empty price tally is
+   * the published reality rather than a fault.
+   *
+   * They stay in `expectedChainIds`, because a chain that stops filing anything
+   * at all is still worth an alert. This only exempts them from the
+   * "files but no price rows" arm.
+   *
+   * ח. כהן is the case: it files a Stores document to laibcatalog every day and
+   * has never filed a price. Counting it as a failure made the price-row gate
+   * report the same chain on every healthy run, which is how an alert stops
+   * being read.
+   */
+  priceExemptChainIds?: string[];
   discover(): Promise<FeedFile[]>;
   fetch(file: FeedFile): Promise<RawBlob>;
   parse(blob: RawBlob): AsyncIterable<RawRecord>;

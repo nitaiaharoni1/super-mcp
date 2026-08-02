@@ -170,6 +170,52 @@ describe("configured chain that yields nothing", () => {
     expect(result.status).toBe("degraded");
   });
 
+  it("exempts a chain that publishes stores and no prices as a matter of record", async () => {
+    // ח. כהן files a Stores document to laibcatalog every day and has never filed
+    // a price. Once the tally counted PRICE rows only, that chain landed in
+    // chainsWithNoRows on every healthy run, and an alert that always fires is
+    // an alert nobody reads. It stays in expectedChainIds, so going fully silent
+    // still degrades the run.
+    delete process.env.SUPER_MCP_NO_CAP;
+    const { runPipeline } = await import("../src/pipeline.js");
+
+    const storesOnlyAdapter: SourceAdapter = {
+      sourceId: "il-laibcatalog",
+      market: "IL",
+      expectedChainIds: [RAMI_LEVY, HAZI_HINAM],
+      priceExemptChainIds: [HAZI_HINAM],
+      discover: async () => [
+        file("stores", RAMI_LEVY),
+        file("pricesfull", RAMI_LEVY),
+        file("stores", HAZI_HINAM),
+      ],
+      fetch: async () => ({}) as never,
+      parse: async function* () {},
+    };
+
+    const result = await runPipeline(storesOnlyAdapter);
+    expect(result.chainsWithNoRows).toEqual([]);
+    expect(result.chainsWithNoFiles).toEqual([]);
+  });
+
+  it("still degrades when an exempt chain files nothing at all", async () => {
+    delete process.env.SUPER_MCP_NO_CAP;
+    const { runPipeline } = await import("../src/pipeline.js");
+
+    const silentAdapter: SourceAdapter = {
+      sourceId: "il-laibcatalog",
+      market: "IL",
+      expectedChainIds: [RAMI_LEVY, HAZI_HINAM],
+      priceExemptChainIds: [HAZI_HINAM],
+      discover: async () => [file("stores", RAMI_LEVY), file("pricesfull", RAMI_LEVY)],
+      fetch: async () => ({}) as never,
+      parse: async function* () {},
+    };
+
+    const result = await runPipeline(silentAdapter);
+    expect(result.chainsWithNoFiles).toContain(HAZI_HINAM);
+  });
+
   it("applies no chain expectation to single-chain sources", async () => {
     const { runPipeline } = await import("../src/pipeline.js");
     const shufersal = {

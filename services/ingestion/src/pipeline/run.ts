@@ -66,9 +66,16 @@ function findEmptyChains(
   // The adapter is authoritative when it can say what it attempted; the
   // per-source fallback covers adapters that cannot.
   const expected = adapter.expectedChainIds ?? expectedChainIdsForSource(adapter.sourceId);
+  const priceExempt = new Set(adapter.priceExemptChainIds ?? []);
   const chainsWithNoFiles = expected.filter((id) => !discoveredChainIds.has(id));
+  // A chain that publishes stores and no prices is exempt only where that is the
+  // PUBLISHED reality, never by default: the whole point of this gate is that
+  // Osher Ad looked healthy while its prices went a fortnight stale.
   const chainsWithNoRows = expected.filter(
-    (id) => discoveredChainIds.has(id) && (rowsByChain.get(id) ?? 0) === 0,
+    (id) =>
+      !priceExempt.has(id) &&
+      discoveredChainIds.has(id) &&
+      (rowsByChain.get(id) ?? 0) === 0,
   );
   return { chainsWithNoFiles, chainsWithNoRows };
 }

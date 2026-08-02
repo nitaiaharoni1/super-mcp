@@ -187,6 +187,7 @@ export function createLaibcatalogAdapter(chains: LaibChainConfig[] = LAIB_CHAINS
     sourceId: LAIB_SOURCE_ID,
     market: "IL",
     expectedChainIds: chains.map((c) => c.chainId),
+    priceExemptChainIds: chains.filter((c) => c.storesOnly).map((c) => c.chainId),
 
     async discover(): Promise<FeedFile[]> {
       const tokens = await fetchSearchTokens(ALLOWED_HOSTS);
