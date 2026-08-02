@@ -6,7 +6,9 @@ vi.mock("@super-mcp/db", () => ({
 }));
 
 describe("listPromotions SQL", () => {
-  beforeEach(() => query.mockClear());
+  beforeEach(() => {
+    query.mockClear();
+  });
 
   it("sends a real \\D regex to Postgres (JS must not eat the backslash)", async () => {
     const { listPromotions } = await import(

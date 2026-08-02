@@ -6,7 +6,9 @@ vi.mock("../../src/client/index.js", () => ({ getPool: () => ({ query }) }));
 import { upsertChain, upsertStore } from "../../src/queries/chains.js";
 
 describe("upsertStore coordinate integrity", () => {
-  beforeEach(() => query.mockClear());
+  beforeEach(() => {
+    query.mockClear();
+  });
 
   it("normalizes invalid incoming coordinates to null and leaves geo_source null", async () => {
     await upsertStore({
@@ -118,7 +120,9 @@ describe("upsertStore coordinate integrity", () => {
 });
 
 describe("upsertStore store_kind", () => {
-  beforeEach(() => query.mockClear());
+  beforeEach(() => {
+    query.mockClear();
+  });
 
   const kindOf = (): unknown => query.mock.calls[0]?.[1]?.[9];
 
@@ -169,7 +173,9 @@ describe("upsertStore store_kind", () => {
 });
 
 describe("upsertChain source_id ownership", () => {
-  beforeEach(() => query.mockClear());
+  beforeEach(() => {
+    query.mockClear();
+  });
 
   it("lets a real source take over a fixture-owned chain but never the reverse", async () => {
     await upsertChain({

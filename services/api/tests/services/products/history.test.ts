@@ -6,7 +6,9 @@ vi.mock("@super-mcp/db", () => ({
 }));
 
 describe("getProductHistory window", () => {
-  beforeEach(() => query.mockReset());
+  beforeEach(() => {
+    query.mockReset();
+  });
 
   it("selects the NEWEST 5000 rows but returns them oldest-first", async () => {
     const rows = [

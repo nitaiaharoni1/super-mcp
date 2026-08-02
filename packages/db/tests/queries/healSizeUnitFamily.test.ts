@@ -6,7 +6,9 @@ vi.mock("../../src/client/index.js", () => ({ getPool: () => ({ query }) }));
 import { healSizeUnitFamily } from "../../src/queries/products.js";
 
 describe("healSizeUnitFamily", () => {
-  beforeEach(() => query.mockReset());
+  beforeEach(() => {
+    query.mockReset();
+  });
 
   it("flips only rows whose g/ml family conflicts with the name at equal quantity", async () => {
     query

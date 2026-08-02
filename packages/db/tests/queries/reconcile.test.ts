@@ -22,7 +22,9 @@ function mockCounts(totalBefore: number, staleFound: number, deleted = staleFoun
 }
 
 describe("reconcileStorePrices", () => {
-  beforeEach(() => query.mockReset());
+  beforeEach(() => {
+    query.mockReset();
+  });
 
   it("deletes rows a full snapshot did not refresh", async () => {
     mockCounts(1000, 50);

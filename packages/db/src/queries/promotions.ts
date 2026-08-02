@@ -88,8 +88,10 @@ export async function upsertPromotion(input: UpsertPromoInput, client?: PoolClie
 export interface ExpiredPromoPurgeResult {
   /** Promotions removed. Their items go with them via ON DELETE CASCADE. */
   promotionsDeleted: number;
-  /** Batches run; hitting the cap means more remain for the next pass. */
+  /** Batches attempted, including ones a timeout sent back smaller. */
   batches: number;
+  /** Batch size the sweep settled on; below the maximum means it backed off. */
+  batchSize: number;
   retentionDays: number;
   /** True when the cap stopped it early, so the sweep did not finish. */
   capped: boolean;
@@ -106,9 +108,36 @@ export interface ExpiredPromoPurgeResult {
  */
 const DEFAULT_PROMO_RETENTION_DAYS = 14;
 
-/** Batch size: small enough that a weak instance never holds a long lock. */
-const PURGE_BATCH = 20_000;
-const MAX_BATCHES = 200;
+/**
+ * Batch size: small enough that a weak instance never holds a long lock.
+ *
+ * Starts high and backs off, because the pool pins `statement_timeout=30000`
+ * and one batch is not 20,000 row deletions but closer to 126,000: the average
+ * promotion carries about five `promotion_item` rows, and the cascade has to
+ * maintain four indexes on `promotion` and three on `promotion_item`. Thirty
+ * seconds is probably enough for that on a db-g1-small and definitely enough
+ * once the backlog is gone, but "probably" is a poor bet for the FIRST sweep,
+ * which is the big one and the one whose failure would be least expected.
+ *
+ * A timed-out DELETE rolls back whole, so nothing is half-deleted and a smaller
+ * retry is safe. Without the backoff a single slow batch throws, the non-fatal
+ * hook logs it, and the sweep makes no progress on that night or any other:
+ * a permanently failing job whose error nobody reads.
+ */
+const PURGE_BATCH_MAX = 20_000;
+const PURGE_BATCH_MIN = 500;
+/** Postgres `query_canceled`, which is what statement_timeout raises. */
+const STATEMENT_TIMEOUT = "57014";
+/** Enough attempts to clear ~800k at the smallest batch, plus room to back off. */
+const MAX_BATCHES = 2_000;
+
+function isStatementTimeout(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === STATEMENT_TIMEOUT
+  );
+}
 
 /**
  * Delete promotions that ended more than `retentionDays` ago.
@@ -128,20 +157,34 @@ export async function purgeExpiredPromotions(
 ): Promise<ExpiredPromoPurgeResult> {
   let promotionsDeleted = 0;
   let batches = 0;
+  let batchSize = PURGE_BATCH_MAX;
   for (; batches < MAX_BATCHES; batches += 1) {
-    const res = await getPool().query(
-      `WITH doomed AS (
-         SELECT id FROM promotion
-          WHERE end_ts < now() - ($1 || ' days')::interval
-          ORDER BY end_ts
-          LIMIT $2
-       )
-       DELETE FROM promotion p USING doomed d WHERE p.id = d.id`,
-      [String(retentionDays), PURGE_BATCH],
-    );
-    const removed = res.rowCount ?? 0;
+    let removed: number;
+    try {
+      const res = await getPool().query(
+        `WITH doomed AS (
+           SELECT id FROM promotion
+            WHERE end_ts < now() - ($1 || ' days')::interval
+            ORDER BY end_ts
+            LIMIT $2
+         )
+         DELETE FROM promotion p USING doomed d WHERE p.id = d.id`,
+        [String(retentionDays), batchSize],
+      );
+      removed = res.rowCount ?? 0;
+    } catch (err) {
+      // Anything but the timeout is a real fault and belongs to the caller. At
+      // the floor, so is the timeout: a batch of 500 that cannot finish in
+      // thirty seconds means something is wrong with the database, not with
+      // the batch size, and quietly grinding on would hide it.
+      if (!isStatementTimeout(err) || batchSize <= PURGE_BATCH_MIN) throw err;
+      batchSize = Math.max(PURGE_BATCH_MIN, Math.floor(batchSize / 4));
+      continue;
+    }
     promotionsDeleted += removed;
-    if (removed === 0) return { promotionsDeleted, batches, retentionDays, capped: false };
+    if (removed === 0) {
+      return { promotionsDeleted, batches, batchSize, retentionDays, capped: false };
+    }
   }
-  return { promotionsDeleted, batches, retentionDays, capped: true };
+  return { promotionsDeleted, batches, batchSize, retentionDays, capped: true };
 }

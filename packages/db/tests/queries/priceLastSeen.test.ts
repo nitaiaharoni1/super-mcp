@@ -14,7 +14,9 @@ import { upsertStorePrice } from "../../src/queries/prices.js";
  * though it had just been seen.
  */
 describe("store_price last_seen_at decoupling", () => {
-  beforeEach(() => query.mockClear());
+  beforeEach(() => {
+    query.mockClear();
+  });
 
   for (const [label, run] of [
     [

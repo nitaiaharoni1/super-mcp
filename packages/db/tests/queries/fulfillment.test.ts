@@ -6,7 +6,9 @@ vi.mock("../../src/client/index.js", () => ({ getPool: () => ({ query }) }));
 import { deactivateFulfillmentServicesExcept } from "../../src/queries/fulfillment.js";
 
 describe("deactivating storefronts the catalogue no longer defines", () => {
-  beforeEach(() => query.mockClear());
+  beforeEach(() => {
+    query.mockClear();
+  });
 
   it("refuses an empty keep-list instead of switching the product off", async () => {
     // In Postgres `slug = ANY('{}')` is always false, so `NOT (...)` is always

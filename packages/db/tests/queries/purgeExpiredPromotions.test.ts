@@ -6,7 +6,13 @@ vi.mock("../../src/client/index.js", () => ({ getPool: () => ({ query }) }));
 import { purgeExpiredPromotions } from "../../src/queries/promotions.js";
 
 describe("sweeping promotions that finished", () => {
-  beforeEach(() => query.mockReset());
+  // Braces matter. `mockReset()` returns the mock, and a value returned from
+  // beforeEach is taken as the teardown callback, so the concise-body form made
+  // vitest call `query()` after every test in this file. Harmless while every
+  // mock resolved, and an unexplained failure the moment one throws.
+  beforeEach(() => {
+    query.mockReset();
+  });
 
   it("keeps going until a batch comes back empty", async () => {
     query
@@ -36,7 +42,47 @@ describe("sweeping promotions that finished", () => {
     query.mockResolvedValue({ rowCount: 20000 });
     const result = await purgeExpiredPromotions(14);
     expect(result.capped).toBe(true);
-    expect(result.promotionsDeleted).toBe(200 * 20000);
+    expect(result.promotionsDeleted).toBe(2000 * 20000);
+  });
+
+  it("shrinks the batch and carries on when one times out", async () => {
+    // The pool pins statement_timeout=30000 and a 20,000-promotion batch is
+    // really ~126,000 row deletions once the promotion_item cascade and seven
+    // indexes are counted. Without this the first sweep, the only one big
+    // enough to be at risk, throws and the table never gets any smaller.
+    const timeout = Object.assign(new Error("canceling statement"), { code: "57014" });
+    query
+      .mockRejectedValueOnce(timeout)
+      .mockResolvedValueOnce({ rowCount: 5000 })
+      .mockResolvedValueOnce({ rowCount: 0 });
+
+    const result = await purgeExpiredPromotions(14);
+    expect(result.promotionsDeleted).toBe(5000);
+    expect(result.capped).toBe(false);
+    expect(result.batchSize).toBe(5000);
+    expect(query.mock.calls[0]?.[1]).toEqual(["14", 20000]);
+    expect(query.mock.calls[1]?.[1]).toEqual(["14", 5000]);
+  });
+
+  it("gives up rather than grind when even the smallest batch times out", async () => {
+    // 500 promotions that cannot be deleted in thirty seconds is a sick
+    // database, and a sweep that kept retrying would bury the signal.
+    query.mockImplementation(() => {
+      throw Object.assign(new Error("canceling statement"), { code: "57014" });
+    });
+    const err = await purgeExpiredPromotions(14).catch((e: unknown) => e);
+    expect((err as Error).message).toBe("canceling statement");
+    // 20000 -> 5000 -> 1250 -> 500, then the floor throws.
+    expect(query).toHaveBeenCalledTimes(4);
+  });
+
+  it("never swallows a fault that is not a timeout", async () => {
+    query.mockImplementation(() => {
+      throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+    });
+    const err = await purgeExpiredPromotions(14).catch((e: unknown) => e);
+    expect((err as Error).message).toBe("deadlock detected");
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
   it("deletes only what ended before the window", async () => {
