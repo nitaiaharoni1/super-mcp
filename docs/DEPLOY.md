@@ -94,6 +94,31 @@ GROUP BY 1 ORDER BY 3 DESC;
 `SUPER_MCP_REGION_FILTER` is a separate, deliberate scope limit (Gush Dan/Sharon,
 Jerusalem, Haifa, Beersheva). Leave it on unless you want national coverage.
 
+## Two ingest env vars that change what production does
+
+Neither has a safe-looking default that is also the right one, so both are worth
+stating outright.
+
+| Variable | Set on | Effect when set | Effect when absent |
+| --- | --- | --- | --- |
+| `SUPER_MCP_EXCLUDE_SOURCES` | `super-mcp-ingest` (europe-west1) = `il-laibcatalog` | Comma-separated source ids dropped from the `all` registry. Excluding every source throws rather than exiting 0 having ingested nothing. | Every source runs. |
+| `SUPER_MCP_PROMO_RETENTION_DAYS` | `super-mcp-ingest` (europe-west1) = `14` | After a run, deletes promotions whose `end_ts` is older than this, cascading to `promotion_item`. **Irreversible.** | The sweep does not run at all. |
+
+`SUPER_MCP_EXCLUDE_SOURCES` exists because `laibcatalog.co.il` silently drops TCP
+connects from outside Israel, so the europe-west1 job books a guaranteed failure
+every night unless it can leave that one source out. The same source is ingested
+by the separate me-west1 job `super-mcp-ingest-il`, which does NOT set the
+variable: the exclusion only applies to `--source=all`, so an explicit
+`--source=il-laibcatalog` still runs. That asymmetry is the point, and it is the
+reason a typo in the variable is not fatal. It is also the reason a typo is easy
+to miss: check the `ingestion_sources_excluded` log line names what you meant.
+
+`SUPER_MCP_PROMO_RETENTION_DAYS` is opt-in so that no deployment starts deleting
+history merely by picking up a new image. It buys a smaller working set, not a
+smaller bill: Cloud SQL charges for the provisioned disk and that disk cannot
+shrink. Values that are not finite and positive disable it silently, which is the
+intended fail-safe direction for a destructive knob.
+
 ## Release order for migrations 023 / 024 (breaking if reversed)
 
 `listStores` and the product-prices query both SELECT `store.store_kind`, which
