@@ -219,3 +219,57 @@ export interface DeliveryNeedsConfirmationResult {
 export type DeliveryOptimizeResult =
   | DeliveryOptimizeCompleteResult
   | DeliveryNeedsConfirmationResult;
+
+/**
+ * Every field a delivery plan carries, as data.
+ *
+ * It lives in `src` and not beside the test that uses it because only `src` is
+ * typechecked (`tsconfig.json` includes `src/**` alone), so a `Record<keyof
+ * DeliveryPlan, true>` written in a test compiles no matter what it says. One
+ * did: it listed `storeName`, which belongs to `InStoreComparison`, and nothing
+ * complained.
+ *
+ * Here the compiler enforces both directions — a new field on `DeliveryPlan` is
+ * a missing key, and a field that does not exist is an excess one — which is
+ * what lets the MCP instructions be checked against the payload they describe.
+ */
+export const DELIVERY_PLAN_FIELDS: Record<keyof DeliveryPlan, true> = {
+  serviceSlug: true,
+  brand: true,
+  serviceType: true,
+  marketplace: true,
+  storefrontUrl: true,
+  chainId: true,
+  chainName: true,
+  storeId: true,
+  currency: true,
+  itemsSubtotal: true,
+  itemsComparableSubtotal: true,
+  totalScope: true,
+  deliveryFee: true,
+  assumedDeliveryFee: true,
+  deliveryFeeIsFloor: true,
+  serviceFee: true,
+  deliveredTotal: true,
+  deliveredComparableTotal: true,
+  deliveryTerms: true,
+  meetsMinimum: true,
+  minimumOrder: true,
+  amountToMinimum: true,
+  minimumKnown: true,
+  requiresMembership: true,
+  coverage: true,
+  freeDeliveryThreshold: true,
+  nextFeeBreak: true,
+  pricedLines: true,
+  resolvableLines: true,
+  requestedLines: true,
+  coverageRatio: true,
+  imputedTotal: true,
+  imputedLines: true,
+  clubOnlyLines: true,
+  couponOnlyLines: true,
+  lines: true,
+  linesTruncated: true,
+  missingItems: true,
+};

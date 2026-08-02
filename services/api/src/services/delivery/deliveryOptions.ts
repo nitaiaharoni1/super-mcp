@@ -26,7 +26,14 @@ export interface DeliveryOptionSummary {
   serviceFeeDescription: string | null;
   pickupAvailable: boolean;
   deliveryTerms: DeliveryTermsProvenance;
-  coverage: DeliveryCoverageReport;
+  /**
+   * Verdict for a specific address, or null when no address was supplied.
+   *
+   * Null rather than `{serves:false}`: `getDeliveryTerms` takes a slug and
+   * nothing else, so it can never test an address, and reporting a denial there
+   * told every caller the storefront does not deliver to them.
+   */
+  coverage: DeliveryCoverageReport | null;
   /** How many prices we hold for this storefront: 0 means we cannot cost a basket. */
   catalogSize: number | null;
   notes: string | null;
@@ -131,9 +138,8 @@ export async function listDeliveryOptions(params: {
       serviceFeeDescription: describeServiceFee(service.serviceFee),
       pickupAvailable: service.tariffs.some((t) => t.slotType === "pickup"),
       deliveryTerms: termsProvenance(service, standardFee != null, now),
-      coverage: destinationKnown
-        ? coverageReport(service, destination)
-        : { serves: false, matchedScope: null, confidence: null, reason: "address_too_vague" },
+      // No address to test means no verdict, not a refusal.
+      coverage: destinationKnown ? coverageReport(service, destination) : null,
       catalogSize: null,
       notes: service.notes,
     };
@@ -142,7 +148,7 @@ export async function listDeliveryOptions(params: {
   const filtered =
     params.includeUnavailable || !destinationKnown
       ? options
-      : options.filter((option) => option.coverage.serves);
+      : options.filter((option) => option.coverage?.serves === true);
 
   return { options: filtered, destinationKnown };
 }

@@ -143,7 +143,17 @@ function restrictToDominantClass(candidates: BasketCandidate[]): BasketCandidate
   if (candidates.length === 0) return candidates;
   if (shareCompatibleClass(candidates)) return restrictToDominantClassL2(candidates);
 
-  const dominantL1 = dominantClassAmong(candidates, (c) => c.classL1);
+  // Majority when the labels agree on one; otherwise the top-ranked candidate's
+  // class, which is what this did before.
+  //
+  // The fallback is load-bearing and was missed the first time. Returning the
+  // pool un-narrowed on a split looks harmless here, but the caller's very next
+  // line is `if (!shareCompatibleClass(pool)) return omitOutcome(...)`, and that
+  // branch had been unreachable precisely because this function always narrowed.
+  // So a split pool stopped being a worse guess and started being a DROPPED
+  // LINE, which is a bigger regression than the one the majority rule fixed.
+  const seedL1 = candidates.find((c) => c.classL1)?.classL1 ?? null;
+  const dominantL1 = dominantClassAmong(candidates, (c) => c.classL1) ?? seedL1;
   if (dominantL1) {
     const same = candidates.filter((c) => !c.classL1 || c.classL1 === dominantL1);
     // Never shrink below the two-peer commodity signal on a class guess alone,
@@ -151,7 +161,9 @@ function restrictToDominantClass(candidates: BasketCandidate[]): BasketCandidate
     return restrictToDominantClassL2(same.length >= 2 ? same : candidates);
   }
 
-  const dominantClass = dominantClassAmong(candidates, (c) => c.productClass);
+  const seedClass = candidates.find((c) => c.productClass)?.productClass ?? null;
+  const dominantClass =
+    dominantClassAmong(candidates, (c) => c.productClass) ?? seedClass;
   if (dominantClass) {
     const same = candidates.filter(
       (c) => !c.productClass || c.productClass === dominantClass,

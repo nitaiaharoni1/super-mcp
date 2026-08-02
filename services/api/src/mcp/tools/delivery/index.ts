@@ -54,6 +54,10 @@ export function registerDeliveryTools(server: McpServer): void {
         "for a delivery question (that is the drive-to-the-shop tool). " +
         "THE HEADLINE FIGURE IS deliveredTotal, not the item subtotal: a ₪35.90 delivery fee outweighs " +
         "most price differences between chains. " +
+        "But RANK on deliveredComparableTotal, never on deliveredTotal: totalScope is priced_lines_only, " +
+        "so a storefront that stocks four of your twelve items reports a small deliveredTotal precisely " +
+        "because it cannot fill the basket. Check pricedLines against requestedLines and say when the " +
+        "coverage is partial. " +
         "Read deliveryTerms.confidence before quoting: 'verified' was read from the retailer's own " +
         "binding terms, 'reported' from a cited secondary source, 'unknown' means no fee is established " +
         "and the ranking used an assumption (assumedDeliveryFee) that must not be repeated as a price. " +
