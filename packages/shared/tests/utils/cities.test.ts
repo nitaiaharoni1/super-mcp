@@ -56,3 +56,42 @@ describe("extractCityFromLocation", () => {
     expect(extractCityFromLocation("אזור תעשייה")).toBeNull();
   });
 });
+
+describe("spacing around a hyphen is typography, not identity", () => {
+  it("reads a retailer's spaced spelling as the same place", () => {
+    // Rami Levy's delivery page writes "תל אביב - יפו". Until this normalised,
+    // that was a different place from "תל אביב-יפו", so the chain's own coverage
+    // list reported that it does not deliver to Tel Aviv.
+    expect(canonicalizeCity("תל אביב - יפו")).toBe("תל אביב-יפו");
+    expect(canonicalizeCity("תל אביב-יפו")).toBe("תל אביב-יפו");
+    expect(canonicalizeCity("תל אביב")).toBe("תל אביב-יפו");
+  });
+
+  it("still tells two genuinely different places apart", () => {
+    expect(canonicalizeCity("רמת גן")).not.toBe(canonicalizeCity("רמת השרון"));
+  });
+});
+
+describe("a street named after a place is not that place", () => {
+  it("does not read a boulevard's name as the city", () => {
+    // "שדרות" is both the word for boulevard and a town, and it is a longer
+    // alias than אילת or חיפה, so it won every address it appeared in: an Eilat
+    // basket was priced against a town 200km away, and so was a Haifa one.
+    expect(extractCityFromLocation("שדרות התמרים 1, אילת")).toBe("אילת");
+    expect(extractCityFromLocation("שדרות בן גוריון 12, חיפה")).toBe("חיפה");
+    expect(extractCityFromLocation("שדרות רוטשילד 20, תל אביב")).toBe("תל אביב-יפו");
+  });
+
+  it("does not read a street named after another city as that city", () => {
+    expect(extractCityFromLocation("שדרות ירושלים 5, בת ים")).toBe("בת ים");
+    expect(extractCityFromLocation("רחוב ירושלים 3, רמת גן")).toBe("רמת גן");
+  });
+
+  it("still finds the town when the street word IS the town", () => {
+    expect(extractCityFromLocation("שדרות ניצנים 3, שדרות")).toBe("שדרות");
+    expect(extractCityFromLocation("שדרות")).toBe("שדרות");
+    expect(extractCityFromLocation("שדרות, ישראל")).toBe("שדרות");
+    // A street named for the city it is in still resolves to that city.
+    expect(extractCityFromLocation("שדרות ירושלים 5, ירושלים")).toBe("ירושלים");
+  });
+});

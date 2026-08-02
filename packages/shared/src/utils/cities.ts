@@ -298,12 +298,20 @@ export function parseLocalityCode(city: string): string | null {
 }
 
 export function normalizeCityKey(city: string): string {
-  return scrubNullChars(city)
-    .trim()
-    .replace(/['"״׳`]/g, "")
-    .replace(/[–—-]/g, "-")
-    .replace(/\s+/g, " ")
-    .toLowerCase();
+  return (
+    scrubNullChars(city)
+      .trim()
+      .replace(/['"״׳`]/g, "")
+      .replace(/[–—-]/g, "-")
+      .replace(/\s+/g, " ")
+      // Spacing around a hyphen is typography, not identity. Rami Levy's delivery
+      // page writes "תל אביב - יפו" and the canonical name is "תל אביב-יפו";
+      // without this the two are different places and the chain reported that it
+      // does not deliver to Tel Aviv. No Israeli locality uses " - " as a real
+      // separator, so collapsing it cannot merge two distinct places.
+      .replace(/\s*-\s*/g, "-")
+      .toLowerCase()
+  );
 }
 
 /** Canonical Hebrew city name when known; otherwise the scrubbed original. */
@@ -381,6 +389,64 @@ function containsCityPhrase(haystack: string, phrase: string): boolean {
 }
 
 /**
+ * Words that introduce a street, so the name after them is a street and not the
+ * town of the same name. Israeli streets are routinely named after other
+ * places: "שדרות ירושלים, בת ים" is in Bat Yam, not Jerusalem.
+ */
+const STREET_PREFIXES = [
+  "רחוב",
+  "רח",
+  "שדרות",
+  "שדרת",
+  "שדרה",
+  "שד",
+  "דרך",
+  "סמטת",
+  "סמטה",
+  "מעלה",
+  "כיכר",
+  "ככר",
+];
+
+/**
+ * True when this match is a street name rather than the locality.
+ *
+ * Two shapes, and the second is the one that actually bit. "שדרות ירושלים 5,
+ * בת ים" is the ordinary case: the locality name follows a street word. But
+ * "שדרות" is ALSO a town, and it is the longest alias in play, so
+ * "שדרות התמרים 1, אילת" matched Sderot and priced an Eilat basket against a
+ * town 200km away — every boulevard address in the country resolved to Sderot.
+ * A street word followed by another word is the street; standing alone, or last
+ * before a comma, it is the town.
+ */
+function isStreetNameMatch(haystack: string, phrase: string): boolean {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prefixes = STREET_PREFIXES.join("|");
+  const afterStreetWord = new RegExp(
+    `(?:^|[^\\p{L}\\p{N}])(?:${prefixes})\\.?\\s+${escaped}(?:$|[^\\p{L}\\p{N}])`,
+    "u",
+  );
+  if (afterStreetWord.test(haystack)) {
+    // Only a street name if every occurrence is one; "שדרות ירושלים, ירושלים"
+    // still names the city.
+    const standalone = new RegExp(
+      `(?:^|[^\\p{L}\\p{N}])(?<!(?:${prefixes})\\.?\\s)${escaped}(?:$|[^\\p{L}\\p{N}])`,
+      "u",
+    );
+    if (!standalone.test(haystack)) return true;
+  }
+  if (!STREET_PREFIXES.includes(phrase)) return false;
+  // The alias is itself a street word. It names the town only where it is not
+  // followed by the rest of a street name.
+  const asStreetWord = new RegExp(
+    `(?:^|[^\\p{L}\\p{N}])${escaped}\\s+\\p{L}`,
+    "u",
+  );
+  const asTown = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?:$|[^\\p{L}\\p{N}\\s])`, "u");
+  return asStreetWord.test(haystack) && !asTown.test(haystack);
+}
+
+/**
  * Parent locality for a neighborhood / landmark phrase, or null when the text
  * carries none. Longest whole-token match, same matcher the locality pass uses.
  */
@@ -409,7 +475,10 @@ export function extractCityFromLocation(location: string): string | null {
   const normalized = normalizeCityKey(location);
   if (!normalized) return null;
   for (const candidate of LOCATION_CITY_CANDIDATES) {
-    if (containsCityPhrase(normalized, candidate.alias)) return candidate.canonical;
+    if (!containsCityPhrase(normalized, candidate.alias)) continue;
+    // A street named after a place is not that place.
+    if (isStreetNameMatch(normalized, candidate.alias)) continue;
+    return candidate.canonical;
   }
   return cityForNeighborhood(normalized);
 }
