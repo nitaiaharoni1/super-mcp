@@ -140,6 +140,16 @@ export function partitionByCoverage(
       );
       continue;
     }
+    // Same treatment for express, which was accepted by the schema and then
+    // matched no tariff band anywhere. Every storefront came back with a null
+    // fee and confidence "unknown", so the answer read as "we do not know what
+    // express costs" when the truth is that nobody in the catalogue offers it.
+    if (slotType === "express" && !service.tariffs.some((t) => t.slotType === "express")) {
+      unavailable.push(
+        unavailableFor(service, "no_express_option", "this storefront publishes no express slot"),
+      );
+      continue;
+    }
     const coverage = coverageReport(service, destination);
     if (coverage.serves) {
       serving.push({ service, coverage });
@@ -442,6 +452,10 @@ async function runDeliveryOptimization(
       chainName: plan.chainName,
       reason: "below_minimum_order",
       detail: `basket is ₪${plan.amountToMinimum?.toFixed(2)} below this storefront's ₪${plan.minimumOrder?.toFixed(2)} minimum`,
+      // The shortfall as a number, not only inside the sentence: plans are
+      // filtered to meetsMinimum before ranking, so this is the ONLY place a
+      // caller can read it.
+      amountToMinimum: plan.amountToMinimum,
     });
   }
 

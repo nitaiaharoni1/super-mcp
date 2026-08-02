@@ -20,6 +20,18 @@ export interface StoreLocationHint {
   lng?: number;
   /** Optional free-text (store name) used as a weak city hint. */
   name?: string;
+  /**
+   * True for a storefront that delivers rather than one a shopper drives to.
+   *
+   * The region filter answers "which BRANCHES are worth refreshing near our
+   * users". It is the wrong question for a delivery depot: where the depot sits
+   * says nothing about where it delivers, and Tiv Taam's Ashdod and Caesarea
+   * picking points sit outside the configured boxes while serving addresses
+   * inside them. Filtering them out did not hide them, because the delivery
+   * surface selects on published coverage; it only stopped their prices being
+   * refreshed, so both were quoted as live options on data 15 days old.
+   */
+  isDeliveryStorefront?: boolean;
 }
 
 /** Bounding boxes [minLat, maxLat, minLng, maxLng] as fallback when city is missing. */
@@ -211,6 +223,8 @@ function nameHintsCoveredCity(name: string | undefined): boolean {
  * like "חולון המרכבה"), which is kept only as a last-resort fallback.
  */
 export function isStoreInIngestRegion(store: StoreLocationHint): boolean {
+  // A depot we quote deliveries from is always worth refreshing, wherever it is.
+  if (store.isDeliveryStorefront) return true;
   if (cityAllowed(store.city)) return true;
   if (geoAllowed(store.lat, store.lng)) return true;
   if (!store.city && cityAllowed(localityFromStoreName(store.name) ?? undefined)) return true;

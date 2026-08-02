@@ -132,3 +132,25 @@ describe("spellings the retailers use that the gazetteer did not know", () => {
     }
   });
 });
+
+describe("a street phrase cannot smuggle a city out through its own tail", () => {
+  it("does not answer with a town nested inside the street name", () => {
+    // The candidate list is longest-first, so rejecting "מעלות תרשיחא" as a
+    // street name still left its trailing token to match on a later pass, and a
+    // Ra'anana address came back as a Galilee town.
+    expect(extractCityFromLocation("שדרות מעלות תרשיחא 5, רעננה")).toBe("רעננה");
+    expect(extractCityFromLocation("רחוב קריית עקרון 5, רעננה")).toBe("רעננה");
+  });
+
+  it("still resolves those towns when they are the address", () => {
+    expect(extractCityFromLocation("מעלות תרשיחא")).toBe("מעלות תרשיחא");
+    expect(extractCityFromLocation("קריית עקרון")).toBe("קריית עקרון");
+  });
+
+  it("finds the town when an unrelated word merely ends in a street word", () => {
+    // "מזרח" ends in "רח", "למעלה" ends in "מעלה": an unanchored lookbehind let
+    // those suppress the standalone rescue and returned nothing at all.
+    expect(extractCityFromLocation("דרך חיפה 3, מזרח חיפה")).toBe("חיפה");
+    expect(extractCityFromLocation("שדרות ירושלים 5, מזרח ירושלים")).toBe("ירושלים");
+  });
+});

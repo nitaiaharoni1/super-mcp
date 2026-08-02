@@ -19,6 +19,7 @@ interface Row {
   lng: number | null;
   store_code: string;
   in_coverage: boolean | null;
+  is_delivery_storefront: boolean;
 }
 
 async function main(): Promise<void> {
@@ -39,7 +40,12 @@ async function main(): Promise<void> {
   }
 
   const { rows } = await pool.query<Row>(
-    `SELECT id, name, city, lat, lng, store_code, in_coverage FROM store`,
+    `SELECT s.id, s.name, s.city, s.lat, s.lng, s.store_code, s.in_coverage,
+            EXISTS (
+              SELECT 1 FROM fulfillment_service fs
+               WHERE fs.store_id = s.id AND fs.active
+            ) AS is_delivery_storefront
+       FROM store s`,
   );
 
   let inCoverage = 0;
@@ -54,6 +60,7 @@ async function main(): Promise<void> {
       lat: row.lat ?? undefined,
       lng: row.lng ?? undefined,
       name: row.name,
+      isDeliveryStorefront: row.is_delivery_storefront,
     });
     if (covered) inCoverage += 1;
     else {

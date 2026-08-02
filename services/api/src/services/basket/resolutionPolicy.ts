@@ -399,6 +399,7 @@ function betterCoveredPeer(
   const specific = pool.filter((c) => queryTokensSatisfied(queryTokens, c.name));
   if (specific.length === 0) return null;
 
+
   const primaryCoverage = primary ? nearbyCoverage(primary, availability) : 0;
   const threshold = Math.max(
     AVAILABILITY_UPGRADE_MIN_STORES,

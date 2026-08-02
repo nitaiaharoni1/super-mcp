@@ -156,9 +156,20 @@ export interface UnavailableStorefront {
     | "coverage_unknown"
     | "below_minimum_order"
     | "no_lines_priced"
-    | "no_pickup_option";
+    | "no_pickup_option"
+    | "no_express_option";
   /** Human-readable detail, e.g. "add ₪27.50 to reach the ₪99 minimum". */
   detail: string | null;
+  /**
+   * Shekels of extra goods needed, when `reason` is `below_minimum_order`.
+   *
+   * Both prose surfaces tell the model to report `amountToMinimum`, and no
+   * returned PLAN can ever carry it: plans are filtered to `meetsMinimum` before
+   * ranking, so the field is null on every one of them. The number only exists
+   * for storefronts that landed here, so this is where it has to be readable
+   * rather than buried in a sentence.
+   */
+  amountToMinimum: number | null;
 }
 
 /** What ordering the same basket in person would cost, when asked for. */

@@ -146,7 +146,15 @@ export function buildDeliveryPlan(input: BuildPlanInput): DeliveryPlan {
 
     itemsSubtotal: agorot(priced.total),
     itemsComparableSubtotal: comparable.comparableTotal,
-    totalScope: pricedLines >= input.resolvableLines ? "complete_basket" : "priced_lines_only",
+    // Measured against what the SHOPPER asked for, not against how many lines
+    // happened to resolve to a product.
+    //
+    // `resolvableLines` is computed globally and drops every line search could
+    // not match at all, so a basket of six items where one resolved reported
+    // `complete_basket` on a plan pricing exactly that one. Both prose surfaces
+    // make this field THE partial-coverage signal, and the sibling basket
+    // surface already derives it from pricedLines/requestedLines.
+    totalScope: pricedLines >= input.requestedLines ? "complete_basket" : "priced_lines_only",
 
     deliveryFee: quotableFee,
     assumedDeliveryFee: quotableFee == null ? ASSUMED_DELIVERY_FEE : null,
@@ -230,6 +238,7 @@ export function unavailableFor(
   service: FulfillmentServiceRow,
   reason: UnavailableStorefront["reason"],
   detail: string | null,
+  amountToMinimum: number | null = null,
 ): UnavailableStorefront {
   return {
     serviceSlug: service.slug,
@@ -237,5 +246,6 @@ export function unavailableFor(
     chainName: service.chainName,
     reason,
     detail,
+    amountToMinimum,
   };
 }

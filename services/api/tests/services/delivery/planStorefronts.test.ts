@@ -445,3 +445,21 @@ describe("no pickup option is a reason, not a disappearance", () => {
     });
   });
 });
+
+describe("what the shopper asked for is the denominator", () => {
+  it("does not call a partly-filled basket complete", () => {
+    // totalScope measured against resolvableLines, which drops every line search
+    // could not match at all. So a basket of six items where one resolved
+    // reported complete_basket on a plan pricing exactly that one, and both
+    // prose surfaces make this field THE partial-coverage signal.
+    const partial = plan({ resolvableLines: 1, requestedLines: 6 });
+    expect(partial.pricedLines).toBeLessThan(6);
+    expect(partial.totalScope).toBe("priced_lines_only");
+  });
+
+  it("still calls a fully priced basket complete", () => {
+    const full = plan({ resolvableLines: 2, requestedLines: 2 });
+    expect(full.pricedLines).toBe(2);
+    expect(full.totalScope).toBe("complete_basket");
+  });
+});

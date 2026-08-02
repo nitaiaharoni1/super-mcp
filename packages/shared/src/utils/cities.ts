@@ -506,9 +506,17 @@ export function extractCityFromLocation(location: string): string | null {
   // skips street-name matches, and the second accepts them when no other
   // locality is named anywhere in the string.
   let streetNameFallback: string | null = null;
+  // Aliases already ruled out as street names, so a SHORTER alias nested inside
+  // the same street phrase cannot win on the next pass. The list is longest
+  // first, so "שדרות מעלות תרשיחא 5, רעננה" rejected "מעלות תרשיחא" as a street
+  // and then matched it again through its own trailing token, answering with a
+  // Galilee town for a Ra'anana address.
+  const rejectedStreetPhrases: string[] = [];
   for (const candidate of LOCATION_CITY_CANDIDATES) {
     if (!containsCityPhrase(normalized, candidate.alias)) continue;
+    if (rejectedStreetPhrases.some((phrase) => phrase.includes(candidate.alias))) continue;
     if (isStreetNameMatch(normalized, candidate.alias)) {
+      rejectedStreetPhrases.push(candidate.alias);
       streetNameFallback ??= candidate.canonical;
       continue;
     }
