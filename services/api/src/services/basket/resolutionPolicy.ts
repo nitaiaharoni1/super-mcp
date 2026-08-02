@@ -9,6 +9,7 @@ import {
   type QueryProfile,
 } from "@super-mcp/shared";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
+import { AUTO_ACCEPT_SCORE } from "./constants.js";
 import { preferDirectForm } from "./derivedForm.js";
 import {
   buildCommodityEquivalents,
@@ -283,7 +284,14 @@ function selectOutcome(
       unit,
       resolvedBy: "query",
       resolutionStatus: "resolved",
-      lowConfidence: false,
+      // A best-effort pick still gets priced — that is the whole point of fast
+      // mode — but it must not be REPORTED as a confident one. This was hardcoded
+      // false, so "שקיות זבל" resolving to "שקיות זיפר L" (ziplock bags, score
+      // 0.0156) reached the caller looking identical to a 0.95 match. Same
+      // threshold the candidate picker uses, so the two agree on what "low" means.
+      // Safe for the gates: every consumer of lowConfidence checks
+      // `resolutionStatus === "resolved" || ...` first, which still short-circuits.
+      lowConfidence: chosen.score < AUTO_ACCEPT_SCORE,
       confidence: chosen.score,
       // Swapping the primary invalidates an equivalence set that was built around
       // the OLD one. `...item` above would carry it over: a "בשר טחון" line

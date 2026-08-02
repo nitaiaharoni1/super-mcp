@@ -243,6 +243,7 @@ export const deliveryPaths = {
             slotType: { type: "string" },
             cheapestDelivered: { $ref: "#/components/schemas/DeliveryPlan" },
             bestVerifiedTerms: { $ref: "#/components/schemas/DeliveryPlan" },
+            bestSingleOrder: { $ref: "#/components/schemas/DeliveryPlan" },
             plans: { type: "array", items: { $ref: "#/components/schemas/DeliveryPlan" } },
             unavailableStores: { type: "array", items: { type: "object" } },
             inStoreComparison: { type: "object", nullable: true },

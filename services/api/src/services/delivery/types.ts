@@ -141,6 +141,17 @@ export interface DeliveryPlan {
   imputedLines: number;
   clubOnlyLines: number;
   couponOnlyLines: number;
+  /**
+   * Priced lines whose price the retailer last published over
+   * STALE_PRICE_DAYS ago.
+   *
+   * Not cosmetic: Rami Levy's online storefront publishes 44.6% of its prices
+   * with a source timestamp older than 30 days and 2,841 of them older than a
+   * year, while every other storefront measures 0%. Per-line `freshness` has
+   * always carried the timestamp, but nothing added it up, so a basket quoting a
+   * thirteen-month-old price looked exactly like one quoting yesterday's.
+   */
+  stalePricedLines: number;
   lines: BasketLine[];
   linesTruncated?: boolean;
   missingItems: BasketMissingItem[];
@@ -210,6 +221,13 @@ export interface DeliveryOptimizeCompleteResult {
   cheapestDelivered: DeliveryPlan | null;
   /** Best plan whose delivery fee we can actually stand behind. */
   bestVerifiedTerms: DeliveryPlan | null;
+  /**
+   * Most of the list obtainable as ONE order, cheapest among equals.
+   *
+   * `cheapestDelivered` prices the gaps at a market reference, which answers
+   * "cheapest if you shop twice". This answers "cheapest that actually arrives".
+   */
+  bestSingleOrder: DeliveryPlan | null;
   plans: DeliveryPlan[];
   unavailableStores: UnavailableStorefront[];
   inStoreComparison: InStoreComparison | null;
@@ -280,6 +298,7 @@ export const DELIVERY_PLAN_FIELDS: Record<keyof DeliveryPlan, true> = {
   imputedLines: true,
   clubOnlyLines: true,
   couponOnlyLines: true,
+  stalePricedLines: true,
   lines: true,
   linesTruncated: true,
   missingItems: true,

@@ -5,6 +5,7 @@ import {
   centroidForCity,
   extractCityFromLocation,
 } from "@super-mcp/shared";
+import { enrichCommodityCoverage } from "../basket/commodityCoverage.js";
 import { buildComparableCosts } from "../basket/comparableBasket.js";
 import {
   createBasketContinuationPayload,
@@ -13,7 +14,7 @@ import {
 } from "../basket/continuation.js";
 import { applyBasketAnswers } from "../basket/continuation.js";
 import { loadBasketPricingData, loadCandidateAvailability } from "../basket/loadPricingData.js";
-import { buildItemStatuses } from "../basket/optimize.js";
+import { buildItemStatuses, collectProductIdsForPricing } from "../basket/optimize.js";
 import { priceStoreBasket } from "../basket/priceStoreBasket.js";
 import {
   DEFAULT_QUESTION_OPTIONS_LIMIT,
@@ -35,7 +36,11 @@ import { listStores, type StoreSummary } from "../stores/index.js";
 import {
   buildDeliveryPlan,
   coverageReport,
+  STALE_PRICE_DAYS,
+  bestSingleOrderPlan,
+  modelledShare,
   rankPlans,
+  rankPlansForResponse,
   unavailableFor,
 } from "./planStorefronts.js";
 import type {
@@ -310,6 +315,7 @@ async function runDeliveryOptimization(
       slotType,
       cheapestDelivered: null,
       bestVerifiedTerms: null,
+      bestSingleOrder: null,
       plans: [],
       unavailableStores: unavailable,
       inStoreComparison: null,
@@ -394,9 +400,19 @@ async function runDeliveryOptimization(
   const pricingItems = fastPolicy.items;
   const assumptions: BasketAssumption[] = fastPolicy.assumptions;
 
-  const productIds = pricingItems
-    .map((item) => item.productId)
-    .filter((id): id is string => id != null);
+  // Broaden each line to the SKUs these storefronts actually carry, before
+  // pricing. Without it every storefront is asked for the one globally chosen
+  // SKU and a chain that stocks the same commodity under its own item code
+  // reports "not carried": Rami Levy online has 15,849 priced products against
+  // Carrefour's 9,600 yet filled 5 lines of a 12-line basket to Carrefour's 11.
+  // The physical surface has called this since the per-chain work landed; the
+  // delivery surface never did.
+  await enrichCommodityCoverage(input.items, pricingItems, servingStoreIds);
+
+  // Primary AND its gated equivalents/alternatives. Collecting only the primary
+  // loaded no listings for the peers, so priceStoreBasket's fallback order had
+  // nothing to fall back to and the enrichment above would have been inert.
+  const productIds = collectProductIdsForPricing(pricingItems);
   const pricing = await loadBasketPricingData(
     productIds,
     servingStoreIds,
@@ -471,10 +487,19 @@ async function runDeliveryOptimization(
     );
   }
 
-  // Below the minimum the order cannot be placed, so it is not a candidate — but
-  // it stays in `plans` with the flag and the shortfall, because "add ₪27.50 and
-  // this becomes your cheapest option" is the most useful thing we can say.
+  // Below the minimum the order cannot be placed, so it is not a candidate for
+  // any recommendation — but it stays in `plans` with the flag and the shortfall,
+  // because "add ₪27.50 and this becomes your cheapest option" is the most useful
+  // thing we can say. It is also listed in unavailableStores, which answers the
+  // different question of why it cannot be ordered as it stands.
+  //
+  // `plans` used to be built from `orderable` alone, so the storefront dropped out
+  // of the response entirely and the shortfall survived only as prose. That hid a
+  // real option: on a Tel Aviv basket, Carrefour listed 11 of 12 lines at ₪134.90
+  // and vanished for being ₪65.10 short, while the storefronts left in view could
+  // fill 7 and 8.
   const orderable = plans.filter((plan) => plan.meetsMinimum);
+  const belowMinimum = plans.filter((plan) => !plan.meetsMinimum);
   for (const plan of plans) {
     if (plan.meetsMinimum) continue;
     unavailable.push({
@@ -491,9 +516,59 @@ async function runDeliveryOptimization(
   }
 
   const ranked = rankPlans(orderable, preference);
+  const allPlans = rankPlansForResponse(plans, preference);
   const cheapestDelivered = ranked[0] ?? null;
   const bestVerifiedTerms =
     ranked.find((plan) => plan.deliveryTerms.confidence === "verified") ?? null;
+  const bestSingleOrder = bestSingleOrderPlan(orderable, preference);
+
+  // A cheapest whose lead comes from lines it cannot sell is not a finding, and
+  // saying it plainly costs nothing. Both halves of this matter: the winner's
+  // total can be mostly modelled, and a rival that actually stocks more of the
+  // list can be sitting right behind it.
+  if (cheapestDelivered) {
+    const modelled = modelledShare(cheapestDelivered);
+    if (modelled >= 0.25) {
+      notes.push(
+        `${Math.round(modelled * 100)}% of ${cheapestDelivered.brand}'s comparable total is a ` +
+          `market reference, not its own price: it lists ${cheapestDelivered.pricedLines} of ` +
+          `${cheapestDelivered.requestedLines} requested lines. Treat the ranking as indicative.`,
+      );
+    }
+    if (cheapestDelivered.stalePricedLines > 0) {
+      notes.push(
+        `${cheapestDelivered.stalePricedLines} of ${cheapestDelivered.pricedLines} priced lines ` +
+          `at ${cheapestDelivered.brand} come from a price the retailer last published over ` +
+          `${STALE_PRICE_DAYS} days ago. Per-line freshness.sourceTs says how old each one is.`,
+      );
+    }
+    // A storefront held back only by its minimum is a live option, not a dead
+    // end: the shopper decides whether topping up is worth it, and cannot decide
+    // that about a storefront we never mention.
+    const worthTopUp = belowMinimum
+      .filter((plan) => plan.amountToMinimum != null)
+      .filter(
+        (plan) =>
+          plan.pricedLines > cheapestDelivered.pricedLines ||
+          plan.deliveredComparableTotal < cheapestDelivered.deliveredComparableTotal,
+      )
+      .sort((a, b) => b.pricedLines - a.pricedLines || a.amountToMinimum! - b.amountToMinimum!)[0];
+    if (worthTopUp) {
+      notes.push(
+        `${worthTopUp.brand} lists ${worthTopUp.pricedLines} of ${worthTopUp.requestedLines} lines ` +
+          `at ₪${worthTopUp.itemsSubtotal.toFixed(2)} but sits ₪${worthTopUp.amountToMinimum!.toFixed(2)} ` +
+          `under its ₪${worthTopUp.minimumOrder?.toFixed(2)} minimum. It is in plans with ` +
+          "meetsMinimum:false; adding that much makes it orderable.",
+      );
+    }
+    if (bestSingleOrder && bestSingleOrder.pricedLines > cheapestDelivered.pricedLines) {
+      notes.push(
+        `${bestSingleOrder.brand} lists ${bestSingleOrder.pricedLines} of ` +
+          `${bestSingleOrder.requestedLines} lines against ${cheapestDelivered.brand}'s ` +
+          `${cheapestDelivered.pricedLines}. It is the best basket obtainable as one order.`,
+      );
+    }
+  }
 
   if (cheapestDelivered?.deliveryTerms.confidence === "unknown") {
     notes.push(
@@ -535,7 +610,8 @@ async function runDeliveryOptimization(
     slotType,
     cheapestDelivered,
     bestVerifiedTerms,
-    plans: ranked,
+    bestSingleOrder,
+    plans: allPlans,
     unavailableStores: unavailable,
     inStoreComparison,
     // Rebuilt from the items that were actually priced, not from the pre-policy

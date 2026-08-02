@@ -453,6 +453,26 @@ export function hasUnrequestedPreservedForm(queryTokens: Set<string>, candidateN
   return false;
 }
 
+/**
+ * A peer that adds an ingredient the shopper never mentioned ("עם הל", "עם גרעינים").
+ *
+ * Structural, not a token list: Hebrew " עם X" is the catalogue's own way of
+ * naming an addition, so the pattern generalises to additions nobody has
+ * enumerated. It exists because the class map cannot be relied on here — 4,104
+ * products whose name carries " עם X" are labelled `variant = regular`, so the
+ * exact-variant SQL gate passes them and a bare "קפה שחור" can be filled with
+ * cardamom-spiced Turkish coffee.
+ *
+ * A query that asks for the addition keeps it: only an UNrequested one is
+ * rejected, the same rule the preserved-form and personal-care guards apply.
+ */
+const WITH_INGREDIENT = /(?:^|\s)עם\s+(\S+)/u;
+
+export function hasUnrequestedAddedIngredient(queryText: string, candidateName: string): boolean {
+  if (WITH_INGREDIENT.test(normalizeEmbedInput(queryText))) return false;
+  return WITH_INGREDIENT.test(normalizeEmbedInput(candidateName));
+}
+
 /** Bath/personal-care tokens the query did not ask for (food-oil ≠ bath oil). */
 export function hasUnrequestedPersonalCare(queryTokens: Set<string>, candidateName: string): boolean {
   for (const t of tokenizeNormalized(normalizeEmbedInput(candidateName))) {

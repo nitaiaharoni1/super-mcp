@@ -108,7 +108,12 @@ export function buildOnlineInstructions(env: NodeJS.ProcessEnv = process.env): s
     "real figure at checkout from the distance), so say 'from ₪X' and treat deliveredTotal as a " +
     "minimum. " +
     "meetsMinimum=false means the order CANNOT be placed as it stands: report amountToMinimum, " +
-    "the shekels of extra goods needed. Never present such a plan as available. " +
+    "the shekels of extra goods needed. Such a plan still appears in plans, after every orderable " +
+    "one, because a storefront held back only by its minimum is the shopper's call to make. Show " +
+    "it as an option that needs a top-up of that many shekels, never as one they can order now. " +
+    "cheapestDelivered ranks on a total that prices missing lines at a market reference, so it can " +
+    "win by not stocking things; bestSingleOrder is the most of the list obtainable in ONE order. " +
+    "When they differ, say so and let the shopper choose. " +
     "nextFeeBreak names a cheaper fee tier the shopper could reach: gap is the extra spend, saving " +
     "is what it takes off the fee, and worthTopUp=true means spending it leaves them better off " +
     "overall. Volunteer that unprompted. " +

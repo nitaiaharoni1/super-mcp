@@ -63,7 +63,11 @@ export function registerDeliveryTools(server: McpServer): void {
         "and the ranking used an assumption (assumedDeliveryFee) that must not be repeated as a price. " +
         "deliveryFeeIsFloor=true means the fee is a published lower bound, so quote it as 'from ₪X' and " +
         "treat deliveredTotal as a minimum. " +
-        "meetsMinimum=false means the order cannot be placed at all; report amountToMinimum instead. " +
+        "meetsMinimum=false means the order cannot be placed as it stands; report amountToMinimum, " +
+        "the top-up needed. Those plans are still listed, after the orderable ones, so present them " +
+        "as options that need topping up rather than hiding them. " +
+        "Rank on cheapestDelivered only if the shopper will happily order twice: it prices missing " +
+        "lines at a market reference. bestSingleOrder is the fullest basket obtainable in one order. " +
         "When nextFeeBreak.worthTopUp is true, spending a little more makes the order cheaper overall — say so. " +
         "Storefronts that do not serve the address come back in unavailableStores with a reason.",
       inputSchema: {

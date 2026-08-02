@@ -693,6 +693,11 @@ export function collectProductIdsForPricing(resolvedItems: ResolvedItem[]): stri
         .flatMap((r) => [
           ...(r.productId != null ? [r.productId] : []),
           ...(r.equivalents ?? []).map((c) => c.productId),
+          // findPricedAlternative walks r.alternatives as the last resort before
+          // dropping a line. Omitting them here meant their listings were never
+          // loaded, so that lookup could only ever miss: the larger-pack fallback
+          // has been unreachable on both surfaces since it was written.
+          ...(r.alternatives ?? []).map((c) => c.productId),
         ]),
     ),
   ];

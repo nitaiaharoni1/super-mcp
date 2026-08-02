@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { FulfillmentServiceRow } from "@super-mcp/db";
 import {
   ASSUMED_DELIVERY_FEE,
+  bestSingleOrderPlan,
   buildDeliveryPlan,
   rankPlans,
+  rankPlansForResponse,
   termsProvenance,
   unfinishedBasketPenalty,
 } from "../../../src/services/delivery/planStorefronts.js";
@@ -198,6 +200,39 @@ describe("reaching a cheaper tier", () => {
   });
 });
 
+describe("a price the retailer stopped republishing", () => {
+  const linesAged = (...daysAgo: Array<number | null>) =>
+    daysAgo.map((days, itemIndex) => ({
+      itemIndex,
+      unitPrice: 10,
+      qty: 1,
+      lineTotal: 10,
+      freshness:
+        days == null
+          ? undefined
+          : { sourceTs: new Date(NOW.getTime() - days * 86_400_000), ingestedAt: NOW },
+    })) as unknown as BasketStoreResult["lines"];
+
+  it("counts the lines whose price has gone quiet", () => {
+    // Rami Levy's storefront publishes 44.6% of its prices with a source stamp
+    // over 30 days old and 2,841 of them over a year, while every other
+    // storefront measures 0%. The per-line stamp was always there; nothing added
+    // it up, so a thirteen-month-old price read like yesterday's.
+    const result = plan({ priced: priced({ lines: linesAged(1, 45, 400) }) });
+    expect(result.stalePricedLines).toBe(2);
+  });
+
+  it("says nothing when every price is current", () => {
+    expect(plan({ priced: priced({ lines: linesAged(0, 3, 29) }) }).stalePricedLines).toBe(0);
+  });
+
+  it("does not read a missing stamp as stale", () => {
+    // Absence of evidence is not a warning. Inventing one would train callers to
+    // ignore the field on exactly the storefronts where it matters.
+    expect(plan({ priced: priced({ lines: linesAged(null, null) }) }).stalePricedLines).toBe(0);
+  });
+});
+
 describe("ranking", () => {
   const withCost = (over: Partial<DeliveryPlan>): DeliveryPlan =>
     ({ ...plan(), ...over }) as DeliveryPlan;
@@ -252,8 +287,84 @@ describe("ranking", () => {
   it("charges a second delivery fee for a basket the storefront cannot finish", () => {
     // The physical surface guesses ₪20 for a second trip. Online the same cost has
     // a published price, so use it.
-    expect(unfinishedBasketPenalty(0)).toBe(0);
-    expect(unfinishedBasketPenalty(3)).toBe(ASSUMED_DELIVERY_FEE);
+    expect(unfinishedBasketPenalty(0, 12)).toBe(0);
+    // A storefront that can fill none of the list owes the whole fee.
+    expect(unfinishedBasketPenalty(12, 12)).toBe(ASSUMED_DELIVERY_FEE);
+  });
+
+  it("prorates that fee by how much of the basket is left behind", () => {
+    // Flat charging made the near-complete plan pay most, relative to what it was
+    // missing: one ₪9.90 line short cost the same ₪35.90 as six lines short. On a
+    // real Tel Aviv basket that ranked a 6-of-12 plan above an 11-of-12 one.
+    expect(unfinishedBasketPenalty(6, 12)).toBe(17.95);
+    expect(unfinishedBasketPenalty(1, 12)).toBe(2.99);
+    expect(unfinishedBasketPenalty(1, 12)).toBeLessThan(unfinishedBasketPenalty(6, 12));
+  });
+
+  it("does not let a coverage gap go uncharged when nothing was priceable", () => {
+    // Guard against a 0/0 share silently becoming NaN, which would sort ahead of
+    // every real cost and hand the recommendation to the emptiest plan.
+    expect(unfinishedBasketPenalty(3, 0)).toBe(ASSUMED_DELIVERY_FEE);
+    expect(Number.isFinite(unfinishedBasketPenalty(3, 0))).toBe(true);
+  });
+
+  it("names the storefront that can actually fill the basket in one order", () => {
+    // deliveredComparableTotal prices a missing line at a market reference, so the
+    // cheapest plan can be one that cannot sell you half the list. Someone asking
+    // for delivery wants the list to arrive, so coverage gets its own answer.
+    const plans = [
+      withCost({
+        serviceSlug: "half-empty",
+        deliveredComparableTotal: 337,
+        pricedLines: 6,
+        imputedLines: 6,
+      }),
+      withCost({
+        serviceSlug: "stocks-it-all",
+        deliveredComparableTotal: 362,
+        pricedLines: 11,
+        imputedLines: 1,
+      }),
+    ];
+    expect(rankPlans(plans, "cheapest")[0]?.serviceSlug).toBe("half-empty");
+    expect(bestSingleOrderPlan(plans, "cheapest")?.serviceSlug).toBe("stocks-it-all");
+  });
+
+  it("keeps a storefront that is only short of its minimum", () => {
+    // It used to be filtered out of plans entirely, so the storefront vanished
+    // from the response and the shortfall survived only as prose. Carrefour could
+    // fill 11 of 12 lines and disappeared for being ₪65.10 short while the plans
+    // still on screen filled 7 and 8. Whether topping up is worth it is the
+    // shopper's call.
+    const all = rankPlansForResponse(
+      [
+        withCost({ serviceSlug: "short", deliveredComparableTotal: 170, meetsMinimum: false }),
+        withCost({ serviceSlug: "orderable", deliveredComparableTotal: 300, meetsMinimum: true }),
+      ],
+      "cheapest",
+    );
+    expect(all.map((p) => p.serviceSlug)).toEqual(["orderable", "short"]);
+  });
+
+  it("never lets an unplaceable order reach plans[0] or a recommendation", () => {
+    const plans = [
+      withCost({ serviceSlug: "short", deliveredComparableTotal: 100, meetsMinimum: false, pricedLines: 11 }),
+      withCost({ serviceSlug: "orderable", deliveredComparableTotal: 400, meetsMinimum: true, pricedLines: 4 }),
+    ];
+    expect(rankPlansForResponse(plans, "cheapest")[0]?.serviceSlug).toBe("orderable");
+    // The recommendations run on the orderable subset, so the cheaper and better
+    // covered but unplaceable plan must not win either of them.
+    const orderable = plans.filter((p) => p.meetsMinimum);
+    expect(rankPlans(orderable, "cheapest")[0]?.serviceSlug).toBe("orderable");
+    expect(bestSingleOrderPlan(orderable, "cheapest")?.serviceSlug).toBe("orderable");
+  });
+
+  it("breaks a coverage tie on cost", () => {
+    const plans = [
+      withCost({ serviceSlug: "dear", deliveredComparableTotal: 400, pricedLines: 11 }),
+      withCost({ serviceSlug: "cheap", deliveredComparableTotal: 300, pricedLines: 11 }),
+    ];
+    expect(bestSingleOrderPlan(plans, "cheapest")?.serviceSlug).toBe("cheap");
   });
 });
 

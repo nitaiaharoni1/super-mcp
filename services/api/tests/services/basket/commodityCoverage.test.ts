@@ -75,6 +75,49 @@ describe("filterClassPeers", () => {
     expect(kept.map((r) => r.product_id).sort()).toEqual(["a", "b", "c"]);
   });
 
+  it("refuses a peer that adds an ingredient the query never asked for", () => {
+    // The class map cannot catch this: 4,104 products whose name carries " עם X"
+    // are labelled variant=regular, so the exact-variant SQL gate passes them and
+    // a bare "קפה שחור" got filled with cardamom-spiced Turkish coffee at a real
+    // Tel Aviv storefront.
+    const coffee = primary({
+      name: "קפה שחור קלוי וטחון",
+      sizeUnit: "g",
+      sizeQty: 100,
+      productClass: "coffee",
+      classL1: "pantry",
+      classL2: "coffee",
+      classL3: "ground_coffee",
+    });
+    const kept = filterClassPeers(
+      "קפה שחור",
+      coffee,
+      [
+        row("plain", "קפה שחור קלוי וטחון", "g", 100),
+        row("cardamom", "קפה שחור קלוי וטחון 100 גרם עם הל טורקי", "g", 100),
+      ],
+    );
+    expect(kept.map((r) => r.product_id)).toEqual(["plain"]);
+  });
+
+  it("keeps the addition when the shopper asked for it", () => {
+    const coffee = primary({
+      name: "קפה שחור קלוי וטחון עם הל",
+      sizeUnit: "g",
+      sizeQty: 100,
+      productClass: "coffee",
+      classL1: "pantry",
+      classL2: "coffee",
+      classL3: "ground_coffee",
+    });
+    const kept = filterClassPeers(
+      "קפה שחור עם הל",
+      coffee,
+      [row("cardamom", "קפה שחור קלוי וטחון 100 גרם עם הל טורקי", "g", 100)],
+    );
+    expect(kept.map((r) => r.product_id)).toEqual(["cardamom"]);
+  });
+
   it("holds query specificity: a cabernet line excludes merlot", () => {
     const wine = primary({
       name: "יין אדום קברנה",

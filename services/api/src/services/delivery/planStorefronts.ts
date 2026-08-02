@@ -6,7 +6,7 @@ import {
 } from "@super-mcp/shared";
 import type { FulfillmentServiceRow } from "@super-mcp/db";
 import { comparableCostFor } from "../basket/comparableBasket.js";
-import type { BasketStoreResult, ComparableCost } from "../basket/types.js";
+import type { BasketLine, BasketStoreResult, ComparableCost } from "../basket/types.js";
 import type {
   DeliveryCoverageReport,
   DeliveryPlan,
@@ -34,7 +34,29 @@ export const ASSUMED_DELIVERY_FEE = 35.9;
 /** Days after which a hand-checked figure stops being quotable. */
 export const TERMS_TTL_DAYS = 90;
 
+/**
+ * Days after which a retailer's own price timestamp counts as stale.
+ *
+ * Chains republish their regulated feed daily, so a source timestamp a month old
+ * means that SKU stopped being restated, not that the price held steady. Thirty
+ * days is loose enough not to flag ordinary weekend gaps and tight enough to
+ * catch a shelf that has gone quiet.
+ */
+export const STALE_PRICE_DAYS = 30;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function countStalePricedLines(lines: readonly BasketLine[], now: Date): number {
+  const cutoff = now.getTime() - STALE_PRICE_DAYS * DAY_MS;
+  return lines.reduce((count, line) => {
+    // A missing or unparseable timestamp is not evidence of staleness; leave it
+    // uncounted rather than inventing a warning the data does not support.
+    const sourceTs = line.freshness?.sourceTs;
+    if (sourceTs == null) return count;
+    const ts = new Date(sourceTs).getTime();
+    return Number.isFinite(ts) && ts < cutoff ? count + 1 : count;
+  }, 0);
+}
 
 function agorot(value: number): number {
   return Math.round(value * 100) / 100;
@@ -186,6 +208,7 @@ export function buildDeliveryPlan(input: BuildPlanInput): DeliveryPlan {
     imputedLines: comparable.imputedLines,
     clubOnlyLines: comparable.clubOnlyLines,
     couponOnlyLines: comparable.couponOnlyLines,
+    stalePricedLines: countStalePricedLines(priced.lines, input.now),
     lines: priced.lines,
     missingItems: priced.missingItems,
   };
@@ -196,13 +219,35 @@ export function buildDeliveryPlan(input: BuildPlanInput): DeliveryPlan {
  *
  * The physical surface charges a flat ₪20 "second trip" here, an estimate of the
  * shopper's time. Online the same idea has a real published price: finishing the
- * list elsewhere means a second delivery fee, and we know what those cost. Using
- * the same assumed fee keeps the two consistent and means a storefront missing
- * lines is charged what completing the order actually costs, not a guess at
- * inconvenience.
+ * list elsewhere means a second delivery fee, and we know what those cost.
+ *
+ * The fee is prorated by the share of the basket left behind rather than charged
+ * flat. Flat punished the near-complete plan hardest in relative terms: a
+ * storefront missing one ₪9.90 line paid the same ₪35.90 as one missing six
+ * lines, so a 12-line basket ranked a plan covering 6 lines above a plan
+ * covering 11. Prorating keeps the "you will pay to finish this elsewhere"
+ * signal while making it proportional to how much is actually left to buy.
  */
-export function unfinishedBasketPenalty(imputedLines: number): number {
-  return imputedLines > 0 ? ASSUMED_DELIVERY_FEE : 0;
+export function unfinishedBasketPenalty(imputedLines: number, priceableLines: number): number {
+  if (imputedLines <= 0) return 0;
+  if (priceableLines <= 0) return ASSUMED_DELIVERY_FEE;
+  const share = Math.min(1, imputedLines / priceableLines);
+  return Math.round(ASSUMED_DELIVERY_FEE * share * 100) / 100;
+}
+
+/**
+ * Share of a plan's comparable total that is modelled rather than observed.
+ *
+ * `deliveredComparableTotal` mixes prices this storefront publishes with a
+ * market reference for every line it does not. At six imputed lines out of
+ * twelve that number is half fiction, and the gap between two such plans can sit
+ * entirely inside the modelling error. Callers use this to decide whether a
+ * "cheapest" claim is worth making at all.
+ */
+export function modelledShare(plan: DeliveryPlan): number {
+  const total = plan.itemsComparableSubtotal;
+  if (total <= 0) return 0;
+  return Math.min(1, plan.imputedTotal / total);
 }
 
 /**
@@ -222,7 +267,9 @@ export function rankPlans(
   preference: "cheapest" | "balanced",
 ): DeliveryPlan[] {
   const cost = (plan: DeliveryPlan): number => {
-    const base = plan.deliveredComparableTotal + unfinishedBasketPenalty(plan.imputedLines);
+    const base =
+      plan.deliveredComparableTotal +
+      unfinishedBasketPenalty(plan.imputedLines, plan.pricedLines + plan.imputedLines);
     if (preference === "cheapest") return base;
     return plan.deliveryTerms.confidence === "unknown" ? base + UNVERIFIED_TERMS_MARGIN : base;
   };
@@ -232,6 +279,50 @@ export function rankPlans(
       b.pricedLines - a.pricedLines ||
       a.serviceSlug.localeCompare(b.serviceSlug),
   );
+}
+
+/**
+ * Every plan, orderable ones first, each group ranked.
+ *
+ * A storefront under its minimum is not a candidate for any recommendation, but
+ * dropping it from the response hid a real option: on a Tel Aviv basket,
+ * Carrefour listed 11 of 12 lines at ₪134.90 and disappeared for being ₪65.10
+ * short, while the storefronts still on screen could fill 7 and 8. Whether that
+ * top-up is worth it is the shopper's call, and they cannot make it about a
+ * storefront nobody mentioned. Orderable plans stay first so `plans[0]` is never
+ * an order that cannot be placed.
+ */
+export function rankPlansForResponse(
+  plans: readonly DeliveryPlan[],
+  preference: "cheapest" | "balanced",
+): DeliveryPlan[] {
+  return [
+    ...rankPlans(plans.filter((plan) => plan.meetsMinimum), preference),
+    ...rankPlans(plans.filter((plan) => !plan.meetsMinimum), preference),
+  ];
+}
+
+/**
+ * The plan a shopper can actually place as ONE order, best coverage first.
+ *
+ * `rankPlans` answers "cheapest once we model the gaps away", which is the right
+ * question only if the shopper is willing to place a second order somewhere else.
+ * Someone asking for a basket to be delivered usually is not: they want the list
+ * to arrive. This is the delivery twin of the physical surface's coverage-first
+ * `bestNearby`, and it breaks coverage ties on the same cost function so the
+ * cheaper of two equally complete storefronts still wins.
+ */
+export function bestSingleOrderPlan(
+  plans: readonly DeliveryPlan[],
+  preference: "cheapest" | "balanced",
+): DeliveryPlan | null {
+  if (plans.length === 0) return null;
+  const ranked = rankPlans(plans, preference);
+  let best = ranked[0]!;
+  for (const plan of ranked) {
+    if (plan.pricedLines > best.pricedLines) best = plan;
+  }
+  return best;
 }
 
 export function unavailableFor(

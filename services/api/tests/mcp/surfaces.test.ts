@@ -18,6 +18,8 @@ const ALLOWED_NON_PLAN_TERMS = new Set([
   "list_delivery_options", "get_delivery_terms", "super-mcp-online",
   // Nested paths and sibling response fields, checked by the assertions above.
   "deliveryTerms.confidence", "deliveryTerms.verifiedAt", "unavailableStores",
+  // Result-level recommendations, not per-plan fields.
+  "cheapestDelivered", "bestSingleOrder",
   "slot_type", "resolution_mode", "pack_qty", "product_id",
   "worthTopUp", "clubOnly", "couponOnly", "itemIndex",
 ]);

@@ -14,6 +14,7 @@ import { resolveCoverageClassScope, type CoverageClassScope } from "./coverageSc
 import { diversifyByChain } from "./diversifyByChain.js";
 import {
   DEFAULT_PACK_TOLERANCE,
+  hasUnrequestedAddedIngredient,
   hasUnrequestedPreservedForm,
   pieceCountsConflict,
   queryHeadAnchored,
@@ -301,6 +302,7 @@ export function filterClassPeers(
     // how a correctly resolved 32-roll toilet paper was billed as moist wipes:
     // resolution rejected the wipes, coverage peers let them straight back in.
     if (hasUnrequestedPreservedForm(queryTokenSet, row.name)) continue;
+    if (hasUnrequestedAddedIngredient(queryText, row.name)) continue;
     if (hasUnrequestedDerivedForm(queryText, row.name)) continue;
     if (rejectPercentMismatch(queryText, row.name)) continue;
     // Pack COUNT equality: without this a 6-egg pack peers with a 12-egg request,
