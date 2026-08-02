@@ -31,7 +31,12 @@ export {
   type BatchListingInput,
   type BatchPriceInput,
 } from "./batchWrite.js";
-export { upsertPromotion, type UpsertPromoInput } from "./promotions.js";
+export {
+  purgeExpiredPromotions,
+  upsertPromotion,
+  type ExpiredPromoPurgeResult,
+  type UpsertPromoInput,
+} from "./promotions.js";
 export { checkCatalogIntegrity, type CatalogIntegrityReport } from "./integrity.js";
 export {
   backfillCentroids,

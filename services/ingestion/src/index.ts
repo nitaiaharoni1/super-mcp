@@ -5,6 +5,7 @@ import {
   backfillCentroids,
   closePool,
   healSizeUnitFamily,
+  purgeExpiredPromotions,
   refreshProductStoreCounts,
 } from "@super-mcp/db";
 import { syncFulfillmentCatalog } from "./fulfillment/sync.js";
@@ -96,6 +97,27 @@ async function main(): Promise<void> {
     );
   } catch (err) {
     console.error("fulfillment_catalog_sync failed (non-fatal):", err);
+  }
+
+  // Sweep promotions that finished a fortnight ago.
+  //
+  // Weekly promotions mean ~800,000 expire every week, and promotion_item had
+  // grown to 2.75GB of a 6.37GB database, larger than every price row put
+  // together. A one-off manual delete would have grown back inside three weeks,
+  // so this belongs on the schedule that creates them rather than in someone's
+  // shell. It does NOT reduce the bill: Cloud SQL charges for the provisioned
+  // disk and that disk cannot shrink. It keeps the working set honest.
+  //
+  // Off unless SUPER_MCP_PROMO_RETENTION_DAYS is set, so no deployment starts
+  // deleting history because it picked up a new image.
+  const retentionDays = Number(process.env.SUPER_MCP_PROMO_RETENTION_DAYS ?? "");
+  if (Number.isFinite(retentionDays) && retentionDays > 0) {
+    try {
+      const purge = await purgeExpiredPromotions(retentionDays);
+      console.log(JSON.stringify({ event: "promotion_purge", ...purge }));
+    } catch (err) {
+      console.error("promotion_purge failed (non-fatal):", err);
+    }
   }
 
   // Stamp any store still missing coordinates (new branches, or ones whose

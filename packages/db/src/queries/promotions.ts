@@ -84,3 +84,64 @@ export async function upsertPromotion(input: UpsertPromoInput, client?: PoolClie
   if (client) return upsertPromotionOn(client, input);
   return withTransaction((tx) => upsertPromotionOn(tx, input));
 }
+
+export interface ExpiredPromoPurgeResult {
+  /** Promotions removed. Their items go with them via ON DELETE CASCADE. */
+  promotionsDeleted: number;
+  /** Batches run; hitting the cap means more remain for the next pass. */
+  batches: number;
+  retentionDays: number;
+  /** True when the cap stopped it early, so the sweep did not finish. */
+  capped: boolean;
+}
+
+/**
+ * Days a finished promotion stays queryable before it is swept.
+ *
+ * Israeli supermarket promotions run weekly, so roughly 800,000 expire every
+ * week and `promotion_item` was the single largest table in the database at
+ * 2.75GB of 6.37GB, larger than every price row put together. Two weeks keeps
+ * "what was on offer last week" answerable through `get_promotions`
+ * (active_only=false is the only reader) and still clears the bulk.
+ */
+const DEFAULT_PROMO_RETENTION_DAYS = 14;
+
+/** Batch size: small enough that a weak instance never holds a long lock. */
+const PURGE_BATCH = 20_000;
+const MAX_BATCHES = 200;
+
+/**
+ * Delete promotions that ended more than `retentionDays` ago.
+ *
+ * Batched rather than one statement, because the first sweep removes millions of
+ * `promotion_item` rows and a single transaction of that size on a db-g1-small
+ * both holds locks and floods WAL. Each batch commits on its own, so a timeout
+ * or a restart loses nothing and the next run simply continues.
+ *
+ * Worth being explicit about what this does NOT do: it will not reduce the bill.
+ * Cloud SQL charges for the PROVISIONED disk, and that disk cannot shrink. What
+ * it buys is a smaller working set, so the queries and the nightly ingest stop
+ * paying for three weeks of dead rows.
+ */
+export async function purgeExpiredPromotions(
+  retentionDays: number = DEFAULT_PROMO_RETENTION_DAYS,
+): Promise<ExpiredPromoPurgeResult> {
+  let promotionsDeleted = 0;
+  let batches = 0;
+  for (; batches < MAX_BATCHES; batches += 1) {
+    const res = await getPool().query(
+      `WITH doomed AS (
+         SELECT id FROM promotion
+          WHERE end_ts < now() - ($1 || ' days')::interval
+          ORDER BY end_ts
+          LIMIT $2
+       )
+       DELETE FROM promotion p USING doomed d WHERE p.id = d.id`,
+      [String(retentionDays), PURGE_BATCH],
+    );
+    const removed = res.rowCount ?? 0;
+    promotionsDeleted += removed;
+    if (removed === 0) return { promotionsDeleted, batches, retentionDays, capped: false };
+  }
+  return { promotionsDeleted, batches, retentionDays, capped: true };
+}
