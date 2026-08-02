@@ -14,3 +14,20 @@ data/raw
 .claude
 .superpowers
 founder-outputs
+
+# Build output and deploy caches for the OTHER deployable in this repo. The
+# image built here is the API; the Next.js app ships to Firebase Hosting and
+# nothing in the Dockerfile reads any of these. .dockerignore already drops
+# .next, but that runs after the upload, so the bytes still crossed the wire.
+# .next-check is the same output under another name (`build:check` sets
+# NEXT_DIST_DIR so a production build cannot clobber a running dev server), so
+# it needs its own line: 138 MB of webpack cache that no glob for .next catches.
+.next
+**/.next
+.next-check
+**/.next-check
+.firebase
+
+# Git worktrees live inside the repo, so an unignored one uploads a second full
+# checkout (1.5 GB when this was written) that the build then throws away.
+.worktrees

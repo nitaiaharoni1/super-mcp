@@ -7,6 +7,7 @@ dist
 **/*.tsbuildinfo
 apps/web/.next
 **/.next
+**/.next-check
 
 # Secrets and local-only state
 .env
@@ -28,6 +29,11 @@ firebase.json
 
 # Large raw feed archives (production pulls fresh from FTP)
 data/raw
+
+# Deploy cache for the Firebase-hosted web app, and any git worktree, which sits
+# inside the repo and would otherwise land a second full checkout in `COPY . .`.
+.firebase
+.worktrees
 
 # Logs / editor / agent cruft
 *.log
