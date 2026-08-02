@@ -255,3 +255,52 @@ describe("configured chain that yields nothing", () => {
     expect(result.pricesReconciled).toBe(28);
   });
 });
+
+describe("a source that dies before discovering anything", () => {
+  it("names the chains it was supposed to cover, instead of reporting none missing", async () => {
+    // The first production run of laibcatalog threw on its very first fetch and
+    // reported `chainsWithNoFiles: []` right next to its own error, which reads
+    // as "every expected chain delivered".
+    delete process.env.SUPER_MCP_NO_CAP;
+    const { runPipeline } = await import("../src/pipeline.js");
+
+    const dead: SourceAdapter = {
+      sourceId: "il-laibcatalog",
+      market: "IL",
+      expectedChainIds: [RAMI_LEVY, HAZI_HINAM],
+      discover: async () => {
+        throw new TypeError("fetch failed");
+      },
+      fetch: async () => ({}) as never,
+      parse: async function* () {},
+    };
+
+    const result = await runPipeline(dead);
+    expect(result.chainsWithNoFiles).toEqual([RAMI_LEVY, HAZI_HINAM]);
+  });
+
+  it("says what actually failed, not just that a fetch did", async () => {
+    // Node's fetch hides ENOTFOUND/ETIMEDOUT one level down in `cause`, so a
+    // nightly failure could not be diagnosed without reproducing it.
+    delete process.env.SUPER_MCP_NO_CAP;
+    const { runPipeline } = await import("../src/pipeline.js");
+
+    const cause = Object.assign(new Error("getaddrinfo ENOTFOUND laibcatalog.co.il"), {
+      code: "ENOTFOUND",
+    });
+    const dead: SourceAdapter = {
+      sourceId: "il-laibcatalog",
+      market: "IL",
+      expectedChainIds: [RAMI_LEVY],
+      discover: async () => {
+        throw Object.assign(new TypeError("fetch failed"), { cause });
+      },
+      fetch: async () => ({}) as never,
+      parse: async function* () {},
+    };
+
+    const result = await runPipeline(dead);
+    expect(result.errorSummary).toContain("ENOTFOUND");
+    expect(result.errorSummary).toContain("laibcatalog.co.il");
+  });
+});

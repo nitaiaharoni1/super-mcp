@@ -12,6 +12,29 @@ import { classifyStatus, isAlertable } from "./status.js";
 import type { PipelineResult } from "./types.js";
 import { expectedChainIdsForSource } from "../expectedChains.js";
 
+/**
+ * An error message that names what actually went wrong.
+ *
+ * Node's `fetch` throws a bare `TypeError: fetch failed` and hides the real
+ * reason (ENOTFOUND, ETIMEDOUT, a TLS failure, a refused connection) one level
+ * down in `cause`. A nightly job that reports only "fetch failed" cannot be
+ * diagnosed without reproducing it, and the first production run of the
+ * laibcatalog source failed exactly that way.
+ */
+function describeError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const parts: string[] = [err.message];
+  let cause: unknown = (err as { cause?: unknown }).cause;
+  let depth = 0;
+  while (cause instanceof Error && depth < 4) {
+    const code = (cause as { code?: string }).code;
+    parts.push(code ? `${cause.message} (${code})` : cause.message);
+    cause = (cause as { cause?: unknown }).cause;
+    depth += 1;
+  }
+  return parts.join(": ");
+}
+
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
 /**
@@ -272,10 +295,16 @@ export async function runPipeline(adapter: SourceAdapter): Promise<PipelineResul
     if (isAlertable(result.status)) emitAlert(runId, result);
     return result;
   } catch (err) {
-    result.errorSummary = (err instanceof Error ? err.message : String(err)).replace(
-      /\u0000/g,
-      "",
-    );
+    result.errorSummary = describeError(err).replace(/\u0000/g, "");
+    // A source that died before discovering anything produced NO files for any
+    // chain it was supposed to cover, and saying so is the whole job of this
+    // field. It used to stay empty on a fatal error, so a run that reached the
+    // portal and got nothing reported `chainsWithNoFiles: []` next to its own
+    // error, which reads as "every expected chain delivered".
+    if (result.filesDiscovered === 0) {
+      result.chainsWithNoFiles =
+        adapter.expectedChainIds ?? expectedChainIdsForSource(adapter.sourceId);
+    }
     result.status = classifyStatus(result);
     await finishRun(runId, result);
     if (isAlertable(result.status)) emitAlert(runId, result);
