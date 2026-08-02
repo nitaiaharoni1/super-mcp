@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { CERBERUS_CHAINS } from "../src/sources/cerberus/adapter.js";
-import { selectCerberusChains } from "../src/sources/index.js";
+import { getAdapters, selectCerberusChains } from "../src/sources/index.js";
 
 const prevNoCap = process.env.SUPER_MCP_NO_CAP;
 afterEach(() => {
@@ -74,5 +74,39 @@ describe("expectedChainIds tracks what the run actually attempts", () => {
     const adapter = createCerberusAdapter();
     expect(adapter.expectedChainIds).not.toContain("7290700100008");
     expect(adapter.expectedChainIds).toContain("7290058140886");
+  });
+});
+
+describe("a source this region cannot reach", () => {
+  const ORIGINAL = process.env.SUPER_MCP_EXCLUDE_SOURCES;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.SUPER_MCP_EXCLUDE_SOURCES;
+    else process.env.SUPER_MCP_EXCLUDE_SOURCES = ORIGINAL;
+  });
+
+  it("leaves it out of an 'all' run instead of failing nightly", () => {
+    // laibcatalog.co.il drops TCP connects from outside Israel, so the
+    // europe-west1 job booked a guaranteed failure every night while me-west1
+    // ingests the same source fine.
+    process.env.SUPER_MCP_EXCLUDE_SOURCES = "il-laibcatalog";
+    const ids = getAdapters("all").map((a) => a.sourceId);
+    expect(ids).not.toContain("il-laibcatalog");
+    expect(ids).toContain("il-shufersal");
+    expect(ids.length).toBeGreaterThan(1);
+  });
+
+  it("keeps every source when nothing is excluded", () => {
+    delete process.env.SUPER_MCP_EXCLUDE_SOURCES;
+    expect(getAdapters("all").map((a) => a.sourceId)).toContain("il-laibcatalog");
+  });
+
+  it("refuses a config that excludes everything rather than ingesting nothing", () => {
+    process.env.SUPER_MCP_EXCLUDE_SOURCES = [
+      "il-shufersal",
+      "il-cerberus",
+      "il-laibcatalog",
+      ...getAdapters("all").map((a) => a.sourceId),
+    ].join(",");
+    expect(() => getAdapters("all")).toThrow(/excluded every source/i);
   });
 });

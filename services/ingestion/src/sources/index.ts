@@ -51,7 +51,49 @@ export function selectCerberusChains(names: string[]): CerberusChainConfig[] {
   return selected;
 }
 
+/**
+ * Sources this deployment cannot reach, from `SUPER_MCP_EXCLUDE_SOURCES`.
+ *
+ * `laibcatalog.co.il` silently drops TCP connects from outside Israel: the
+ * europe-west1 ingest job fails on its first fetch with UND_ERR_CONNECT_TIMEOUT
+ * while the same image in me-west1 (Tel Aviv) ingests it fine. So the national
+ * job has to be able to leave that one source out, or it books a guaranteed
+ * failure every single night, and an alert that always fires is an alert nobody
+ * reads. Excluded by deployment rather than in code, because which sources a
+ * region can reach is a property of where it runs, not of the source.
+ */
+function excludedSourceIds(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  return new Set(
+    (env.SUPER_MCP_EXCLUDE_SOURCES ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
 export function getAdapters(selection: string, chains: string[] = []): SourceAdapter[] {
+  const excluded = excludedSourceIds();
+  const keep = (adapters: SourceAdapter[]): SourceAdapter[] => {
+    const kept = adapters.filter((a) => !excluded.has(a.sourceId.toLowerCase()));
+    const dropped = adapters.length - kept.length;
+    if (dropped > 0) {
+      console.log(
+        JSON.stringify({
+          event: "ingestion_sources_excluded",
+          excluded: [...excluded],
+          remaining: kept.map((a) => a.sourceId),
+        }),
+      );
+    }
+    // Excluding every source is a misconfiguration, not a no-op run: refuse it
+    // rather than exit 0 having ingested nothing.
+    if (kept.length === 0 && adapters.length > 0) {
+      throw new Error(
+        `SUPER_MCP_EXCLUDE_SOURCES excluded every source for '${selection}': ${[...excluded].join(", ")}`,
+      );
+    }
+    return kept;
+  };
   switch (selection) {
     case "fixture":
       return [createFixtureAdapter()];
@@ -64,12 +106,12 @@ export function getAdapters(selection: string, chains: string[] = []): SourceAda
     case "il-laibcatalog":
       return [createLaibcatalogAdapter()];
     case "all":
-      return [
+      return keep([
         createShufersalAdapter(),
         createCerberusAdapter(selectCerberusChains(chains)),
         ...PUBLISHPRICE_PORTALS.map((p) => createPublishPriceAdapter(p)),
         createLaibcatalogAdapter(),
-      ];
+      ]);
     default: {
       throw new Error(
         `Unknown source '${selection}'. Use fixture|il-cerberus|il-shufersal|il-carrefour|il-laibcatalog|all`,
