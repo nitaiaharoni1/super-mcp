@@ -10,6 +10,39 @@ import {
   DELIVERY_PROTOCOL_ID,
   parseProtocolIdentityLine,
 } from "../../src/mcp/protocolIdentity.js";
+import type { DeliveryPlan } from "../../src/services/delivery/types.js";
+
+/**
+ * Every field a plan carries, enforced by the compiler.
+ *
+ * `Record<keyof DeliveryPlan, true>` is what makes this a real check: adding a
+ * field to DeliveryPlan without adding it here fails typecheck, so the set can
+ * never quietly fall behind the payload it is meant to describe.
+ */
+const PLAN_FIELDS: Record<keyof DeliveryPlan, true> = {
+  serviceSlug: true, brand: true, serviceType: true, marketplace: true,
+  storefrontUrl: true, chainId: true, chainName: true, storeId: true,
+  storeName: true, currency: true, itemsSubtotal: true,
+  itemsComparableSubtotal: true, totalScope: true, deliveryFee: true,
+  assumedDeliveryFee: true, deliveryFeeIsFloor: true, serviceFee: true,
+  deliveredTotal: true, deliveredComparableTotal: true, deliveryTerms: true,
+  meetsMinimum: true, minimumOrder: true, amountToMinimum: true,
+  minimumKnown: true, requiresMembership: true, coverage: true,
+  freeDeliveryThreshold: true, nextFeeBreak: true, pricedLines: true,
+  resolvableLines: true, requestedLines: true, coverageRatio: true,
+  imputedTotal: true, imputedLines: true, clubOnlyLines: true,
+  couponOnlyLines: true, lines: true, linesTruncated: true, missingItems: true,
+};
+
+/** camelCase words in the prose that name something other than a plan field. */
+const ALLOWED_NON_PLAN_TERMS = new Set([
+  "optimize_delivery", "optimize_basket", "search_products", "get_promotions",
+  "list_delivery_options", "get_delivery_terms", "super-mcp-online",
+  // Nested paths and sibling response fields, checked by the assertions above.
+  "deliveryTerms.confidence", "deliveryTerms.verifiedAt", "unavailableStores",
+  "slot_type", "resolution_mode", "pack_qty", "product_id",
+  "worthTopUp", "clubOnly", "couponOnly", "itemIndex",
+]);
 
 function toolsOf(surface: keyof typeof MCP_SURFACES): string[] {
   const registered: string[] = [];
@@ -95,8 +128,26 @@ describe("surface identity", () => {
 
   it("requires the fee's confidence to be read before it is quoted", () => {
     const instructions = buildOnlineInstructions({});
-    expect(instructions).toContain("deliveryFeeConfidence");
+    // deliveryTerms.confidence, which is what a plan actually carries. This
+    // asserted `deliveryFeeConfidence` for as long as the instructions said it,
+    // and no plan has ever had a field by that name: the one direction a test
+    // over prose cannot catch is prose and payload being wrong together.
+    expect(instructions).toContain("deliveryTerms.confidence");
     expect(instructions).toMatch(/meetsMinimum=false/);
+  });
+
+  it("names only fields a plan actually carries", () => {
+    // The instructions are the only documentation the model gets, so a field
+    // named here that does not exist is an instruction to check something
+    // uncheckable, which the model satisfies by quoting the fee unguarded.
+    const instructions = buildOnlineInstructions({});
+    const planFields = new Set(Object.keys(PLAN_FIELDS));
+    const referenced = instructions.match(/\b[a-z][A-Za-z]{4,}(?=[ .,=])/g) ?? [];
+    const camel = referenced.filter((w) => /[A-Z]/.test(w));
+    const unknown = [...new Set(camel)].filter(
+      (w) => !planFields.has(w) && !ALLOWED_NON_PLAN_TERMS.has(w),
+    );
+    expect(unknown).toEqual([]);
   });
 });
 

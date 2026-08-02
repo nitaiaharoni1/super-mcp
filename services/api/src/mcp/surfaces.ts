@@ -94,10 +94,16 @@ export function buildOnlineInstructions(env: NodeJS.ProcessEnv = process.env): s
     "{continuation, answers}. " +
     "THE HEADLINE NUMBER IS deliveredTotal, not the item subtotal: a ₪29 delivery fee outweighs " +
     "most price differences between chains, so a storefront with dearer items can still win. " +
-    "Read each plan's itemsSubtotal, deliveryFee, deliveredTotal and deliveryFeeConfidence. " +
-    "deliveryFeeConfidence=verified means we checked the retailer's own published terms on " +
-    "verifiedAt; reported means a cited secondary source. When it is unknown the fee is null and " +
-    "the ranking used assumedDeliveryFee, which is NOT a price and must not be repeated as one. " +
+    "Read each plan's itemsSubtotal, deliveryFee, deliveredTotal and deliveryTerms.confidence. " +
+    "Compare storefronts on deliveredComparableTotal, never on deliveredTotal: totalScope is " +
+    "priced_lines_only, so a storefront that stocks four of your twelve items reports a small " +
+    "deliveredTotal precisely because it cannot fill the basket. pricedLines out of requestedLines " +
+    "says how much of the list a plan actually covers, and imputedLines how many the comparable " +
+    "figure had to price at a market reference. Say so when coverage is partial. " +
+    "deliveryTerms.confidence=verified means we checked the retailer's own published terms on " +
+    "deliveryTerms.verifiedAt; reported means a cited secondary source. When it is unknown the fee " +
+    "is null and the ranking used assumedDeliveryFee, which is NOT a price and must not be " +
+    "repeated as one. " +
     "When deliveryFeeIsFloor is true the fee is a published lower bound (a marketplace sets the " +
     "real figure at checkout from the distance), so say 'from ₪X' and treat deliveredTotal as a " +
     "minimum. " +
