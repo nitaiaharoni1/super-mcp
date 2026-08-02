@@ -523,3 +523,108 @@ describe("applyFastResolutionPolicy generic chicken", () => {
     }
   });
 });
+
+describe("the dominant class is the pool's majority, not its first classified row", () => {
+  // Regression: the seed used to be `candidates.find((c) => c.classL1)`, i.e.
+  // rank order, i.e. whichever candidate the exact-name arm of the search score
+  // put first. On the live catalog "שמן" led with `שמן אלוורה 200 מל דר פישר`,
+  // an aloe-vera skin oil, so cosmetics became the class and all seventeen
+  // cooking oils were filtered out. The pool left this function holding ONE
+  // candidate, the availability upgrade had nothing to move to, and the basket
+  // bought tanning oil.
+  function oil(
+    id: string,
+    name: string,
+    classL1: string,
+    classL2: string,
+    hasLocalPrice = true,
+  ): BasketCandidate {
+    return cand({
+      productId: id,
+      name,
+      classL1,
+      classL2,
+      productClass: classL1,
+      hasLocalPrice,
+      sizeQty: 750,
+      sizeUnit: "ml",
+    });
+  }
+
+  function oilLine(candidates: BasketCandidate[]): ResolvedItem {
+    return {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: candidates[0]!.productId,
+      name: candidates[0]!.name,
+      resolvedBy: "query",
+      confidence: 1,
+      lowConfidence: false,
+      resolutionStatus: "resolved",
+      candidates,
+      primaryProductId: null,
+      primaryName: null,
+      substitution: null,
+    } as ResolvedItem;
+  }
+
+  it("does not let one mislabelled top hit dictate the class", () => {
+    const candidates = [
+      oil("cosmetic", "שמן אלוורה 200 מל דר פישר", "personal_care", "cosmetics"),
+      ...Array.from({ length: 8 }, (_, i) =>
+        oil(`food-${i}`, `שמן קנולה ${i} 1 ליטר`, "pantry", "oil_vinegar"),
+      ),
+    ];
+    const availability = new Map<string, CandidateAvailability>(
+      candidates.map((c) => [
+        c.productId,
+        {
+          pricedStoreCount: c.productId === "cosmetic" ? 14 : 120,
+          chainCount: c.productId === "cosmetic" ? 1 : 5,
+          minPrice: 10,
+        },
+      ]),
+    );
+
+    const result = applyFastResolutionPolicy(
+      [{ query: "שמן", packQty: 1 }],
+      [oilLine(candidates)],
+      availability,
+    );
+
+    const chosen = result.items[0]!;
+    expect(chosen.productId).not.toBe("cosmetic");
+    expect(chosen.name).toContain("קנולה");
+  });
+
+  it("leaves a genuinely split pool alone rather than guessing", () => {
+    // Four and four is the labels disagreeing, not half the pool being the wrong
+    // food. Narrowing here is what cost חומוס and אבקת כביסה their better-stocked
+    // peers when the L2 pass tried it.
+    const candidates = [
+      ...Array.from({ length: 4 }, (_, i) =>
+        oil(`a-${i}`, `שמן זית ${i} 750 מל`, "pantry", "oil_vinegar"),
+      ),
+      ...Array.from({ length: 4 }, (_, i) =>
+        oil(`b-${i}`, `שמן רחצה ${i} 750 מל`, "personal_care", "cosmetics"),
+      ),
+    ];
+    const availability = new Map<string, CandidateAvailability>(
+      candidates.map((c) => [
+        c.productId,
+        { pricedStoreCount: 50, chainCount: 3, minPrice: 10 },
+      ]),
+    );
+    const result = applyFastResolutionPolicy(
+      [{ query: "שמן", packQty: 1 }],
+      [oilLine(candidates)],
+      availability,
+    );
+    // Nothing is 3x better stocked, so the line keeps its primary either way;
+    // what matters is that the run did not throw away one half of the pool.
+    expect(result.items[0]!.productId).toBe("a-0");
+  });
+});

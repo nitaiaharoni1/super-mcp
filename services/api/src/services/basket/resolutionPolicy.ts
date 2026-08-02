@@ -12,6 +12,7 @@ import { rejectUnsafeChickenName } from "./chickenSafety.js";
 import { preferDirectForm } from "./derivedForm.js";
 import {
   buildCommodityEquivalents,
+  dominantClassAmong,
   queryHeadAnchored,
   restrictToDominantClassL2,
 } from "./equivalence.js";
@@ -114,10 +115,6 @@ function shareCompatibleClass(candidates: BasketCandidate[]): boolean {
 }
 
 /**
- * When the safe pool still spans multiple L1/productClass labels (search noise),
- * keep the class of the top-ranked candidate instead of omitting the whole line.
- */
-/**
  * Narrow a candidate pool to one kind of thing.
  *
  * Two levels, because L1 is too coarse to be safe on its own: beef and a vegan
@@ -125,23 +122,43 @@ function shareCompatibleClass(candidates: BasketCandidate[]): boolean {
  * onto "בשר טחון ביונד מיט". That is not hypothetical — it priced ₪159.60 of
  * Beyond Meat against ₪44.90 beef on the same shelf, and it reached the shopper
  * through THREE different call sites that each trusted this function or plain
- * rank order to keep the pool honest.
+ * rank order to keep the pool honest. L2 narrowing runs even when L1 already
+ * agrees, which is the whole point.
  *
- * L2 narrowing runs even when L1 already agrees, which is the whole point.
+ * The class is now the pool's MAJORITY, matching what this function has always
+ * been called. It used to be whichever candidate happened to be classified
+ * first, which is rank order, which is the exact-name arm of the search score.
+ * So one mislabelled or plainly wrong top hit dictated the class and everything
+ * else was discarded: "שמן" led with `שמן אלוורה 200 מל דר פישר` (aloe vera skin
+ * oil), that made cosmetics the class, and all seventeen cooking oils were
+ * filtered out. The pool came out of here holding ONE candidate, so the
+ * availability upgrade downstream had nothing to move to and the basket bought
+ * tanning oil. `שמן גזר לשיזוף` reached the benchmark the same way.
+ *
+ * Sharing `dominantClassAmong` with the L2 pass also brings the two rules into
+ * line: a bare plurality is not enough, and an unclassified candidate is never
+ * the odd one out.
  */
 function restrictToDominantClass(candidates: BasketCandidate[]): BasketCandidate[] {
   if (candidates.length === 0) return candidates;
   if (shareCompatibleClass(candidates)) return restrictToDominantClassL2(candidates);
-  const seed = candidates.find((c) => c.classL1) ?? candidates.find((c) => c.productClass);
-  if (!seed) return candidates;
-  if (seed.classL1) {
-    const same = candidates.filter((c) => !c.classL1 || c.classL1 === seed.classL1);
-    return restrictToDominantClassL2(same.length > 0 ? same : candidates);
+
+  const dominantL1 = dominantClassAmong(candidates, (c) => c.classL1);
+  if (dominantL1) {
+    const same = candidates.filter((c) => !c.classL1 || c.classL1 === dominantL1);
+    // Never shrink below the two-peer commodity signal on a class guess alone,
+    // the same floor the L2 pass keeps.
+    return restrictToDominantClassL2(same.length >= 2 ? same : candidates);
   }
-  if (seed.productClass) {
-    const same = candidates.filter((c) => !c.productClass || c.productClass === seed.productClass);
-    return restrictToDominantClassL2(same.length > 0 ? same : candidates);
+
+  const dominantClass = dominantClassAmong(candidates, (c) => c.productClass);
+  if (dominantClass) {
+    const same = candidates.filter(
+      (c) => !c.productClass || c.productClass === dominantClass,
+    );
+    return restrictToDominantClassL2(same.length >= 2 ? same : candidates);
   }
+
   return restrictToDominantClassL2(candidates);
 }
 
@@ -321,12 +338,26 @@ function filterPool(
 const AVAILABILITY_UPGRADE_MIN_RATIO = 3;
 const AVAILABILITY_UPGRADE_MIN_STORES = 3;
 
+/**
+ * Chain breadth was tried here as a second way to qualify a peer, and measured
+ * WORSE: 89% to 82% resolution accuracy on the benchmark.
+ *
+ * The reasoning was sound — a chain's private label lives in one chain by
+ * definition, so its store count can never be 3x a national brand's, and several
+ * remaining failures were private labels. The implementation is what broke: any
+ * peer spanning two more chains qualified on being carried by a single store
+ * more, which swapped good lines onto thin multi-chain SKUs (`טונה בודד סאן
+ * רויאל`, 2 of 149 branches). A breadth rule needs its own floor, not the
+ * primary's count plus one. Left as a note rather than a knob, since a knob at
+ * the wrong setting is how this cost seven points.
+ */
 function nearbyCoverage(
   candidate: BasketCandidate,
   availability: Map<string, CandidateAvailability>,
 ): number {
   return availability.get(candidate.productId)?.pricedStoreCount ?? 0;
 }
+
 
 /**
  * A peer carried by materially more nearby stores than the resolved primary.

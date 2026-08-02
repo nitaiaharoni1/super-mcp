@@ -788,12 +788,25 @@ const DOMINANT_CLASS_MIN_SHARE = 0.7;
  * disagreement anywhere else in this file, and ~95% of the catalog is
  * unclassified, so treating null as odd-one-out would empty the pool.
  */
-export function restrictToDominantClassL2(pool: BasketCandidate[]): BasketCandidate[] {
+/**
+ * The class a clear majority of classified candidates agree on, or null.
+ *
+ * Null when the labels are split, because these labels are LLM-assigned and
+ * noisy: a near-even split means the labels disagree, not that half the pool is
+ * the wrong food. Unclassified candidates are not counted at all, in either
+ * direction — ~95% of the catalog is unlabelled, so treating null as a
+ * disagreement would empty every pool.
+ */
+export function dominantClassAmong(
+  pool: BasketCandidate[],
+  classOf: (c: BasketCandidate) => string | null | undefined,
+): string | null {
   const counts = new Map<string, number>();
   for (const c of pool) {
-    if (c.classL2) counts.set(c.classL2, (counts.get(c.classL2) ?? 0) + 1);
+    const cls = classOf(c);
+    if (cls) counts.set(cls, (counts.get(cls) ?? 0) + 1);
   }
-  if (counts.size < 2) return pool;
+  if (counts.size === 0) return null;
   // Sort by name first so an exact tie resolves deterministically.
   let winner: string | null = null;
   let winnerCount = 0;
@@ -803,15 +816,21 @@ export function restrictToDominantClassL2(pool: BasketCandidate[]): BasketCandid
       winnerCount = n;
     }
   }
-  if (!winner) return pool;
-  // Only act on a CLEAR majority. L2 labels are LLM-assigned and noisy, so a
-  // near-even split means the labels disagree, not that half the pool is the
-  // wrong food. Narrowing on every split cost two benchmark lines: חומוס and
-  // אבקת כביסה each spread across two L2 labels, and chopping to the mode threw
-  // away better-stocked peers, dropping both below their availability floor.
-  // A vegan patty among beef is 3-of-18, nothing like an even split.
+  if (!winner) return null;
   const classified = [...counts.values()].reduce((n, v) => n + v, 0);
-  if (winnerCount / classified < DOMINANT_CLASS_MIN_SHARE) return pool;
+  return winnerCount / classified < DOMINANT_CLASS_MIN_SHARE ? null : winner;
+}
+
+export function restrictToDominantClassL2(pool: BasketCandidate[]): BasketCandidate[] {
+  const distinct = new Set(pool.map((c) => c.classL2).filter(Boolean));
+  if (distinct.size < 2) return pool;
+  // Only act on a CLEAR majority. Narrowing on every split cost two benchmark
+  // lines: חומוס and אבקת כביסה each spread across two L2 labels, and chopping
+  // to the mode threw away better-stocked peers, dropping both below their
+  // availability floor. A vegan patty among beef is 3-of-18, nothing like an
+  // even split.
+  const winner = dominantClassAmong(pool, (c) => c.classL2);
+  if (!winner) return pool;
   const kept = pool.filter((c) => !c.classL2 || c.classL2 === winner);
   // Never shrink below the two-peer commodity signal on a class guess alone.
   return kept.length >= 2 ? kept : pool;
