@@ -93,6 +93,11 @@ export async function listDeliveryOptions(params: {
   // Same reason as optimizeDelivery: a settlement-list service area can only be
   // tested against a town, so the town is parsed out of a free-text address.
   const named = params.city ?? (params.address ? extractCityFromLocation(params.address) : null);
+  // canonicalizeCity echoes anything it does not recognise straight back, so it
+  // cannot answer "is this a real place". Keeping the echo is right: published
+  // service areas are the retailers' own spellings, and roughly 1,200 Israeli
+  // localities exist against 135 canonical ones, so a real town can match a
+  // published area without ever being canonical. It just is not evidence.
   const city = named ? (canonicalizeCity(named) ?? named) : null;
   // A radius or polygon rule needs a point. Without one, every regional depot
   // reports "address too vague" and a shopper who typed their town sees none of
@@ -104,10 +109,25 @@ export async function listDeliveryOptions(params: {
     lat: centroid?.lat ?? null,
     lng: centroid?.lng ?? null,
   };
-  const destinationKnown = destination.city != null || destination.lat != null;
   const now = new Date();
+  const coverageByService = services.map((service) => coverageReport(service, destination));
+  /**
+   * Whether anything actually recognised this destination.
+   *
+   * The test used to be `destination.city != null`, and since an unrecognised
+   * name is echoed into that field, it was true for absolutely any non-empty
+   * string. A typo, or a region name such as "בקעת אונו" (a valley, not a
+   * town), came back `destinationKnown: true` carrying exactly one storefront,
+   * so an agent would report that only Shufersal delivers there. That one hit
+   * was the NATIONAL rule, which serves everyone and is therefore no evidence
+   * at all: only a coordinate, or a city/radius/polygon match, places a
+   * shopper.
+   */
+  const destinationKnown =
+    destination.lat != null ||
+    coverageByService.some((c) => c.serves && c.matchedScope !== "national");
 
-  const options = services.map<DeliveryOptionSummary>((service) => {
+  const options = services.map<DeliveryOptionSummary>((service, index) => {
     const standardFee = publicFeeFrom(service.tariffs);
     return {
       serviceSlug: service.slug,
@@ -139,7 +159,7 @@ export async function listDeliveryOptions(params: {
       pickupAvailable: service.tariffs.some((t) => t.slotType === "pickup"),
       deliveryTerms: termsProvenance(service, standardFee != null, now),
       // No address to test means no verdict, not a refusal.
-      coverage: destinationKnown ? coverageReport(service, destination) : null,
+      coverage: destinationKnown ? coverageByService[index]! : null,
       catalogSize: null,
       notes: service.notes,
     };

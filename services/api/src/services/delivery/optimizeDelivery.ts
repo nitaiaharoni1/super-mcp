@@ -282,6 +282,25 @@ async function runDeliveryOptimization(
   const services = await listFulfillmentServices();
   const { serving, unavailable } = partitionByCoverage(services, destination, slotType);
 
+  // Nothing placed this destination. `canonicalizeCity` hands back anything it
+  // does not recognise, so a typo or a region name ("בקעת אונו" is a valley,
+  // not a town) reaches here looking like a city and finds no centroid. The
+  // national storefronts still match, because national coverage matches
+  // everyone, and the surface used to hand back a priced plan and a status of
+  // "complete" for an address that does not exist. Say so instead: the only
+  // storefronts left are the ones that would have served any address at all.
+  const placed = destination.lat != null;
+  const onlyNational =
+    !placed && serving.every(({ coverage }) => coverage.matchedScope === "national");
+  if (onlyNational && serving.length > 0) {
+    notes.push(
+      `We could not place "${destination.city ?? "this address"}". The storefronts below ` +
+        "deliver nationwide, so they are not evidence that anyone delivers to this " +
+        "particular address. Send a fuller address, or a known city name, to get a real " +
+        "coverage answer.",
+    );
+  }
+
   if (serving.length === 0) {
     return {
       status: "complete",
