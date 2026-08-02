@@ -724,7 +724,29 @@ export function rankQueryCandidates(
     const stapleSafe = candidates.filter(
       (c) => !rejectUnsafeStapleName(queryText, c.name, c.preparation),
     );
-    const top = stapleSafe.find((c) => queryHeadAnchored(queryText, c.name));
+    // Prefer a head-anchored candidate the shopper can actually buy here.
+    //
+    // Taking rank order alone re-installed exactly the SKU `decideResolution`
+    // had just rejected. Its `prefersUnavailableProduct` guard is what raised
+    // the confirmation in the first place: the top hit has no local price while
+    // rivals do. Overriding that back to `resolved` on rank order undoes the
+    // guard rather than answering it.
+    //
+    // It bites on QUALIFIED generics specifically, which is why bare words look
+    // fine. The catalogue holds internal one-chain listings named exactly
+    // "קפה נמס" or "אורז בסמטי"; those score 1.0 on the exact-name arm against
+    // 0.95 for every real product, so they lead the shortlist. A qualified query
+    // also makes the shortlist homogeneous enough for this branch to fire, where
+    // a bare "קפה" falls through to the availability-gated branch below and gets
+    // a stocked SKU. Measured: "קפה נמס" resolved to a product in 1 store
+    // nationally and 0 of the 24 online storefronts, while "קפה" resolved to one
+    // in 505 stores.
+    //
+    // The fallback keeps today's behaviour when nothing in the shortlist is
+    // locally priced, which is the data-sparsity case the guard deliberately
+    // tolerates.
+    const anchored = stapleSafe.filter((c) => queryHeadAnchored(queryText, c.name));
+    const top = anchored.find((c) => c.hasLocalPrice) ?? anchored[0];
     if (top) {
       const equivalents = buildCommodityEquivalents(
         top,

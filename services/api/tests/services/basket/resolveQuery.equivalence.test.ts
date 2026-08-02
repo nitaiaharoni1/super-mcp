@@ -656,3 +656,49 @@ describe("resolveQuery risk + equivalence wiring", () => {
     expect(item.equivalents?.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("the commodity override does not re-install an unbuyable SKU", () => {
+  beforeEach(() => {
+    getActiveOntology.mockResolvedValue(heRetailOntologyFixture());
+    loadSemanticProfiles.mockResolvedValue(new Map());
+  });
+
+  it("prefers a head-anchored candidate that is actually priced here", async () => {
+    // The catalog holds one-chain internal listings named EXACTLY the query
+    // ("קפה נמס", "אורז בסמטי"). Those score 1.0 on the exact-name arm against
+    // 0.95 for every real product, so they lead the shortlist. The override used
+    // to take the leader on rank order, which re-installed precisely the SKU
+    // `decideResolution` had just rejected for having no local price, undoing
+    // its own guard. Measured: "קפה נמס" resolved to a product in 1 store
+    // nationally and none of the 24 online storefronts.
+    const item = await resolveLine("קפה נמס", [
+      hit("orphan", "קפה נמס", 1, {
+        hasLocalPrice: false,
+        evidence: { exactName: true, exactPhrase: true, queryTokenCount: 2, matchedTokenCount: 2 },
+      }),
+      hit("stocked-a", "קפה נמס מיובש טסטרס צ'ויס 200 גרם", 0.95, { hasLocalPrice: true }),
+      hit("stocked-b", "קפה נמס מגורען רד מאג 200 גרם", 0.95, { hasLocalPrice: true }),
+    ]);
+
+    expect(item.productId).not.toBe("orphan");
+    expect(item.resolutionStatus).toBe("resolved");
+  });
+
+  it("asks rather than picking the orphan when nothing is priced here", async () => {
+    // The `?? anchored[0]` fallback exists so data sparsity does not drop a line,
+    // but it must not become a back door that auto-resolves the orphan whenever
+    // the whole shortlist is unpriced. Nothing here is buyable, so the honest
+    // answer is a question, not a confident pick.
+    const item = await resolveLine("אורז בסמטי", [
+      hit("a", "אורז בסמטי", 1, {
+        hasLocalPrice: false,
+        evidence: { exactName: true, exactPhrase: true, queryTokenCount: 2, matchedTokenCount: 2 },
+      }),
+      hit("b", 'אורז בסמטי קלאסי 1 ק"ג סוגת', 0.95, { hasLocalPrice: false }),
+      hit("c", 'אורז בסמטי מלא 1 ק"ג', 0.95, { hasLocalPrice: false }),
+    ]);
+
+    expect(item.resolutionStatus).toBe("needs_confirmation");
+    expect(item.productId).toBeNull();
+  });
+});
