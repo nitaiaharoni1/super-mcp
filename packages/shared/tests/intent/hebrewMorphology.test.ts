@@ -57,4 +57,26 @@ describe("queryTokensSatisfied", () => {
   it("still requires specific tokens", () => {
     expect(queryTokensSatisfied(["יין", "אדום", "קברנה"], "יין אדום מרלו")).toBe(false);
   });
+
+  it("collapses ktiv doubling, as head anchoring already does", () => {
+    // The feeds spell one brand several ways: טייסטרס / טסטרס, קורנפלייקס /
+    // קורנפלקס. queryHeadAnchored has folded matres lectionis for exactly this
+    // reason; this function did not, so a "קפה נמס טייסטרס צ'ויס" line failed to
+    // match "קפה נמס מיובש טסטרס צ'ויס 200 גרם" — the very product all five
+    // storefronts stock. With no same-brand peer left, the line fell to the
+    // category tier and was filled with a chain's own-brand instant coffee at
+    // ₪21.90 against Taster's Choice at ₪39.90, which also made that storefront
+    // look like the cheapest one.
+    expect(queryTokensSatisfied(["טייסטרס"], "קפה נמס מיובש טסטרס צ'ויס 200 גרם")).toBe(true);
+    expect(
+      queryTokensSatisfied(["קפה", "נמס", "טייסטרס", "צויס"], "קפה נמס מיובש טסטרס צ'ויס 200 גרם"),
+    ).toBe(true);
+    expect(queryTokensSatisfied(["קורנפלייקס"], "קורנפלקס 500 גרם")).toBe(true);
+  });
+
+  it("folding does not merge genuinely different words", () => {
+    expect(queryTokensSatisfied(["קברנה"], "יין אדום מרלו")).toBe(false);
+    expect(queryTokensSatisfied(["טייסטרס"], "קפה מיובש בהקפאה 200")).toBe(false);
+    expect(queryTokensSatisfied(["לימון"], "מלון")).toBe(false);
+  });
 });

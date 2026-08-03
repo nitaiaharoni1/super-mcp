@@ -133,6 +133,18 @@ export function expandHebrewQueryVariants(query: string, limit = 4): string[] {
  * Compares STEMS (final-letter normalized, one plural/feminine suffix stripped).
  */
 export function queryTokensSatisfied(queryTokens: string[], name: string): boolean {
-  const nameStems = new Set(tokenizeNormalized(normalizeEmbedInput(name)).map(stemHebrewToken));
-  return queryTokens.every((qt) => nameStems.has(stemHebrewToken(qt)));
+  // Fold ktiv doubling on BOTH sides, the same treatment queryHeadAnchored gives
+  // the head token and for the same reason: the feeds spell one word two ways.
+  // Without it "טייסטרס" and "טסטרס" are different brands, "קורנפלייקס" and
+  // "קורנפלקס" different cereals. That cost more than recall — a brand-named
+  // coffee line found no same-brand peer, fell through to the category tier, and
+  // was filled with a chain's own-brand instant at ₪21.90 against the ₪39.90
+  // Taster's Choice every storefront actually stocks, which then made that
+  // storefront rank as the cheapest.
+  //
+  // foldMatresLectionis keeps the original token when too little would survive,
+  // so short words cannot collapse into each other.
+  const key = (token: string): string => foldMatresLectionis(stemHebrewToken(token));
+  const nameStems = new Set(tokenizeNormalized(normalizeEmbedInput(name)).map(key));
+  return queryTokens.every((qt) => nameStems.has(key(qt)));
 }
