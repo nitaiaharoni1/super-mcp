@@ -57,6 +57,22 @@ export function chainEquivalentReason(primaryName: string | null, selectedName: 
 }
 
 /**
+ * Provenance for the last-resort tier: same class and variant, but the name
+ * never repeats what the shopper typed.
+ *
+ * Deliberately wordier than the others. This is the one substitution the
+ * shopper is most likely to want to overrule, so the sentence has to say plainly
+ * that the match rests on category alone.
+ */
+export function classFallbackReason(primaryName: string | null, selectedName: string): string {
+  const primary = primaryName ?? "the resolved product";
+  return (
+    `class_fallback: this chain lists no product named like "${primary}", so priced ` +
+    `"${selectedName}" on category and variant alone. Worth confirming.`
+  );
+}
+
+/**
  * Provenance for a same-brand compatible pack priced under brand_family intent
  * (e.g. selected 95g Taster's → local 100g original).
  */

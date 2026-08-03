@@ -628,3 +628,76 @@ describe("the dominant class is the pool's majority, not its first classified ro
     expect(result.items[0]!.productId).toBe("a-0");
   });
 });
+
+describe("a query that names its own concept beats a plurality of search hits", () => {
+  const ontology = heRetailOntologyFixture();
+
+  function bagsLine(): ResolvedItem {
+    return {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: null,
+      name: "שקיות זבל",
+      resolvedBy: "query",
+      resolutionStatus: "needs_confirmation",
+      confidence: null,
+      lowConfidence: true,
+      // What search actually returns for "שקיות זבל": the ziplock bags outrank
+      // the bin liners, because the catalogue files those under "אשפה" and only
+      // the ziplock names share the typed word "שקיות".
+      candidates: [
+        cand({
+          productId: "zip1", name: "שקיות זיפר L", score: 0.95,
+          productClass: "household", classL1: "household", classL2: "disposables",
+          classL3: "food_storage_bags", sizeUnit: "unit",
+        }),
+        cand({
+          productId: "zip2", name: "שקיות זיפר סגירה כפולה", score: 0.94,
+          productClass: "household", classL1: "household", classL2: "disposables",
+          classL3: "food_storage_bags", sizeUnit: "unit",
+        }),
+        cand({
+          productId: "waste", name: "שקיות אשפה גדולות 20 יחידות", score: 0.6,
+          productClass: "household", classL1: "household", classL2: "disposables",
+          classL3: "waste_bags", sizeUnit: "unit",
+        }),
+      ],
+      primaryProductId: null,
+      primaryName: null,
+      substitution: null,
+    };
+  }
+
+  const availability = new Map<string, CandidateAvailability>([
+    ["zip1", { pricedStoreCount: 9, chainCount: 3, minPrice: 16.7 }],
+    ["zip2", { pricedStoreCount: 8, chainCount: 3, minPrice: 15 }],
+    ["waste", { pricedStoreCount: 7, chainCount: 3, minPrice: 19.9 }],
+  ]);
+
+  it("picks the bin liners even though ziplock outranks and outnumbers them", () => {
+    const result = applyFastResolutionPolicy(
+      [{ query: "שקיות זבל" }],
+      [bagsLine()],
+      availability,
+      ontology,
+    );
+    expect(result.items[0]?.productId).toBe("waste");
+  });
+
+  it("leaves the pool alone when nothing in it matches the hint", () => {
+    // Narrowing to an empty set would turn a mediocre answer into no answer, so
+    // the hint yields when the concept simply is not on offer.
+    const line = bagsLine();
+    line.candidates = line.candidates.filter((c) => c.classL3 === "food_storage_bags");
+    const result = applyFastResolutionPolicy(
+      [{ query: "שקיות זבל" }],
+      [line],
+      availability,
+      ontology,
+    );
+    expect(result.items[0]?.productId).not.toBeNull();
+  });
+});

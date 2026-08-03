@@ -479,6 +479,27 @@ export async function enrichCommodityCoverage(
       requireQueryTokens: true,
       allowCountToWeight: intent.allowCountToWeight,
     });
+
+    // Last-resort tier: same class, same variant, every safety gate still
+    // applied, but not required to repeat the shopper's words.
+    //
+    // A chain names the category its own way. Rami Levy prices 157 body washes
+    // as "אל סבון" and not one says "רחצה", so a "סבון רחצה" line matched their
+    // class and variant exactly and was still reported not_carried_by_chain.
+    // Same for its ground coffee, every unit of which is called "קפה טורקי".
+    // Pricing reaches for these only when the primary and its gated equivalents
+    // all failed to price at that store, so a line that already finds its
+    // product is untouched.
+    const loose = filterClassPeers(queryText, primary, rows, {
+      requireQueryTokens: false,
+      allowCountToWeight: intent.allowCountToWeight,
+    });
+    const strictIds = new Set(peers.map((row) => row.product_id));
+    const looseOnly = loose.filter((row) => !strictIds.has(row.product_id));
+    if (looseOnly.length > 0) {
+      item.looseEquivalents = looseOnly.map((row) => candidateFromPeerRow(row, primary, scope));
+    }
+
     if (peers.length === 0) return;
 
     item.equivalents = mergeCoverageEquivalents(primary, item.equivalents, peers, scope);

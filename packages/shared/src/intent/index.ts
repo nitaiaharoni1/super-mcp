@@ -7,3 +7,4 @@ export * from "./productIntent.js";
 export * from "./productAliases.js";
 export * from "./phraseEvidence.js";
 export * from "./productClassTaxonomy.js";
+export * from "./queryClassHints.js";

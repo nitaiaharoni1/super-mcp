@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 import {
   ALL_L2,
-  ALL_L3,
   L3_NONE,
   PACK_FORMS,
   PREPARATIONS,
@@ -152,7 +151,14 @@ Rules:
   (ללא סוכר), decaf (נטול קפאין), organic (אורגני/ביו), premium (פרימיום/מובחר/בוטיק),
   baby_mini (בייבי/מיני), cherry_grape (שרי/מיני tomatoes/ענבניות), sliced_prepared
   (פרוס/קצוץ/מגורד/מרוסק ready-cut), whole_wheat (מלא/כוסמין), lactose_free (ללא לקטוז),
-  spicy (חריף/פיקנטי). A plain product with none of these -> "regular".
+  spicy (חריף/פיקנטי), kids (לילדים/לילדות/ילדים/בטעם for a child audience, e.g.
+  משחת שיניים לילדים, שמפו לילדים), colour_variant (a colour that makes it a different
+  line: קינואה אדומה, עדשים כתומות, אורז אדום/שחור — but NOT when the colour is part of
+  the staple's ordinary name, e.g. פלפל שחור, קפה שחור, יין אדום, שוקולד לבן).
+  A plain product with none of these -> "regular".
+  Judge the variant against the UNMARKED everyday product a shopper means when they
+  name the category with no adjective. If the name carries a qualifier that a shopper
+  asking plainly would not have got, it is not "regular".
 - preparation: is this the PLAIN staple, or something made from it? This is the axis
   that decides whether two products are the same shopping-list line.
   * plain: the staple itself. אורז לבן, חלב 3%, יוגורט לבן, טונה בשמן, לחם אחיד,
@@ -207,7 +213,13 @@ function buildRequestBody(names: string[]): unknown {
             i: { type: "INTEGER" },
             l1: { type: "STRING", enum: [...TAXONOMY_L1] },
             l2: { type: "STRING", enum: [...ALL_L2, L3_NONE] },
-            l3: { type: "STRING", enum: [...ALL_L3, L3_NONE] },
+            // Free string, not an enum. Extending the taxonomy into the non-food
+            // branches pushed ALL_L3 past what Vertex will accept ("schema
+            // produces a constraint that has too much branching for serving"),
+            // and the constraint was never the real guard anyway: the prompt
+            // lists the legal l3 family per l2, and isValidClassPath below
+            // re-asks and then degrades an off-menu value to NULL.
+            l3: { type: "STRING" },
             variant: { type: "STRING", enum: [...VARIANTS] },
             preparation: { type: "STRING", enum: [...PREPARATIONS] },
             packForm: { type: "STRING", enum: [...PACK_FORMS] },

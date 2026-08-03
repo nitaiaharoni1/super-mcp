@@ -8,6 +8,7 @@ import {
   type OntologySnapshot,
   type QueryProfile,
 } from "@super-mcp/shared";
+import { intendedL3ForQuery } from "@super-mcp/shared";
 import { rejectUnsafeChickenName } from "./chickenSafety.js";
 import { AUTO_ACCEPT_SCORE } from "./constants.js";
 import { preferDirectForm } from "./derivedForm.js";
@@ -140,6 +141,25 @@ function shareCompatibleClass(candidates: BasketCandidate[]): boolean {
  * line: a bare plurality is not enough, and an unclassified candidate is never
  * the odd one out.
  */
+/**
+ * Narrow to the L3 the query names outright, before any majority rule runs.
+ *
+ * The majority rules below read the class off the candidates, so they inherit
+ * whatever name-similarity search ranked first. For "שקיות זבל" that was ziplock
+ * bags, which share the word "שקיות" while the bin liners the shopper meant are
+ * filed under "אשפה" and never surface. A phrase the taxonomy recognises is
+ * better evidence of intent than a plurality of search hits, so it wins.
+ *
+ * Applied only when the pool actually holds that L3; otherwise it would empty
+ * the pool and turn a mediocre answer into no answer.
+ */
+function restrictToQueryL3(candidates: BasketCandidate[], query: string): BasketCandidate[] {
+  const wanted = intendedL3ForQuery(query);
+  if (!wanted) return candidates;
+  const onTarget = candidates.filter((c) => c.classL3 === wanted);
+  return onTarget.length > 0 ? onTarget : candidates;
+}
+
 function restrictToDominantClass(candidates: BasketCandidate[]): BasketCandidate[] {
   if (candidates.length === 0) return candidates;
   if (shareCompatibleClass(candidates)) return restrictToDominantClassL2(candidates);
@@ -484,7 +504,7 @@ function upgradeResolvedLine(
   if (item.resolvedBy !== "query") return null;
   if (!query) return null;
 
-  const pool = restrictToDominantClass(filterPool(item, query, profile));
+  const pool = restrictToDominantClass(restrictToQueryL3(filterPool(item, query, profile), query));
   if (pool.length === 0) return null;
 
   const primary = item.candidates.find((c) => c.productId === item.productId) ?? null;
@@ -535,7 +555,7 @@ function resolveFastOutcome(
     return { kind: "selected", item, assumption: null };
   }
 
-  const pool = restrictToDominantClass(filterPool(item, query, profile));
+  const pool = restrictToDominantClass(restrictToQueryL3(filterPool(item, query, profile), query));
 
   if (pool.length === 0) {
     return omitOutcome(item, input);

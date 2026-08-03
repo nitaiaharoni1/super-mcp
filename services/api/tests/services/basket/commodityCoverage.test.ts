@@ -75,6 +75,54 @@ describe("filterClassPeers", () => {
     expect(kept.map((r) => r.product_id).sort()).toEqual(["a", "b", "c"]);
   });
 
+  it("keeps a same-class peer the chain names its own way, as a separate tier", () => {
+    // Rami Levy prices 157 body washes and not one is called "סבון רחצה"; they
+    // are all "אל סבון". Same class, same variant, and the line still came back
+    // not_carried_by_chain because the name did not repeat the shopper's words.
+    const soap = primary({
+      name: "סבון רחצה צמחי פאפאי",
+      sizeUnit: "ml",
+      sizeQty: 1000,
+      productClass: "personal_care",
+      classL1: "personal_care",
+      classL2: "hygiene",
+      classL3: null,
+    });
+    const rows = [row("lavender", "אל סבון בניחוח לבנדר", "ml", 1000)];
+    // The strict pass, which is what feeds `equivalents`, still rejects it.
+    expect(filterClassPeers("סבון רחצה", soap, rows, { requireQueryTokens: true })).toEqual([]);
+    // The loose pass, which only ever feeds the last-resort tier, keeps it.
+    const loose = filterClassPeers("סבון רחצה", soap, rows, { requireQueryTokens: false });
+    expect(loose.map((r) => r.product_id)).toEqual(["lavender"]);
+  });
+
+  it("still applies every safety gate on the loose pass", () => {
+    // Relaxing the wording must not relax what is safe to substitute. If it did,
+    // this tier would re-open the wrong-substitution bugs the strict gates exist
+    // to prevent.
+    const coffee = primary({
+      name: "קפה שחור קלוי וטחון",
+      sizeUnit: "g",
+      sizeQty: 100,
+      productClass: "coffee",
+      classL1: "pantry",
+      classL2: "coffee",
+      classL3: "ground_coffee",
+    });
+    const loose = filterClassPeers(
+      "קפה שחור",
+      coffee,
+      [
+        row("turkish", "קפה טורקי עלית", "g", 100),
+        row("cardamom", "קפה טורקי עם הל", "g", 100),
+      ],
+      { requireQueryTokens: false },
+    );
+    // The chain's own name for the category gets through; the unrequested
+    // addition does not.
+    expect(loose.map((r) => r.product_id)).toEqual(["turkish"]);
+  });
+
   it("refuses a peer that adds an ingredient the query never asked for", () => {
     // The class map cannot catch this: 4,104 products whose name carries " עם X"
     // are labelled variant=regular, so the exact-variant SQL gate passes them and

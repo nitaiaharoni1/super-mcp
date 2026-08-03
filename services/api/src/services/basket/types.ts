@@ -254,6 +254,16 @@ export interface ResolvedItem {
    * Surfaced as alternative_available when no auto peer is priced locally.
    */
   alternatives?: BasketCandidate[];
+  /**
+   * Same class and variant, every safety gate applied, but the name does not
+   * repeat the shopper's words. Priced ONLY when the primary and every gated
+   * equivalent failed at that store, and always flagged as a loose match.
+   *
+   * A chain naming a category its own way is not the same thing as not selling
+   * it: Rami Levy prices 157 body washes as "אל סבון", never "סבון רחצה", and
+   * the line came back not_carried_by_chain.
+   */
+  looseEquivalents?: BasketCandidate[];
 }
 
 export interface BasketItemStatus {

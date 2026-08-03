@@ -698,6 +698,7 @@ export function collectProductIdsForPricing(resolvedItems: ResolvedItem[]): stri
           // loaded, so that lookup could only ever miss: the larger-pack fallback
           // has been unreachable on both surfaces since it was written.
           ...(r.alternatives ?? []).map((c) => c.productId),
+          ...(r.looseEquivalents ?? []).map((c) => c.productId),
         ]),
     ),
   ];

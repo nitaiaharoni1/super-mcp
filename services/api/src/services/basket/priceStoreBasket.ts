@@ -6,6 +6,7 @@ import { estimatedDistanceKm } from "./recommendStores.js";
 import {
   brandFamilyEquivalentReason,
   chainEquivalentReason,
+  classFallbackReason,
   fallbackCandidate,
   isChainEquivalentSubstitution,
   isLineSubstituted,
@@ -108,26 +109,33 @@ export function priceStoreBasket(
 
     const tryOrder = tryOrderForItem(item);
 
-    let matched: {
-      candidate: BasketCandidate;
-      listing: ListingRow;
-      priceRow: StorePriceRow;
-      qty: number;
-      qtyMode: string;
-    } | null = null;
-
-    let sawListing = false;
-    let matchedTotal = Infinity;
-    let matchedValue: number | null = null;
+    // Held on an object, not in plain locals: the pricing loop below runs inside
+    // a closure so it can be replayed over the loose tier, and TypeScript keeps
+    // narrowing `let` across such a call while it resets it for a property.
+    const best: {
+      matched: {
+        candidate: BasketCandidate;
+        listing: ListingRow;
+        priceRow: StorePriceRow;
+        qty: number;
+        qtyMode: string;
+      } | null;
+      sawListing: boolean;
+      total: number;
+      value: number | null;
+    } = { matched: null, sawListing: false, total: Infinity, value: null };
     const primaryScore = tryOrder[0]?.score ?? 0;
     const primaryProductId = item.productId;
 
-    for (const candidate of tryOrder) {
+    let usedLooseTier = false;
+
+    const priceFrom = (candidates: readonly BasketCandidate[]): void => {
+    for (const candidate of candidates) {
       // Don't silently swap to a much worse match (e.g. 6-pack mini pita for "פיתות 10").
       if (candidate.score + 0.2 < primaryScore) continue;
       const listings = byProduct?.get(candidate.productId) ?? [];
       if (listings.length === 0) continue;
-      sawListing = true;
+      best.sawListing = true;
       let picked: { listing: ListingRow; priceRow: StorePriceRow } | null = null;
       for (const l of listings) {
         const pr = priceByListingAndStore.get(`${l.id}:${store.id}`);
@@ -166,7 +174,7 @@ export function priceStoreBasket(
       // Exact / brand_family: prefer the pinned primary whenever stocked.
       // Commodity intent: minimize line total among approved peers (bare יין).
       if (item.intentMode !== "commodity" && isPrimary) {
-        matched = {
+        best.matched = {
           candidate,
           listing,
           priceRow,
@@ -178,22 +186,34 @@ export function priceStoreBasket(
       // Prefer the better unit price when both sides expose a comparable size;
       // otherwise fall back to the pack total.
       const beatsBest =
-        candidateValue != null && matchedValue != null
-          ? candidateValue < matchedValue
-          : candidateTotal < matchedTotal;
+        candidateValue != null && best.value != null
+          ? candidateValue < best.value
+          : candidateTotal < best.total;
       if (beatsBest) {
-        matched = {
+        best.matched = {
           candidate,
           listing,
           priceRow,
           qty: purchase.qty,
           qtyMode: purchase.mode,
         };
-        matchedTotal = candidateTotal;
-        matchedValue = candidateValue;
+        best.total = candidateTotal;
+        best.value = candidateValue;
       }
     }
+    };
 
+    priceFrom(tryOrder);
+    // Only now, with the primary and every gated equivalent unpriced here, widen
+    // to peers that match on class and variant but not on wording. Running this
+    // second means a line that already found its product cannot be changed by it.
+    if (!best.matched && item.looseEquivalents && item.looseEquivalents.length > 0) {
+      priceFrom(item.looseEquivalents);
+      usedLooseTier = best.matched != null;
+    }
+
+    const matched = best.matched;
+    const sawListing = best.sawListing;
     if (!matched) {
       const alt = findPricedAlternative(item, byProduct, priceByListingAndStore, store.id);
       if (alt) {
@@ -272,10 +292,13 @@ export function priceStoreBasket(
       item.intentMode === "brand_family" &&
       isChainEquivalent &&
       matched.candidate.productId !== item.productId;
-    const substituted = isChainEquivalent || isLineSubstituted(item, matched.candidate.productId);
+    const substituted =
+      usedLooseTier || isChainEquivalent || isLineSubstituted(item, matched.candidate.productId);
     const primaryCand = item.candidates.find((c) => c.productId === item.productId);
     const primaryName = primaryCand?.name ?? item.name;
-    const substitutionReason = isBrandFamily
+    const substitutionReason = usedLooseTier
+      ? classFallbackReason(primaryName, matched.candidate.name || matched.listing.name)
+      : isBrandFamily
       ? brandFamilyEquivalentReason(
           primaryName,
           matched.candidate.name || matched.listing.name,

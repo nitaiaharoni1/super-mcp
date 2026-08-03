@@ -456,9 +456,16 @@ export function hasUnrequestedPreservedForm(queryTokens: Set<string>, candidateN
 /**
  * A peer that adds an ingredient the shopper never mentioned ("עם הל", "עם גרעינים").
  *
- * Structural, not a token list: Hebrew " עם X" is the catalogue's own way of
- * naming an addition, so the pattern generalises to additions nobody has
- * enumerated. It exists because the class map cannot be relied on here — 4,104
+ * Structural, not a token list: Hebrew " עם X" and "בטעם X" are the catalogue's
+ * own ways of naming an addition, so the pattern generalises to additions nobody
+ * has enumerated. "בטעם" earns its place separately: a bare "קפה שחור" was
+ * filled with "קפה טורקי בטעם קקאו קינמון", and it is also what separates real
+ * maple syrup from "סירופ בטעם מייפל".
+ *
+ * "בניחוח" (scented) is deliberately NOT here. It reads like the same pattern
+ * and is not: every body wash on the shelf is scented, so treating scent as an
+ * addition rejected "אל סבון בניחוח לבנדר" — the exact product the last-resort
+ * tier exists to recover. It exists because the class map cannot be relied on here — 4,104
  * products whose name carries " עם X" are labelled `variant = regular`, so the
  * exact-variant SQL gate passes them and a bare "קפה שחור" can be filled with
  * cardamom-spiced Turkish coffee.
@@ -466,7 +473,7 @@ export function hasUnrequestedPreservedForm(queryTokens: Set<string>, candidateN
  * A query that asks for the addition keeps it: only an UNrequested one is
  * rejected, the same rule the preserved-form and personal-care guards apply.
  */
-const WITH_INGREDIENT = /(?:^|\s)עם\s+(\S+)/u;
+const WITH_INGREDIENT = /(?:^|\s)(?:עם|בטעם)\s+\S+/u;
 
 export function hasUnrequestedAddedIngredient(queryText: string, candidateName: string): boolean {
   if (WITH_INGREDIENT.test(normalizeEmbedInput(queryText))) return false;
