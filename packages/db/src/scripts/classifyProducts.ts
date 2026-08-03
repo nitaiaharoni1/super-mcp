@@ -145,6 +145,18 @@ Rules:
   * מלח גס/שולחן -> pantry_dry/salt_sugar/salt.
   * קפה נמס / טייסטרס / נסקפה instant -> coffee/instant_coffee. קפה טורקי / ground Turkish coffee (no נמס) -> coffee/ground_coffee — NOT instant_coffee.
   * עוגת לימונים / lemon cake -> bakery/cake ; never fruit_fresh/lemon. לקריץ/סוכריות קולה -> snacks_sweets/candy ; never soda/cola.
+- Non-food families are as literal as the food ones. Do NOT let waste_bags become
+  the default for anything bag-shaped or disposable:
+  * שקית/שקיות אשפה/זבל, שקיות לפח, bin liners -> disposables/waste_bags ONLY.
+  * שקית בד / שקיות קופה / שקית נשיאה / שקית ללקוחות (carrier or shopping bag) ->
+    disposables, l3 "none". A bag you carry shopping in is not a bin liner.
+  * שקיות זיפר/הקפאה/סנדוויץ -> disposables/food_storage_bags.
+  * צלחות/כוסות/קערות/סכום חד פעמי -> disposables/tableware_disposable.
+  * נייר כסף/אלומיניום/ניילון נצמד/נייר אפייה -> disposables/foil_wrap.
+  * סלוטייפ/דבק/מספריים/כלי כתיבה and other stationery -> non_food_other/misc.
+  When a non-food name does not clearly belong to one of the listed families,
+  answer l3 "none". An unlabelled product is treated as unknown; a wrongly
+  labelled one gets substituted into somebody's basket.
 - פיקדון/deposit/gift card/service fee -> non_food_other.
 - variant: the cross-cutting form a shopper would NOT accept as a plain substitute.
   Default "regular" for a normal product. Use: diet_zero (דיאט/זירו/zero), sugar_free

@@ -27,6 +27,17 @@ async function main(): Promise<void> {
   let totalPairs = 0;
   const perConcept: Array<{ l3: string; products: number; phrases: number }> = [];
 
+  // Authoritative, not additive. These rows are DERIVED from the classification,
+  // so a product that loses its L3 must lose the concept's words with it.
+  // Insert-only left 452 demoted products still answering to "שקיות זבל" in
+  // production, which is exactly how a cloth carrier bag reached the ranker for
+  // a bin-liner line. Only source='concept' is touched; curated aliases are not
+  // ours to delete.
+  if (!dryRun) {
+    const { rowCount } = await pool.query(`DELETE FROM product_alias WHERE source = $1`, [SOURCE]);
+    console.log(`[alias] cleared ${rowCount} previously derived rows`);
+  }
+
   for (const [l3, phrases] of Object.entries(L3_QUERY_PHRASES)) {
     const { rows } = await pool.query<{ product_id: string }>(
       `SELECT product_id FROM product_class_map WHERE class_l3 = $1`,
