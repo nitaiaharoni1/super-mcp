@@ -113,7 +113,8 @@ export function buildOnlineInstructions(env: NodeJS.ProcessEnv = process.env): s
     "it as an option that needs a top-up of that many shekels, never as one they can order now. " +
     "cheapestDelivered ranks on a total that prices missing lines at a market reference, so it can " +
     "win by not stocking things; bestSingleOrder is the most of the list obtainable in ONE order. " +
-    "When they differ, say so and let the shopper choose. " +
+    "When they differ, say so and let the shopper choose. Those three recommendation fields carry " +
+    "the totals only; look the storefront up in plans by serviceSlug for its priced lines. " +
     "nextFeeBreak names a cheaper fee tier the shopper could reach: gap is the extra spend, saving " +
     "is what it takes off the fee, and worthTopUp=true means spending it leaves them better off " +
     "overall. Volunteer that unprompted. " +

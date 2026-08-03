@@ -68,6 +68,8 @@ export function registerDeliveryTools(server: McpServer): void {
         "as options that need topping up rather than hiding them. " +
         "Rank on cheapestDelivered only if the shopper will happily order twice: it prices missing " +
         "lines at a market reference. bestSingleOrder is the fullest basket obtainable in one order. " +
+        "Both, and bestVerifiedTerms, carry totals only: find the storefront in plans by serviceSlug " +
+        "for its priced lines. " +
         "When nextFeeBreak.worthTopUp is true, spending a little more makes the order cheaper overall — say so. " +
         "Storefronts that do not serve the address come back in unavailableStores with a reason.",
       inputSchema: {

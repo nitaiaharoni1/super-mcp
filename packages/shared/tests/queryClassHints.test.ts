@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { intendedL3ForQuery, l2ForL3 } from "../src/intent/queryClassHints.js";
+import { intendedL3ForQuery } from "../src/intent/queryClassHints.js";
 
 describe("the words a shopper types, mapped to the class the catalogue uses", () => {
   it("reads bin liners out of a query the catalogue never spells that way", () => {
@@ -43,10 +43,5 @@ describe("the words a shopper types, mapped to the class the catalogue uses", ()
     expect(intendedL3ForQuery("קינואה")).toBeNull();
     expect(intendedL3ForQuery("")).toBeNull();
     expect(intendedL3ForQuery("משהו שאין לו שום קשר")).toBeNull();
-  });
-
-  it("reports the owning L2 for a hint", () => {
-    expect(l2ForL3("waste_bags")).toBe("disposables");
-    expect(l2ForL3("not_a_real_l3")).toBeNull();
   });
 });

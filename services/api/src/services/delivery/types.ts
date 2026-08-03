@@ -157,6 +157,17 @@ export interface DeliveryPlan {
   missingItems: BasketMissingItem[];
 }
 
+/**
+ * A recommendation, without the line detail that `plans` already carries.
+ *
+ * The three recommendation fields name storefronts that are always present in
+ * `plans` too, so repeating every priced line inside each of them was a quarter
+ * of the response for nothing: 29,779 bytes of a 119,719-byte answer to a
+ * 12-line basket, on a surface whose result an agent has to hold in context.
+ * Look the storefront up in `plans` by `serviceSlug` for its lines.
+ */
+export type DeliveryPlanSummary = Omit<DeliveryPlan, "lines" | "missingItems">;
+
 export interface UnavailableStorefront {
   serviceSlug: string;
   brand: string;
@@ -218,16 +229,16 @@ export interface DeliveryOptimizeCompleteResult {
   preference: DeliveryPreference;
   slotType: string;
   /** Lowest deliveredComparableTotal among orderable plans. */
-  cheapestDelivered: DeliveryPlan | null;
+  cheapestDelivered: DeliveryPlanSummary | null;
   /** Best plan whose delivery fee we can actually stand behind. */
-  bestVerifiedTerms: DeliveryPlan | null;
+  bestVerifiedTerms: DeliveryPlanSummary | null;
   /**
    * Most of the list obtainable as ONE order, cheapest among equals.
    *
    * `cheapestDelivered` prices the gaps at a market reference, which answers
    * "cheapest if you shop twice". This answers "cheapest that actually arrives".
    */
-  bestSingleOrder: DeliveryPlan | null;
+  bestSingleOrder: DeliveryPlanSummary | null;
   plans: DeliveryPlan[];
   unavailableStores: UnavailableStorefront[];
   inStoreComparison: InStoreComparison | null;

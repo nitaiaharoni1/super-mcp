@@ -1,5 +1,4 @@
 import { normalizeEmbedInput } from "../embeddings/localEmbed.js";
-import { L3_TO_L2 } from "./productClassTaxonomy.js";
 
 /**
  * Everyday Hebrew for a taxonomy concept, so a typed query lands where the
@@ -68,9 +67,4 @@ export function intendedL3ForQuery(queryText: string): string | null {
     if (q.includes(phrase)) return l3;
   }
   return null;
-}
-
-/** The L2 owning an L3 hint, for callers gating one level up. */
-export function l2ForL3(l3: string): string | null {
-  return L3_TO_L2.get(l3) ?? null;
 }

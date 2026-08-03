@@ -33,11 +33,19 @@ async function main(): Promise<void> {
   // production, which is exactly how a cloth carrier bag reached the ranker for
   // a bin-liner line. Only source='concept' is touched; curated aliases are not
   // ours to delete.
-  if (!dryRun) {
-    const { rowCount } = await pool.query(`DELETE FROM product_alias WHERE source = $1`, [SOURCE]);
+  //
+  // The clear and the rewrite share one transaction. Apart they are a window in
+  // which search has lost every derived alias, and a crash midway leaves it that
+  // way: the bin liners silently stop being findable by the word the shopper
+  // actually types, with nothing failing loudly to say so.
+  const client = dryRun ? null : await pool.connect();
+  if (client) {
+    await client.query("BEGIN");
+    const { rowCount } = await client.query(`DELETE FROM product_alias WHERE source = $1`, [SOURCE]);
     console.log(`[alias] cleared ${rowCount} previously derived rows`);
   }
 
+  try {
   for (const [l3, phrases] of Object.entries(L3_QUERY_PHRASES)) {
     const { rows } = await pool.query<{ product_id: string }>(
       `SELECT product_id FROM product_class_map WHERE class_l3 = $1`,
@@ -53,13 +61,20 @@ async function main(): Promise<void> {
     // NOTHING makes the whole script idempotent, so it is safe to re-run after
     // every classification pass.
     for (const alias of phrases) {
-      await pool.query(
+      await client!.query(
         `INSERT INTO product_alias (product_id, alias, locale, source)
          SELECT unnest($1::uuid[]), $2, 'he', $3
          ON CONFLICT (alias, product_id) DO NOTHING`,
         [rows.map((r: { product_id: string }) => r.product_id), alias, SOURCE],
       );
     }
+  }
+    if (client) await client.query("COMMIT");
+  } catch (err) {
+    if (client) await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client?.release();
   }
 
   for (const c of perConcept) {

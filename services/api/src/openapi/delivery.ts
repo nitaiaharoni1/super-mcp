@@ -155,6 +155,13 @@ const deliveryPlanSchema = {
     imputedLines: { type: "integer" },
     clubOnlyLines: { type: "integer" },
     couponOnlyLines: { type: "integer" },
+    stalePricedLines: {
+      type: "integer",
+      description:
+        "Priced lines whose price the retailer last republished over 30 days ago. Rami Levy's " +
+        "storefront runs 44.6% stale by this measure and every other storefront 0%, so it is worth " +
+        "saying out loud rather than quoting a thirteen-month-old price as today's.",
+    },
     lines: { type: "array", items: { $ref: "#/components/schemas/BasketLine" } },
     missingItems: { type: "array", items: { type: "object" } },
   },
@@ -162,6 +169,18 @@ const deliveryPlanSchema = {
 
 export const deliveryComponentSchemas = {
   DeliveryPlan: deliveryPlanSchema,
+  // The recommendation fields name a storefront that `plans` already carries in
+  // full, so they ship without the line arrays: repeating them was a quarter of
+  // the response on a 12-line basket. Look the storefront up in `plans` by
+  // `serviceSlug` for its priced lines.
+  DeliveryPlanSummary: {
+    ...deliveryPlanSchema,
+    properties: Object.fromEntries(
+      Object.entries(deliveryPlanSchema.properties).filter(
+        ([key]) => key !== "lines" && key !== "missingItems" && key !== "linesTruncated",
+      ),
+    ),
+  },
   DeliveryTermsProvenance: termsProvenanceSchema,
   DeliveryCoverageReport: coverageReportSchema,
 };
@@ -241,9 +260,9 @@ export const deliveryPaths = {
             address: { type: "object" },
             preference: { type: "string" },
             slotType: { type: "string" },
-            cheapestDelivered: { $ref: "#/components/schemas/DeliveryPlan" },
-            bestVerifiedTerms: { $ref: "#/components/schemas/DeliveryPlan" },
-            bestSingleOrder: { $ref: "#/components/schemas/DeliveryPlan" },
+            cheapestDelivered: { $ref: "#/components/schemas/DeliveryPlanSummary" },
+            bestVerifiedTerms: { $ref: "#/components/schemas/DeliveryPlanSummary" },
+            bestSingleOrder: { $ref: "#/components/schemas/DeliveryPlanSummary" },
             plans: { type: "array", items: { $ref: "#/components/schemas/DeliveryPlan" } },
             unavailableStores: { type: "array", items: { type: "object" } },
             inStoreComparison: { type: "object", nullable: true },

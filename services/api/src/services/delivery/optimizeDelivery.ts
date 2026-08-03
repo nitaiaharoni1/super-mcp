@@ -49,6 +49,7 @@ import type {
   DeliveryOptimizeRequest,
   DeliveryOptimizeResult,
   DeliveryPlan,
+  DeliveryPlanSummary,
   DeliveryPreference,
   InStoreComparison,
   UnavailableStorefront,
@@ -515,6 +516,15 @@ async function runDeliveryOptimization(
     });
   }
 
+  // The recommendation fields name storefronts that `plans` already carries in
+  // full, so they ship without the line arrays. Repeating them cost a quarter of
+  // the response on a 12-line basket.
+  const asSummary = (plan: DeliveryPlan | null): DeliveryPlanSummary | null => {
+    if (!plan) return null;
+    const { lines: _lines, missingItems: _missingItems, ...summary } = plan;
+    return summary;
+  };
+
   const ranked = rankPlans(orderable, preference);
   const allPlans = rankPlansForResponse(plans, preference);
   const cheapestDelivered = ranked[0] ?? null;
@@ -608,9 +618,9 @@ async function runDeliveryOptimization(
     address: describeAddress(input, destination),
     preference,
     slotType,
-    cheapestDelivered,
-    bestVerifiedTerms,
-    bestSingleOrder,
+    cheapestDelivered: asSummary(cheapestDelivered),
+    bestVerifiedTerms: asSummary(bestVerifiedTerms),
+    bestSingleOrder: asSummary(bestSingleOrder),
     plans: allPlans,
     unavailableStores: unavailable,
     inStoreComparison,

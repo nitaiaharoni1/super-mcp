@@ -252,7 +252,7 @@ export const PACK_FORM_DEFAULT = "single";
 
 const L2_TO_L1 = new Map<string, string>();
 for (const [l1, l2s] of Object.entries(TAXONOMY_L2)) for (const l2 of l2s) L2_TO_L1.set(l2, l1);
-export const L3_TO_L2 = new Map<string, string>();
+const L3_TO_L2 = new Map<string, string>();
 for (const [l2, l3s] of Object.entries(TAXONOMY_L3)) for (const l3 of l3s) L3_TO_L2.set(l3, l2);
 
 /** Validate an L1/L2/L3 triple against the closed hierarchy (l3 may be null/none). */

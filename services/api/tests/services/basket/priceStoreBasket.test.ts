@@ -1183,3 +1183,118 @@ describe("coupon-gated pricing", () => {
     expect(result?.lines[0]).toMatchObject({ lineTotal: 8, couponOnly: false });
   });
 });
+
+describe("the last-resort tier only fires when nothing else priced", () => {
+  const cand = (productId: string, name: string, score = 0.9) => ({
+    productId,
+    name,
+    score,
+    matchedVia: "product" as const,
+    sizeQty: 500,
+    sizeUnit: "ml",
+    hasPrice: true,
+    hasLocalPrice: true,
+    productClass: "personal_care",
+  });
+
+  const listing = (productId: string, id: string, name: string): ListingRow =>
+    ({ id, product_id: productId, chain_id: "chain", item_code: id, name, gtin: null }) as ListingRow;
+
+  const price = (listingId: string, value: string): [string, StorePriceRow] => [
+    `${listingId}:store`,
+    {
+      listing_id: listingId,
+      store_id: "store",
+      price: value,
+      currency: "ILS",
+      source_ts: "2026-08-01T00:00:00Z",
+      ingested_at: "2026-08-01T00:00:00Z",
+    } as StorePriceRow,
+  ];
+
+  function soapLine(over: Partial<ResolvedItem> = {}): ResolvedItem {
+    return {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: "papaya",
+      name: "סבון רחצה צמחי פאפאי",
+      resolvedBy: "query",
+      resolutionStatus: "resolved",
+      confidence: 0.95,
+      lowConfidence: false,
+      intentMode: "commodity",
+      candidates: [cand("papaya", "סבון רחצה צמחי פאפאי")],
+      equivalents: [cand("gated", "סבון רחצה אחר")],
+      looseEquivalents: [cand("lavender", "אל סבון בניחוח לבנדר")],
+      primaryProductId: "papaya",
+      primaryName: "סבון רחצה צמחי פאפאי",
+      substitution: null,
+      ...over,
+    } as ResolvedItem;
+  }
+
+  it("prices the loose peer when the primary and its gated equivalents are absent", () => {
+    // Rami Levy stocks 157 body washes and calls none of them "רחצה". Before this
+    // tier the line reported not_carried_by_chain while matching class and variant.
+    const result = priceStoreBasket(
+      STORE,
+      [soapLine()],
+      new Map([["chain", new Map([["lavender", [listing("lavender", "l1", "אל סבון בניחוח לבנדר")]]])]]),
+      new Map([price("l1", "7.9")]),
+      new Map(),
+    );
+    expect(result?.lines).toHaveLength(1);
+    expect(result?.lines[0]?.name).toBe("אל סבון בניחוח לבנדר");
+    expect(result?.lines[0]?.lineTotal).toBe(7.9);
+    expect(result?.lines[0]?.substituted).toBe(true);
+    expect(result?.lines[0]?.substitutionReason).toMatch(/^class_fallback:/);
+  });
+
+  it("leaves a line alone when a gated equivalent IS priced here", () => {
+    // The whole safety of the tier rests on this: it must never change a line
+    // that already found its product, however cheap the loose peer is.
+    const result = priceStoreBasket(
+      STORE,
+      [soapLine()],
+      new Map([
+        [
+          "chain",
+          new Map([
+            ["gated", [listing("gated", "l2", "סבון רחצה אחר")]],
+            ["lavender", [listing("lavender", "l1", "אל סבון בניחוח לבנדר")]],
+          ]),
+        ],
+      ]),
+      // The loose peer is less than a third of the price and must still lose.
+      new Map([price("l2", "25"), price("l1", "7.9")]),
+      new Map(),
+    );
+    expect(result?.lines[0]?.name).toBe("סבון רחצה אחר");
+    expect(result?.lines[0]?.substitutionReason ?? "").not.toMatch(/class_fallback/);
+  });
+
+  it("still reports the line missing when the loose tier has nothing priced either", () => {
+    const result = priceStoreBasket(
+      STORE,
+      [soapLine()],
+      new Map([["chain", new Map()]]),
+      new Map(),
+      new Map(),
+    );
+    expect(result).toBeNull();
+  });
+
+  it("does not invent a loose match for a line that never had one", () => {
+    const result = priceStoreBasket(
+      STORE,
+      [soapLine({ looseEquivalents: undefined })],
+      new Map([["chain", new Map([["lavender", [listing("lavender", "l1", "אל סבון")]]])]]),
+      new Map([price("l1", "7.9")]),
+      new Map(),
+    );
+    expect(result).toBeNull();
+  });
+});
