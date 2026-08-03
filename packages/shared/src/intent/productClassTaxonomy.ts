@@ -222,6 +222,26 @@ export const VARIANTS: readonly string[] = [
 export const VARIANT_DEFAULT = "regular";
 
 /**
+ * The variant to REASON with, given the label a product carries.
+ *
+ * `other` is the classifier's "none of the listed variants applies" answer, so it
+ * is the absence of a variant rather than one of them. Treating it as a value has
+ * the same shape as the waste_bags bug: a catch-all becomes a real category and
+ * starts excluding things. Two products are not interchangeable *because* neither
+ * could be labelled, and nothing else carries `other` either, so a line pinned to
+ * it finds no peers at all.
+ *
+ * Live: "דבש 10% תוספת 385 גרם יד מרדכי" is a bonus pack, not a variant a shopper
+ * would refuse. Labelled `other`, it matched none of the 20 honeys Shufersal
+ * ONLINE prices — every one of them `regular` — and the line was reported
+ * not_carried_by_chain at a chain that sells plenty of honey.
+ */
+export function effectiveVariant(variant: string | null | undefined): string {
+  if (!variant || variant === "other") return VARIANT_DEFAULT;
+  return variant;
+}
+
+/**
  * Cross-cutting PREPARATION — is this the plain staple, or something made from it?
  *
  * The axis that actually produces wrong basket answers, and the one L3 was supposed

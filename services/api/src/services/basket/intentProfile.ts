@@ -1,4 +1,4 @@
-import { normalizeMeasure, type CanonicalUnit } from "@super-mcp/shared";
+import { effectiveVariant, normalizeMeasure, type CanonicalUnit } from "@super-mcp/shared";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { classifyLineRisk, isBrandFamilyPin, type RiskCandidate } from "./lineRisk.js";
 import type { BasketCandidate, BasketItemInput, BasketPricingIntent } from "./types.js";
@@ -57,7 +57,9 @@ function resolveIntentMode(
   }
 
   // Non-regular variant primaries (diet_zero / organic / …) must not broaden.
-  if (primary.variant && primary.variant !== "regular") {
+  // `other` is not one of them: it means the classifier found no variant to apply,
+  // so pinning on it strands the line with no peers (see effectiveVariant).
+  if (effectiveVariant(primary.variant) !== "regular") {
     return "exact";
   }
 

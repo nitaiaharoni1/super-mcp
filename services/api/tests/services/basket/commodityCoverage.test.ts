@@ -544,6 +544,42 @@ describe("enrichCommodityCoverage identity pin", () => {
     expect(line.equivalents?.map((c) => c.productId).sort()).toEqual(["tomato-a", "tomato-b"]);
   });
 
+  it('treats variant "other" as unlabelled, not as a variant peers must share', async () => {
+    // `other` is the classifier's "none of the listed variants applies" answer, so
+    // it is the ABSENCE of a variant, not one. Matching peers on it exactly groups
+    // products by "we could not label either of them", which is not a shopping
+    // intent — and it empties the peer set, because almost nothing else carries it.
+    //
+    // Live: "דבש 10% תוספת 385 גרם יד מרדכי" (a bonus pack, labelled `other`) found
+    // none of the 20 honeys Shufersal ONLINE prices, all of them `regular`, and the
+    // line came back not_carried_by_chain.
+    const honey = primary({
+      productId: "honey-bonus",
+      name: "דבש 10% תוספת 385 גרם יד מרדכי",
+      sizeQty: 385,
+      sizeUnit: "g",
+      productClass: "spreads_condiments",
+      classL1: "spreads_condiments",
+      classL2: "honey_jam",
+      classL3: "honey",
+      variant: "other",
+    });
+    const line = resolvedLine({
+      productId: "honey-bonus",
+      name: honey.name,
+      candidates: [honey],
+    });
+
+    query.mockResolvedValue({ rows: [] });
+
+    await enrichCommodityCoverage([{ query: "דבש", packQty: 1 }], [line], ["store-1"]);
+
+    expect(query).toHaveBeenCalledOnce();
+    const params = query.mock.calls[0]![1] as unknown[];
+    expect(params).toContain("regular");
+    expect(params).not.toContain("other");
+  });
+
   it("representative confirmation (commodity override) keeps multi-chain pita peers", async () => {
     const pitaA = primary({
       productId: "pita-10",

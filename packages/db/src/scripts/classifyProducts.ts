@@ -195,7 +195,11 @@ Rules:
   משחת שיניים לילדים, שמפו לילדים), colour_variant (a colour that makes it a different
   line: קינואה אדומה, עדשים כתומות, אורז אדום/שחור — but NOT when the colour is part of
   the staple's ordinary name, e.g. פלפל שחור, קפה שחור, יין אדום, שוקולד לבן).
-  A plain product with none of these -> "regular".
+  A plain product with none of these -> "regular". A BONUS PACK is not a variant:
+  "10% תוספת", "+20% חינם", "מארז חיסכון" describe how much you get, not a
+  different product, so they stay "regular". Reserve "other" for a product that
+  genuinely is a variant but none of the listed ones; when in doubt use "regular",
+  because "other" is treated as unlabelled downstream.
   Judge the variant against the UNMARKED everyday product a shopper means when they
   name the category with no adjective. If the name carries a qualifier that a shopper
   asking plainly would not have got, it is not "regular".

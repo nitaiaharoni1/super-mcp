@@ -2,6 +2,7 @@ import { query } from "@super-mcp/db";
 import {
   mapPool,
   normalizeEmbedInput,
+  effectiveVariant,
   packSizesCompatible,
   queryTokensSatisfied,
   tokenizeNormalized,
@@ -92,7 +93,7 @@ async function fetchCarriedClassPeers(
   // variant is NOT a wildcard: a stale row (classified before the variant pass)
   // whose name implies שרי/דיאט/אורגני would otherwise group into a generic line.
   conds.push(`m.variant = $${params.length + 1}`);
-  params.push(primary.variant ?? "regular");
+  params.push(effectiveVariant(primary.variant));
   // Same axis, one level more fundamental: a peer must share the primary's
   // PREPARATION. This is what stops a plain "אורז" line pricing rice paper or rice
   // noodles, and a plain "יוגורט" line pricing a chocolate-cornflake dessert. Only
