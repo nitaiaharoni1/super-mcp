@@ -65,6 +65,8 @@ function resolvedLine(over: Partial<ResolvedItem>): ResolvedItem {
 
 // filterClassPeers now only holds query SPECIFICITY (morphology-tolerant) + unit;
 // class and variant are filtered in SQL (fetchCarriedClassPeers).
+const LETTERS = "אבגדהוזחטיכלמנסעפצקרשתםןףץ".repeat(3).split("");
+
 describe("filterClassPeers", () => {
   it("keeps per-chain twins across Hebrew plural/singular (מלפפונים↔מלפפון)", () => {
     const kept = filterClassPeers(
@@ -312,6 +314,74 @@ describe("filterClassPeers", () => {
 
   it("returns [] on an empty query", () => {
     expect(filterClassPeers("", primary({}), [row("a", "מלפפון")])).toEqual([]);
+  });
+
+  // The peer set exists so that EVERY in-scope storefront can price the line. A
+  // global top-20 cap diversified by chain does not deliver that: a storefront
+  // whose only compatible SKUs are expensive gets crowded out, and the line is
+  // then reported not_carried_by_chain even though that storefront prices dozens
+  // of the same commodity. This is exactly how Shufersal ONLINE — which prices 93
+  // hand soaps — reported no_price_data for "סבון ידיים".
+  it("keeps at least one peer for every storefront, even a starved one", () => {
+    const soap = primary({
+      name: 'סבון ידיים 950 מ"ל',
+      sizeQty: 950,
+      sizeUnit: "ml",
+      classL1: "personal_care",
+      classL2: "hygiene",
+      classL3: "hand_soap",
+    });
+    // 30 cheap SKUs at one storefront, one dear SKU that is the ONLY thing the
+    // second storefront prices.
+    const rows = Array.from({ length: 30 }, (_, i) => ({
+      product_id: `cheap-${String(i).padStart(2, "0")}`,
+      name: `סבון ידיים ${LETTERS[i]}`,
+      size_qty: 1000,
+      size_unit: "ml",
+      chain_id: "chain-a",
+      min_price: 10 + i,
+      store_ids: ["store-a"],
+    })).concat([
+      {
+        product_id: "only-at-b",
+        name: "סבון ידיים יקר",
+        size_qty: 1000,
+        size_unit: "ml",
+        chain_id: "chain-a",
+        min_price: 99,
+        store_ids: ["store-b"],
+      },
+    ]);
+    const kept = filterClassPeers("סבון ידיים", soap, rows, {
+      storeIds: ["store-a", "store-b"],
+    });
+    expect(kept.some((r) => r.product_id === "only-at-b")).toBe(true);
+  });
+
+  it("still honours the cap when every storefront is already covered", () => {
+    const soap = primary({
+      name: 'סבון ידיים 950 מ"ל',
+      sizeQty: 950,
+      sizeUnit: "ml",
+      classL1: "personal_care",
+      classL2: "hygiene",
+      classL3: "hand_soap",
+    });
+    const rows = Array.from({ length: 40 }, (_, i) => ({
+      product_id: `p-${String(i).padStart(2, "0")}`,
+      name: `סבון ידיים ${LETTERS[i]}`,
+      size_qty: 1000,
+      size_unit: "ml",
+      chain_id: "chain-a",
+      min_price: 10 + i,
+      store_ids: ["store-a", "store-b"],
+    }));
+    const kept = filterClassPeers("סבון ידיים", soap, rows, {
+      storeIds: ["store-a", "store-b"],
+    });
+    expect(kept).toHaveLength(20);
+    // Cheapest is what a coverage-first pick should keep first.
+    expect(kept.some((r) => r.product_id === "p-00")).toBe(true);
   });
 });
 

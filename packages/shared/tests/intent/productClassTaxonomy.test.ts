@@ -20,6 +20,28 @@ describe("isValidClassPath", () => {
   });
 });
 
+describe("sweet spreads and syrups have leaves", () => {
+  // honey_jam held honey, jam, nut butter and maple/date syrup in ONE bucket with
+  // no L3, so coverage fell back to L2 breadth and a "דבש" line could be filled
+  // with apricot jam or peanut butter. Maple syrup had no home at all and the
+  // classifier scattered it over beverage/syrup_concentrate, pantry_dry/oil_vinegar
+  // and pantry_dry/salt_sugar, so two identical maple syrups were not peers.
+  it("accepts the sweet-spread leaves", () => {
+    for (const l3 of ["honey", "jam_preserve", "nut_seed_butter", "date_syrup_silan", "maple_syrup"]) {
+      expect(isValidClassPath("spreads_condiments", "honey_jam", l3)).toBe(true);
+    }
+  });
+
+  it("keeps honey, jam and maple syrup mutually non-substitutable", () => {
+    const honey = { l1: "spreads_condiments", l2: "honey_jam", l3: "honey" };
+    const jam = { l1: "spreads_condiments", l2: "honey_jam", l3: "jam_preserve" };
+    const maple = { l1: "spreads_condiments", l2: "honey_jam", l3: "maple_syrup" };
+    expect(compareClassPaths(honey, jam)).toBe("different");
+    expect(compareClassPaths(honey, maple)).toBe("different");
+    expect(compareClassPaths(maple, maple)).toBe("same");
+  });
+});
+
 describe("compareClassPaths", () => {
   const p = (l1: string | null, l2: string | null = null, l3: string | null = null) => ({ l1, l2, l3 });
 

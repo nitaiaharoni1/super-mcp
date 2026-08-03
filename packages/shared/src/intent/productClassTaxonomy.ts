@@ -163,6 +163,21 @@ export const TAXONOMY_L3: Record<string, readonly string[]> = {
   // `grains_rice`, which held 12,653 products with nothing below it.
   grains_rice: ["rice", "bulgur", "quinoa", "couscous", "oats", "barley_freekeh"],
   legumes_dry: ["lentil", "chickpea", "bean_dry", "split_pea"],
+
+  // Sweet spreads. `honey_jam` was one undivided bucket of 587 names holding four
+  // families a shopper would never swap: bee honey, cooked fruit jam, nut/seed
+  // butter, and date/maple syrup. With no L3 the coverage scope fell back to L2
+  // breadth, so a bare "דבש" line offered apricot jam, silan and peanut butter as
+  // interchangeable equivalents.
+  //
+  // maple_syrup is the leaf that did not exist ANYWHERE. Having no home, the
+  // classifier scattered identical maple syrups across `beverage/syrup_concentrate`
+  // (which is drink concentrate — פטל, תרכיז לימונענע), `pantry_dry/oil_vinegar`
+  // (cooking oil) and `pantry_dry/salt_sugar`. Peers are matched on class, so two
+  // maple syrups on the same shelf were not peers of each other and a "מייפל" line
+  // pinned to whichever SKU search ranked first, then reported "not carried" at
+  // every storefront that happened to stock a differently-labelled one.
+  honey_jam: ["honey", "jam_preserve", "nut_seed_butter", "date_syrup_silan", "maple_syrup"],
 };
 
 export const TAXONOMY_L1: readonly string[] = Object.keys(TAXONOMY_L2);

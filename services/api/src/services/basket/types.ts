@@ -96,7 +96,14 @@ export interface BasketAssumption {
     /** Swapped onto a materially better-stocked same-class peer. */
     | "availability_upgrade"
     | "location_city_fallback"
-    | "unsafe_line_omitted";
+    | "unsafe_line_omitted"
+    /**
+     * Omitted because NOTHING in the catalog carries all of the query's words —
+     * usually two shopping-list items glued into one line ("דבש מייפל"). Distinct
+     * from `unsafe_line_omitted`, which means the product exists but nothing safe
+     * was priced nearby. Only this one is fixed by re-sending as separate lines.
+     */
+    | "query_matches_no_product";
   message: string;
 }
 

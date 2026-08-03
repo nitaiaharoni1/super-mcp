@@ -212,21 +212,50 @@ function assumptionMessage(query: string, selectedName: string): string {
   return `Assumed "${selectedName}" for "${query}".`;
 }
 
+/**
+ * True when not one shortlisted product carries every word of a multi-word query.
+ *
+ * The signature of two shopping-list items glued into one line: "דבש מייפל" is
+ * maple AND honey, and no SKU is maple honey, so search degrades to vector noise
+ * (honey cake, honey liqueur, pastrami in honey) and the line is dropped. That
+ * read identically to "this product exists but nothing safe is priced near you",
+ * so the caller could not learn to split the line.
+ *
+ * REPORTING ONLY. It must never decide whether to omit: plenty of good lines have
+ * no candidate repeating every word — a chain calls hand soap "אל סבון אוקיינוס",
+ * which carries neither of "סבון ידיים"'s two tokens as the query spells them.
+ * That is what the loose equivalence tier exists for.
+ *
+ * The weak-score condition is what separates "these words never co-occur" from
+ * "this exists and the policy rejected it". A brand line like "חלב תנובה" whose
+ * Tnuva candidates were filtered out still leaves a 0.95-scoring milk in the
+ * shortlist; a phrase no product is named scores nothing but vector noise (the
+ * honey-maple shortlist topped out at 0.02).
+ */
+function queryMatchesNoProduct(item: ResolvedItem, query: string): boolean {
+  const tokens = tokenizeNormalized(normalizeEmbedInput(query));
+  if (tokens.length < 2 || item.candidates.length === 0) return false;
+  if (item.candidates.some((c) => queryTokensSatisfied(tokens, c.name))) return false;
+  return item.candidates.every((c) => (c.score ?? 0) < AUTO_ACCEPT_SCORE);
+}
+
 function omitOutcome(
   item: ResolvedItem,
   input: BasketItemInput,
   message?: string,
 ): FastResolutionOutcome {
   const query = input.query?.trim() ?? null;
+  const noMatch = query != null && queryMatchesNoProduct(item, query);
   const assumption: BasketAssumption = {
     itemIndex: item.index,
     query,
     selectedProductId: null,
     selectedName: null,
-    reason: "unsafe_line_omitted",
-    message:
-      message ??
-      `No safe locally priced match for "${query ?? item.name ?? `item ${item.index + 1}`}"; omitted from basket.`,
+    reason: noMatch ? "query_matches_no_product" : "unsafe_line_omitted",
+    message: noMatch
+      ? `No product carries all of "${query}". If that is two items, send them as separate lines.`
+      : (message ??
+        `No safe locally priced match for "${query ?? item.name ?? `item ${item.index + 1}`}"; omitted from basket.`),
   };
   return {
     kind: "omitted",
@@ -348,7 +377,28 @@ function filterPool(
   const anchored = withoutUnsafeStaples.filter(
     (c) => !query || queryHeadAnchored(query, c.name),
   );
-  const headAnchored = anchored.length > 0 ? anchored : withoutUnsafeStaples;
+  // Head anchoring reads only a name's first TWO tokens, which is enough to keep
+  // hosts out ("עוגת לימונים" for לימונים) but also discards perfectly ordinary
+  // SKUs whose brand buries the commodity word past that window: for "מייפל",
+  // "מיימונס סירופ מייפל אמיתי 100% מקנדה" is real Canadian maple priced at five
+  // storefronts and does not anchor. The line was left with organic imports, one
+  // of them carried by a single storefront.
+  //
+  // The anchor is a NAME-based proxy for "same kind of thing". Where the taxonomy
+  // answers that outright — the same L3 leaf as something that DID anchor — the
+  // proxy is redundant, so trust the label. A host never shares the leaf (cake is
+  // bakery/cake, a corkscrew is kitchenware), so the guard keeps its teeth.
+  const anchoredLeaves = new Set(
+    anchored.map((c) => c.classL3).filter((l3): l3 is string => l3 != null && l3 !== ""),
+  );
+  const sameLeafAsAnchored =
+    anchoredLeaves.size > 0
+      ? withoutUnsafeStaples.filter(
+          (c) => c.classL3 != null && anchoredLeaves.has(c.classL3) && !anchored.includes(c),
+        )
+      : [];
+  const withLeafPeers = [...anchored, ...sameLeafAsAnchored];
+  const headAnchored = withLeafPeers.length > 0 ? withLeafPeers : withoutUnsafeStaples;
 
   // Derived products (rice paper for rice, bread crumbs for bread) are already
   // hard-rejected by isStapleIncompatible. This is the graceful layer for the
@@ -429,14 +479,28 @@ function betterCoveredPeer(
 
 
   const primaryCoverage = primary ? nearbyCoverage(primary, availability) : 0;
-  const threshold = Math.max(
-    AVAILABILITY_UPGRADE_MIN_STORES,
-    primaryCoverage * AVAILABILITY_UPGRADE_MIN_RATIO,
-  );
+  // An UNCLASSIFIED primary's store count is a ceiling, not a floor.
+  // `enrichCommodityCoverage` needs a class to find the SKUs each storefront
+  // actually stocks, so a primary with no class row reaches pricing with zero
+  // equivalents and can only be filled where it is itself listed. A classified
+  // peer's count is a floor: every storefront can fill the line with its own
+  // same-class SKU. The 3x ratio cannot see that asymmetry, so a bare "מייפל"
+  // stayed pinned to an unclassified organic maple in one storefront and was
+  // reported not_carried_by_chain at the four that price maple syrup.
+  //
+  // Classification is never complete — products arrive between offline classify
+  // runs — so this has to be handled in the resolver, not only in the data.
+  const primaryIsUnclassified = primary != null && !primary.classL1;
+  const threshold = primaryIsUnclassified
+    ? Math.max(primaryCoverage, 1)
+    : Math.max(AVAILABILITY_UPGRADE_MIN_STORES, primaryCoverage * AVAILABILITY_UPGRADE_MIN_RATIO);
 
   let best: { candidate: BasketCandidate; coverage: number } | null = null;
   for (const candidate of specific) {
     if (primary && candidate.productId === primary.productId) continue;
+    // Swapping one orphan for another buys nothing: the replacement is just as
+    // unable to gain equivalents. Only a classified peer lifts the ceiling.
+    if (primaryIsUnclassified && !candidate.classL1) continue;
     const coverage = nearbyCoverage(candidate, availability);
     if (coverage < threshold) continue;
     // Among qualifying peers take the widest coverage, then the better name

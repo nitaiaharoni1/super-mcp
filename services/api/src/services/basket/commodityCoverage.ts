@@ -11,7 +11,7 @@ import { rejectUnsafePlainMilkName } from "./milkSafety.js";
 import { rejectUnsafePlainYogurtName } from "./yogurtSafety.js";
 import { allowsCountToWeight } from "./countWeightPolicy.js";
 import { resolveCoverageClassScope, type CoverageClassScope } from "./coverageScope.js";
-import { diversifyByChain } from "./diversifyByChain.js";
+import { diversifyByChain, selectCoveringPeers } from "./diversifyByChain.js";
 import {
   DEFAULT_PACK_TOLERANCE,
   hasUnrequestedAddedIngredient,
@@ -56,6 +56,8 @@ interface CarriedProductRow {
   preparation?: string | null;
   /** single | multipack (migration 025); NULL = unclassified. */
   pack_form?: string | null;
+  /** In-scope stores that price this product — drives per-storefront peer coverage. */
+  store_ids?: readonly string[] | null;
 }
 
 export interface BrandFamilyPeerSets {
@@ -111,7 +113,15 @@ async function fetchCarriedClassPeers(
     params.push(sameKind);
   }
   // Cap per chain first so large classes (produce/bakery) don't fill a global
-  // LIMIT with one chain's SKUs before diversifyByChain can help.
+  // LIMIT with one chain's SKUs before the peer cap can help, and take the
+  // truncation in rank order so every chain keeps its cheapest.
+  //
+  // WHICH in-scope storefronts price each peer is attached only to the survivors.
+  // The cap downstream is a set cover over those storefronts, so the column has to
+  // exist — but computing it inside `priced` (GROUP BY + array_agg over the whole
+  // class join) cost 371ms where DISTINCT ON costs 6ms, and on a large class it
+  // blew past the statement timeout. As a correlated lookup over ≤600 already
+  // chosen products it is two index probes each: 59ms vs 36ms on produce.
   const res = await query<CarriedProductRow>(
     `WITH priced AS (
        SELECT DISTINCT ON (l.product_id) l.product_id, p.name, p.size_qty, p.size_unit,
@@ -129,12 +139,18 @@ async function fetchCarriedClassPeers(
               brand_extracted, preparation, pack_form,
               row_number() OVER (PARTITION BY chain_id ORDER BY price ASC, product_id) AS rn
          FROM priced
+     ),
+     top AS (
+       SELECT * FROM ranked WHERE rn <= 40 ORDER BY rn, min_price ASC LIMIT 600
      )
-     SELECT product_id, name, size_qty, size_unit, piece_count, chain_id, min_price,
-            brand_extracted, preparation, pack_form
-       FROM ranked
-      WHERE rn <= 40
-      LIMIT 400`,
+     SELECT t.product_id, t.name, t.size_qty, t.size_unit, t.piece_count, t.chain_id,
+            t.min_price, t.brand_extracted, t.preparation, t.pack_form,
+            (SELECT array_agg(DISTINCT sp2.store_id)
+               FROM listing l2
+               JOIN store_price sp2 ON sp2.listing_id = l2.id AND sp2.price > 0
+              WHERE l2.product_id = t.product_id
+                AND sp2.store_id = ANY($1::uuid[])) AS store_ids
+       FROM top t`,
     params,
   );
   return res.rows;
@@ -260,6 +276,8 @@ export interface FilterClassPeersOptions {
   requireQueryTokens?: boolean;
   /** Override produce/bakery count↔weight policy from intent profile. */
   allowCountToWeight?: boolean;
+  /** In-scope storefronts. Each one keeps a peer it can price (see selectCoveringPeers). */
+  storeIds?: readonly string[];
 }
 
 /**
@@ -340,10 +358,11 @@ export function filterClassPeers(
     seen.add(row.product_id);
     compatible.push(row);
   }
-  // Cap peers but prefer chain diversity so one chain's SKU flood doesn't starve
-  // others of equivalents (false not_carried_by_chain). Always retain the
-  // globally cheapest compatible peer so a soft cap cannot hide the store minimum.
-  return diversifyByChain(compatible, MAX_COVERAGE_EQUIVALENTS);
+  // Cap peers, but never below what pricing needs: one peer per in-scope
+  // storefront. Chain diversity alone left storefronts with nothing to price
+  // (false not_carried_by_chain); the globally cheapest compatible peer is still
+  // always retained so a soft cap cannot hide the store minimum.
+  return selectCoveringPeers(compatible, opts.storeIds ?? [], MAX_COVERAGE_EQUIVALENTS);
 }
 
 /** Query text for peer filtering: prefer the line's free-text query, else primary name. */
@@ -478,6 +497,7 @@ export async function enrichCommodityCoverage(
     const peers = filterClassPeers(queryText, primary, rows, {
       requireQueryTokens: true,
       allowCountToWeight: intent.allowCountToWeight,
+      storeIds,
     });
 
     // Last-resort tier: same class, same variant, every safety gate still
@@ -493,6 +513,7 @@ export async function enrichCommodityCoverage(
     const loose = filterClassPeers(queryText, primary, rows, {
       requireQueryTokens: false,
       allowCountToWeight: intent.allowCountToWeight,
+      storeIds,
     });
     const strictIds = new Set(peers.map((row) => row.product_id));
     const looseOnly = loose.filter((row) => !strictIds.has(row.product_id));

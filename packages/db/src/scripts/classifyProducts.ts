@@ -31,6 +31,7 @@ import { closePool, getPool } from "../client/index.js";
  *   --project=<id>           GCP project id (or GOOGLE_CLOUD_PROJECT) — required
  *   --batch-size=N           names per request (default 50)
  *   --concurrency=N          parallel requests (default 12)
+ *   --name-like=<regex>      only names matching this POSIX regex (finds misfiled ones)
  *   --limit=N                cap distinct names (bake-off / smoke)
  *   --only-missing           skip names already classified for the current name (default on)
  *   --all-rows               reclassify even if a row exists
@@ -48,6 +49,15 @@ interface Args {
   concurrency: number;
   /** Restrict to products already classified into these class_l2 buckets. */
   l2: string[];
+  /**
+   * Restrict to product names matching this POSIX regex.
+   *
+   * The instrument `--l2` cannot be: a misclassified product is, by definition,
+   * not in the bucket you would look for it in. Maple syrup sat in oil_vinegar,
+   * salt_sugar, spices_seasoning, syrup_concentrate and l2 NULL at once, so no
+   * bucket list could name the set. Its NAME is the one thing all of them share.
+   */
+  nameLike: string | null;
   /** Only names whose existing rows lack `preparation` (resumable top-up). */
   missingPreparation: boolean;
   limit: number | null;
@@ -67,6 +77,7 @@ function parseArgs(argv: string[]): Args {
     batchSize: 50,
     concurrency: 12,
     l2: [],
+    nameLike: null,
     missingPreparation: false,
     limit: null,
     onlyMissing: true,
@@ -85,6 +96,7 @@ function parseArgs(argv: string[]): Args {
     else if (arg.startsWith("--project=")) a.project = arg.slice(10);
     else if (arg.startsWith("--l2="))
       a.l2 = arg.slice(5).split(",").map((v) => v.trim()).filter(Boolean);
+    else if (arg.startsWith("--name-like=")) a.nameLike = arg.slice(12);
     else if (arg === "--missing-preparation") a.missingPreparation = true;
     else if (arg.startsWith("--batch-size=")) a.batchSize = Number(arg.slice(13));
     else if (arg.startsWith("--concurrency=")) a.concurrency = Number(arg.slice(14));
@@ -145,6 +157,22 @@ Rules:
   * מלח גס/שולחן -> pantry_dry/salt_sugar/salt.
   * קפה נמס / טייסטרס / נסקפה instant -> coffee/instant_coffee. קפה טורקי / ground Turkish coffee (no נמס) -> coffee/ground_coffee — NOT instant_coffee.
   * עוגת לימונים / lemon cake -> bakery/cake ; never fruit_fresh/lemon. לקריץ/סוכריות קולה -> snacks_sweets/candy ; never soda/cola.
+- SYRUPS split by what they are POURED ON versus what they are DILUTED INTO. The word
+  סירופ alone decides nothing:
+  * A table/topping syrup eaten on food -> spreads_condiments/honey_jam with its leaf:
+    סירופ מייפל / מייפל / maple (any purity or origin) -> maple_syrup. "סירופ בטעם
+    מייפל" / "סירופ טעם מייפל" (imitation pancake syrup) is STILL maple_syrup —
+    nobody dilutes it into a drink — with preparation "flavoured" to mark that it
+    is not the pure sap. The word בטעם does not make it a drink concentrate ;
+    סילאן / דבש תמרים / סירופ תמרים -> date_syrup_silan ;
+    סירופ אגבה / agave / סירופ תירס / סירופ גלוקוז -> honey_jam, l3 "none".
+    NEVER put these in beverage/syrup_concentrate, pantry_dry/oil_vinegar or salt_sugar.
+  * A drink concentrate mixed with water -> beverage/syrup_concentrate:
+    תרכיז / סירופ פטל / רימונים / לימונענע / תות לשתייה, and bar syrups (גומדין).
+  * The rest of spreads_condiments/honey_jam takes a leaf too: bee דבש -> honey ;
+    ריבה / קונפיטורה / מרמלדה -> jam_preserve ; חמאת בוטנים / חמאת שקדים / חמאת קשיו /
+    חמאת קוקוס / ממרח חלווה -> nut_seed_butter. A sweet spread that is none of these
+    (ריבת חלב, ממרח בייגלה) -> l3 "none".
 - Non-food families are as literal as the food ones. Do NOT let waste_bags become
   the default for anything bag-shaped or disposable:
   * שקית/שקיות אשפה/זבל, שקיות לפח, bin liners -> disposables/waste_bags ONLY.
@@ -259,7 +287,14 @@ async function callVertex(args: Args, names: string[]): Promise<ClassResult[]> {
   const url = `https://${args.region}-aiplatform.googleapis.com/v1/projects/${args.project}/locations/${args.region}/publishers/google/models/${args.model}:generateContent`;
   const body = JSON.stringify(buildRequestBody(names));
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // Vertex answers 429 for sustained fan-out, and four attempts topping out at a
+  // 4s backoff is not enough to ride that out: a whole-bucket reclassification
+  // (thousands of names) died partway and left the taxonomy half-migrated. Ten
+  // attempts with jitter and a 30s ceiling is ~2 minutes of patience per batch,
+  // which costs nothing on an offline job and removes the failure mode.
+  const MAX_ATTEMPTS = 10;
+  const MAX_BACKOFF_MS = 30_000;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -283,7 +318,11 @@ async function callVertex(args: Args, names: string[]): Promise<ClassResult[]> {
       return parsed;
     } catch (err) {
       lastErr = err;
-      await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+      // Jitter matters as much as the ceiling: without it every worker in the
+      // pool retries on the same schedule and re-creates the burst that got them
+      // throttled.
+      const backoff = Math.min(MAX_BACKOFF_MS, 500 * 2 ** attempt);
+      await new Promise((r) => setTimeout(r, backoff * (0.5 + Math.random())));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
@@ -322,6 +361,11 @@ async function selectDistinctNames(args: Args): Promise<NameRow[]> {
     )`;
   }
   // Resumable top-up: a row can already carry l1/l2/l3 and still lack the new axes.
+  let nameFilter = "";
+  if (args.nameLike) {
+    params.push(args.nameLike);
+    nameFilter = `AND p.name ~ $${params.length}`;
+  }
   const preparationFilter = args.missingPreparation
     ? `AND EXISTS (
          SELECT 1 FROM product_class_map m3
@@ -332,7 +376,7 @@ async function selectDistinctNames(args: Args): Promise<NameRow[]> {
     `SELECT p.name, array_agg(DISTINCT p.id) AS ids
      FROM product p
      ${scopeJoin}
-     WHERE p.name IS NOT NULL AND p.name <> '' ${missingFilter} ${l2Filter} ${preparationFilter}
+     WHERE p.name IS NOT NULL AND p.name <> '' ${missingFilter} ${l2Filter} ${nameFilter} ${preparationFilter}
      GROUP BY p.name
      ORDER BY p.name`,
     params,

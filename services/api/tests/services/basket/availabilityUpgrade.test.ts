@@ -98,6 +98,78 @@ describe("availability upgrade on already-resolved lines", () => {
     expect(result.assumptions[0]?.selectedProductId).toBe("common");
   });
 
+  it("moves off an UNCLASSIFIED primary onto a classified peer of equal standing", () => {
+    // An unclassified SKU can never gain equivalents: enrichCommodityCoverage
+    // needs a class to find the peers each storefront actually stocks, so its
+    // store count is a CEILING. A classified peer's count is a floor — every
+    // storefront can fill the line with its own same-class SKU. That asymmetry is
+    // invisible to the 3x coverage rule, so a bare "מייפל" line pinned to an
+    // unclassified organic maple carried by one storefront and was reported
+    // not_carried_by_chain everywhere else, while classified maple syrups sat
+    // priced at four of them.
+    const orphan = cand({
+      productId: "orphan",
+      name: 'מייפל אורגני טהור 100% 236 מ"ל',
+      score: 0.95,
+      classL1: null,
+      classL2: null,
+      classL3: null,
+      variant: null,
+    });
+    const classified = cand({
+      productId: "classified",
+      name: 'סירופ מייפל טבעי 250 מ"ל',
+      score: 0.94,
+      classL1: "spreads_condiments",
+      classL2: "honey_jam",
+      classL3: "maple_syrup",
+    });
+
+    const result = applyFastResolutionPolicy(
+      [{ query: "מייפל", packQty: 1 }],
+      [resolvedLine("orphan", orphan.name, [orphan, classified])],
+      availability([
+        ["orphan", 2],
+        ["classified", 3],
+      ]),
+      ontology,
+    );
+
+    expect(result.items[0]?.productId).toBe("classified");
+  });
+
+  it("keeps an unclassified primary when it is the better-covered option anyway", () => {
+    const orphan = cand({
+      productId: "orphan",
+      name: 'מייפל אורגני טהור 100% 236 מ"ל',
+      score: 0.95,
+      classL1: null,
+      classL2: null,
+      classL3: null,
+      variant: null,
+    });
+    const classified = cand({
+      productId: "classified",
+      name: 'סירופ מייפל טבעי 250 מ"ל',
+      score: 0.94,
+      classL1: "spreads_condiments",
+      classL2: "honey_jam",
+      classL3: "maple_syrup",
+    });
+
+    const result = applyFastResolutionPolicy(
+      [{ query: "מייפל", packQty: 1 }],
+      [resolvedLine("orphan", orphan.name, [orphan, classified])],
+      availability([
+        ["orphan", 40],
+        ["classified", 2],
+      ]),
+      ontology,
+    );
+
+    expect(result.items[0]?.productId).toBe("orphan");
+  });
+
   it("leaves the primary alone when coverage is only marginally better", () => {
     // 700 vs 780 stores is jitter between two widely-stocked SKUs; the better name
     // match must still win.

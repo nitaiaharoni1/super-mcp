@@ -101,6 +101,178 @@ describe("applyFastResolutionPolicy hard attributes", () => {
     expect(result.assumptions[0]?.reason).toBe("unsafe_line_omitted");
   });
 
+  it("says so when no product carries all the query's words", () => {
+    // "דבש מייפל" is two shopping-list items glued into one line. No SKU is maple
+    // honey, so search fell back to vector noise (honey cake, honey liqueur,
+    // pastrami in honey) and the line was dropped with the same wording used for a
+    // product that exists but is not stocked nearby. The caller cannot tell those
+    // apart, so it cannot learn to split the line.
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: null,
+      name: "דבש מייפל",
+      resolvedBy: "unresolved",
+      resolutionStatus: "needs_confirmation",
+      confidence: null,
+      lowConfidence: true,
+      candidates: [
+        cand({
+          productId: "liqueur",
+          name: "ליקר טנסי דבש",
+          score: 0.02,
+          classL1: "alcohol",
+          classL2: "liqueur",
+        }),
+        cand({
+          productId: "pastrami",
+          name: "פסטרמה בדבש",
+          score: 0.01,
+          classL1: "meat_fish",
+          classL2: "meat_processed",
+        }),
+      ],
+      primaryProductId: null,
+      primaryName: null,
+      substitution: null,
+    };
+    const result = applyFastResolutionPolicy(
+      [{ query: "דבש מייפל" }],
+      [item],
+      new Map<string, CandidateAvailability>(),
+      ontology,
+    );
+    expect(result.items[0]?.productId).toBeNull();
+    expect(result.assumptions[0]?.reason).toBe("query_matches_no_product");
+    expect(result.assumptions[0]?.message).toContain("separate lines");
+  });
+
+  it("keeps the ordinary omission reason when the product exists but is not stocked", () => {
+    const item = unresolvedMilk();
+    item.candidates = [
+      cand({ productId: "other", name: "חלב טרה 3%", brandExtracted: "טרה", score: 0.95 }),
+    ];
+    const result = applyFastResolutionPolicy(
+      [{ query: "חלב תנובה" }],
+      [item],
+      new Map<string, CandidateAvailability>([
+        ["other", { pricedStoreCount: 5, chainCount: 2, minPrice: 8 }],
+      ]),
+      ontology,
+    );
+    expect(result.assumptions[0]?.reason).toBe("unsafe_line_omitted");
+  });
+
+  it("lets the taxonomy re-admit a same-leaf peer the head-anchor window cut off", () => {
+    // queryHeadAnchored only inspects a name's first TWO tokens, so a brand-led
+    // name buries the commodity word out of reach: "מיימונס סירופ מייפל אמיתי
+    // 100% מקנדה" is real Canadian maple at five storefronts and does not anchor
+    // for "מייפל". The line was left with organic imports carried by one.
+    //
+    // Head anchoring is a NAME-based proxy for "same kind of thing". Where the
+    // taxonomy answers that question outright — same L3 leaf — the proxy is
+    // redundant and only does harm. A host product (bakery/cake for "לימונים")
+    // never shares the leaf, so the guard keeps its teeth.
+    const organic = cand({
+      productId: "organic",
+      name: 'מייפל אורגני טהור 100% 236 מ"ל',
+      score: 0.95,
+      variant: "organic",
+      classL1: "spreads_condiments",
+      classL2: "honey_jam",
+      classL3: "maple_syrup",
+    });
+    const stocked = cand({
+      productId: "stocked",
+      name: 'מיימונס סירופ מייפל אמיתי 100% מקנדה 236 מ"ל',
+      score: 0.88,
+      variant: "regular",
+      classL1: "spreads_condiments",
+      classL2: "honey_jam",
+      classL3: "maple_syrup",
+    });
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: null,
+      name: "מייפל",
+      resolvedBy: "unresolved",
+      resolutionStatus: "needs_confirmation",
+      confidence: null,
+      lowConfidence: true,
+      candidates: [organic, stocked],
+      primaryProductId: null,
+      primaryName: null,
+      substitution: null,
+    };
+
+    const result = applyFastResolutionPolicy(
+      [{ query: "מייפל", packQty: 1 }],
+      [item],
+      new Map<string, CandidateAvailability>([
+        ["organic", { pricedStoreCount: 1, chainCount: 1, minPrice: 35 }],
+        ["stocked", { pricedStoreCount: 5, chainCount: 4, minPrice: 10 }],
+      ]),
+      ontology,
+    );
+
+    expect(result.items[0]?.productId).toBe("stocked");
+  });
+
+  it("still refuses a host product that merely contains the query word", () => {
+    const lemon = cand({
+      productId: "lemon",
+      name: "לימון",
+      score: 0.95,
+      classL1: "produce",
+      classL2: "fruit_fresh",
+      classL3: "lemon",
+    });
+    const cake = cand({
+      productId: "cake",
+      name: "עוגת לימונים במילוי קרם",
+      score: 0.9,
+      classL1: "bakery",
+      classL2: "cake",
+      classL3: null,
+    });
+    const item: ResolvedItem = {
+      index: 0,
+      qty: 1,
+      qtyMode: "packs",
+      amount: null,
+      unit: null,
+      productId: null,
+      name: "לימונים",
+      resolvedBy: "unresolved",
+      resolutionStatus: "needs_confirmation",
+      confidence: null,
+      lowConfidence: true,
+      candidates: [lemon, cake],
+      primaryProductId: null,
+      primaryName: null,
+      substitution: null,
+    };
+
+    const result = applyFastResolutionPolicy(
+      [{ query: "לימונים", packQty: 1 }],
+      [item],
+      new Map<string, CandidateAvailability>([
+        ["lemon", { pricedStoreCount: 2, chainCount: 1, minPrice: 5 }],
+        ["cake", { pricedStoreCount: 90, chainCount: 9, minPrice: 20 }],
+      ]),
+      ontology,
+    );
+
+    expect(result.items[0]?.productId).toBe("lemon");
+  });
+
   it("keeps the dominant class instead of omitting on mixed-class search noise", () => {
     const item: ResolvedItem = {
       index: 0,
