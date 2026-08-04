@@ -46,8 +46,8 @@ pnpm db:seed          # demo catalog + writes API key to .local/api-key.txt
 pnpm dev
 # http://localhost:8787/health
 # http://localhost:8787/openapi.json
-# MCP — physical stores:   http://localhost:8787/mcp
-# MCP — online delivery:   http://localhost:8787/mcp/online
+# MCP — online supermarket (only): http://localhost:8787/mcp
+# MCP — compat alias:              http://localhost:8787/mcp/online
 ```
 
 Auth: `Authorization: Bearer $(cat .local/api-key.txt)`
@@ -59,33 +59,26 @@ KEY=$(cat .local/api-key.txt)
 curl -s http://localhost:8787/health
 curl -s -H "Authorization: Bearer $KEY" 'http://localhost:8787/v1/products?q=חלב'
 curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"items":[{"query":"חלב","pack_qty":2},{"gtin":"7290112490463","pack_qty":1}],"city":"תל אביב"}' \
-  http://localhost:8787/v1/basket/optimize
-curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"items":[{"query":"חלב","pack_qty":4},{"query":"קוטג","pack_qty":4}],"address":"מנדלסון 1, תל אביב"}' \
   http://localhost:8787/v1/delivery/optimize
 ```
 
-## Two MCP surfaces: driving there, and having it delivered
+## MCP: online supermarket delivery
 
-A shopper asks two different questions, and one tool answering both has to guess which one they meant.
+`/mcp` is **super-mcp** for groceries delivered to an address (`optimize_delivery`). `/mcp/online` is
+the same server under a compatibility alias.
 
-| | `/mcp` — **super-mcp** | `/mcp/online` — **super-mcp-online** |
-| --- | --- | --- |
-| lead tool | `optimize_basket` | `optimize_delivery` |
-| minimises | basket **+ travel** | basket **+ delivery fee + service fee** |
-| cost of distance | ₪/km, a smooth estimate | a published fee, a **step function** of the subtotal |
-| feasibility | a branch inside the radius | the storefront delivers to the address **and** the basket clears its minimum |
-| "buy the rest elsewhere" | another trip, worth roughly ₪20 | another delivery fee, worth exactly what it says |
-| location input | `city` / `near` / `location` + `radius_km` | `address` / `city` / `near` — **no radius** |
+| | SuperMCP (`/mcp`) |
+| --- | --- |
+| lead tool | `optimize_delivery` |
+| minimises | basket **+ delivery fee + service fee** |
+| cost of distance | a published fee, a **step function** of the subtotal |
+| feasibility | the storefront delivers to the address **and** the basket clears its minimum |
+| location input | `address` / `city` / `near` — **no radius** |
 
-They share everything below the objective function: catalogue identity, Hebrew search, line resolution,
-unit normalisation, promotion maths, freshness. That is why this is one codebase and one database rather
-than a fork — and it is what lets `optimize_delivery` answer `compare_in_store`, which prices the same
-basket at nearby branches and reports the delivery premium.
-
-Both surfaces are served by one process by default. `SUPER_MCP_SURFACES=stores` or `=online` splits them
-across separate deployments from the same image.
+Catalogue identity, Hebrew search, line resolution, unit normalisation, promotion maths, and freshness
+are shared with the (unmounted) physical basket engine. Optional `compare_in_store` can still price the
+same basket at nearby branches and report the delivery premium.
 
 ### Where online prices and delivery terms come from
 
@@ -197,9 +190,9 @@ Ingest drains `semantic_index_dirty` before reporting success; failures mark the
 
 Free-text basket lines resolve with **deterministic evidence first** (exact name/phrase, form/class gates); embeddings run only when lexical recall is weak. The API warms the query embedder on boot (fire-and-forget) to cut cold latency on the first basket call.
 
-**Agent / MCP flow (required):** call `optimize_basket` once with the full shopping list and `location` (or `city` / `near`). Default `resolution_mode=fast` returns a compact best-effort `complete` result in one call — assumptions are intentional. For exact product control, set `resolution_mode=strict`; then if `status` is `needs_confirmation`, answer every required `question` and call again with only `{continuation, answers}` — do not reconstruct items. When `status` is `complete`, use `bestSingleStore` / `cheapestCompleteStore` / `closestStore` / `multiStore`.
+**Agent / MCP flow (default surface, online):** call `optimize_delivery` once with the full shopping list and `address` (or `city` / `near`). Rank on `deliveredComparableTotal`; the headline figure is `deliveredTotal` (items + delivery fee). Same `resolution_mode=fast|strict` and continuation rules as the physical basket engine.
 
-#### Comparing stores: use `comparableTotal`, not `total`
+#### Comparing storefronts / stores: use comparable totals, not raw `total`
 
 `total` is the money spent **at that store**, and it only covers the lines that store prices. Ranking on it is wrong: the store missing the most expensive item looks cheapest. A live Herzliya basket recommended a store at ₪92.86 over a ₪171.42 rival purely because it did not stock a ₪71.60 tuna line.
 
@@ -231,7 +224,7 @@ Distances are labelled, never faked. Each store carries `distanceAccuracy`: `bra
 #### Default one-call example
 
 ```json
-// Request (MCP optimize_basket or POST /v1/basket/optimize)
+// Internal physical-basket engine example (not mounted as MCP or REST)
 {
   "location": "רחוב בן גוריון, תל אביב",
   "items": [
@@ -436,11 +429,12 @@ See [docs/folder-conventions.md](./docs/folder-conventions.md) for target folder
 - `GET /v1/products/:id/history`
 - `GET /v1/chains` · `GET /v1/stores` — returns `{ stores, location }` (not a bare array); `?near=` defaults to **10km** radius. Each store carries `storeKind` (`branch` / `online` / `pickup` / `warehouse`); only `branch` rows are used for basket recommendations
 - `GET /v1/promotions`
-- `POST /v1/basket/optimize` — one-call fast default: initial `{items, city|near|location}` returns compact `complete`; opt in with `resolution_mode=strict` for resumable `{continuation, answers}`; plans are `bestSingleStore` / `cheapestCompleteStore` / `closestStore` / `multiStore`. Rank on `comparableTotal`; set `preference` to `cheapest` / `balanced` / `closest`
+- `POST /v1/delivery/optimize` — shopping-list path: `{items, address|city|near}` ranks storefronts on delivered cost
+- `POST /v1/basket/optimize` — physical basket (not mounted)
 - `GET /v1/usage`
 
 ## MCP tools
 
-`optimize_basket` · `search_products` · `resolve_products` · `get_product` · `compare_prices` · `suggest_substitutes` · `list_stores` · `get_promotions`
+**`/mcp` (and `/mcp/online` alias):** `optimize_delivery` · `list_delivery_options` · `get_delivery_terms` · `search_products` · `get_product` · `get_promotions`
 
-Shopping lists: call `optimize_basket` once with `{query, pack_qty}` or `{query, amount, unit}` plus `location` (preferred) / `city` / `near`. Fast mode completes in one call; for exact products set `resolution_mode=strict` and, if confirmation is required, resume with `{continuation, answers}` only. Do not search each line first.
+Shopping lists: call `optimize_delivery` once with `{query, pack_qty}` or `{query, amount, unit}` plus `address` (preferred) / `city` / `near`. Do not search each line first.

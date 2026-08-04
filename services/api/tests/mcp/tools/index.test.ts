@@ -10,7 +10,7 @@ import { registerTools } from "../../../src/mcp/tools/index.js";
 import { registerProductTools } from "../../../src/mcp/tools/products/index.js";
 import { registerBasketTools } from "../../../src/mcp/tools/basket/index.js";
 import { registerStoreTools } from "../../../src/mcp/tools/stores/index.js";
-import { MCP_SERVER_INSTRUCTIONS } from "../../../src/mcp/server.js";
+import { buildStoresInstructions } from "../../../src/mcp/surfaces.js";
 import {
   BASKET_PROTOCOL_ID,
   parseProtocolIdentityLine,
@@ -20,6 +20,7 @@ import type { z } from "zod";
 const PRODUCT_LIST_STEER =
   "Do not use this for a shopping list or after optimize_basket has started. " +
   "Use optimize_basket directly; strict confirmation options are sufficient to resume.";
+const MCP_SERVER_INSTRUCTIONS = buildStoresInstructions({});
 
 describe("MCP domain tool registrars", () => {
   afterEach(() => {

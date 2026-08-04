@@ -5,6 +5,9 @@
  * is tired of guessing which supermarket is cheaper. NOT a developer. That
  * decision drives the whole file.
  *
+ * Product surface: online delivery (`optimize_delivery` / `/mcp`).
+ * Physical drive-to-store is not mounted.
+ *
  * Four rules for editing:
  *   1. Plain Hebrew. If a word only makes sense to someone who builds software
  *      ("שרת", "SDK", "endpoint", "לקוח" in the API sense), it does not belong
@@ -13,12 +16,13 @@
  *   3. Say what the reader gets, not how we built it.
  *   4. No em dashes or en dashes. This copy is public. The Hebrew maqaf is fine.
  *
- * Every number below was measured on the production catalog on 26.7.2026 (last
- * feed ingest 21.7.2026). The basket and the ledger come from one real
- * `optimize_basket` call near Dizengoff Center that compared 68 stores.
+ * Ledger figures were measured on the production catalog on 26.7.2026 (last feed
+ * ingest 21.7.2026) from one real shelf-price comparison near Dizengoff Center.
+ * The hero chat is a labeled delivery mock so the product surface matches what
+ * clients actually connect to; it is not that measured run.
  */
 
-/** The measured basket that the hero and the ledger both draw from. */
+/** Measured shelf-price comparison used by the ledger and coverage footnotes. */
 const measurement = {
   measuredOn: "26.7.2026",
   ingestedOn: "21.7.2026",
@@ -29,9 +33,9 @@ const measurement = {
 
 export const he = {
   meta: {
-    title: "SuperMCP | אותם מוצרים, מחיר אחר בכל חנות",
+    title: "SuperMCP | קניות סופר עם משלוח, בתוך העוזר שלכם",
     description:
-      "כותבים רשימת קניות בעברית לקלוד או ל־ChatGPT, ומקבלים תשובה ברורה: באיזו חנות לידכם הקנייה הזאת הכי זולה, כמה כל פריט עולה, ומה שאין בחנות מסומן. המחירים מגיעים מהמחירונים הרשמיים של 10 רשתות בישראל.",
+      "כותבים רשימת קניות בעברית לקלוד או ל־ChatGPT, ומקבלים תשובה ברורה: מי משלוח לכתובת שלכם הכי משתלם כולל דמי משלוח, כמה כל פריט עולה, ומה שחסר מסומן. המחירים מגיעים מהמחירונים הרשמיים של הרשתות בישראל.",
   },
 
   header: {
@@ -45,11 +49,11 @@ export const he = {
   },
 
   hero: {
-    eyebrow: "השוואת מחירי סופר, בתוך העוזר שאתם כבר מדברים איתו",
+    eyebrow: "השוואת מחירי סופר עם משלוח, בתוך העוזר שאתם כבר מדברים איתו",
     titleLines: ["אותו מוצר.", "שני מחירים."],
     titleAccent: "אנחנו אומרים איזה.",
     subtitle:
-      "כותבים רשימת קניות בעברית ומקבלים תשובה ברורה: באיזו חנות לידכם הסל הזה הכי זול, כמה כל פריט עולה, ומה שאין בחנות מסומן במקום להיעלם.",
+      "כותבים רשימת קניות בעברית ומקבלים תשובה ברורה: מי משלוח לכתובת שלכם הכי משתלם כולל דמי משלוח, כמה כל פריט עולה, ומה שחסר מסומן במקום להיעלם.",
     primaryCta: "התחילו עכשיו",
     /*
      * The button says "now" and the truth is "within a business day", so the
@@ -62,42 +66,57 @@ export const he = {
     assistantsLabel: "עובד בתוך העוזרים שאתם כבר משתמשים בהם",
 
     /*
-     * The hero artifact is one real exchange: what a person typed, what the
-     * assistant went and checked, and what came back. The plain sentence leads;
-     * the tool name sits underneath it in small type, because a shopper does not
-     * need to read it but seeing a real tool run is what makes the page credible.
+     * Delivery-shaped mock of the live product surface. Totals here are labeled
+     * illustrative so we do not pretend a shelf-price measurement is a
+     * deliveredTotal. The ledger below keeps the measured catalogue comparison.
      */
     chat: {
       userMessage:
-        "תכנן לי קנייה שבועית ליד דיזנגוף סנטר: חלב 3% פעמיים, לחם פרוס, ביצים L, קוטג׳ 5% פעמיים, קילו עגבניות, קילו מלפפונים, קילו בננות, ארבעה יוגורטים, אורז ושתי חבילות פסטה.",
-      toolLabel: `בודק את 10 הפריטים ב־${measurement.storesCompared} חנויות ליד הכתובת`,
-      toolName: "super-mcp · optimize_basket",
-      replyLead: "הכי זול לסל הזה:",
-      planStore: "יוחננוף יד אליהו",
-      planDistance: "2.14 ק״מ",
-      planDistancePrecision: "לפי כתובת הסניף",
-      planTotal: "₪99.96",
+        "תכנן לי קנייה שבועית למשלוח למנדלסון 1, תל אביב: חלב 3% פעמיים, לחם פרוס, ביצים L, קוטג׳ 5% פעמיים, קילו עגבניות, קילו מלפפונים, קילו בננות, ארבעה יוגורטים, אורז ושתי חבילות פסטה.",
+      toolLabel: "בודק אתרים שמשלוחים לכתובת, כולל דמי משלוח ומינימום הזמנה",
+      toolName: "super-mcp · optimize_delivery",
+      replyLead: "הכי משתלם כולל משלוח:",
+      planStore: "שופרסל ONLINE",
+      planDistance: "דמי משלוח מאומתים",
+      planDistancePrecision: "סל + משלוח",
+      planTotal: "₪129.86",
       planCoverage: "9 מתוך 10 פריטים תומחרו",
-      planMissingLabel: "לא נמצא בחנות",
+      planMissingLabel: "לא נמצא באתר",
       planMissing: "מלפפונים",
-      footnote: `נמדד ${measurement.measuredOn}`,
+      footnote: "דוגמה להמחשה · לא מדידה חיה",
     },
+  },
+
+  /*
+   * The ticker between the hero and the ledger. Short promises only, each one
+   * already made and sourced elsewhere on the page. No numbers here: the
+   * measured figures live in the ledger and coverage sections.
+   */
+  marquee: {
+    items: [
+      "אותו מוצר, שני מחירים",
+      "אנחנו אומרים איזה",
+      "מה שחסר מסומן",
+      "כל מחיר נושא מועד אחרון שנראה",
+      "המחירונים הרשמיים של הרשתות",
+      "נטען כל יום",
+    ],
   },
 
   ledger: {
     id: "ledger",
-    eyebrow: "אותו מוצר, שתי חנויות",
-    title: "החנות שמתחת לבית גובה 13.7% יותר",
-    body: "השווינו רק מוצרים שבשתי החנויות הם בדיוק אותו דבר: אותו שם, אותה אריזה, אותו יצרן. בכל אחד מהם חוץ מהחלב, החנות הקרובה יותר יקרה יותר.",
+    eyebrow: "אותו מוצר, שני מחירונים",
+    title: "אותם חמישה מוצרים עולים 13.7% יותר במחירון אחד",
+    body: "השווינו רק מוצרים שבשני המחירונים הם בדיוק אותו דבר: אותו שם, אותה אריזה, אותו יצרן. המדידה ממחישה למה צריך לחשב את כל הרשימה ולא להסתמך על מחיר של פריט אחד.",
     columns: {
       item: "מוצר",
       /** Full store names head the legend; short forms head the table on narrow screens. */
       near: "שופרסל דיל תל אביב",
       nearShort: "שופרסל",
-      nearMeta: "0.08 ק״מ",
+      nearMeta: "מחירון רשמי",
       far: "יוחננוף יד אליהו",
       farShort: "יוחננוף",
-      farMeta: "2.14 ק״מ",
+      farMeta: "מחירון רשמי",
       delta: "פער",
     },
     rows: [
@@ -109,8 +128,8 @@ export const he = {
     ],
     totals: { label: "חמישה מוצרים זהים", far: "₪63.92", near: "₪72.70", delta: "₪8.78" },
     deltaHeadline: "13.7%",
-    deltaCaption: "יותר על אותם חמישה מוצרים, בשביל לחסוך 2 ק״מ הליכה",
-    footnote: `סל אחד שנמדד ב־${measurement.measuredOn} מול מחירונים שנטענו ב־${measurement.ingestedOn}. זו מדידה אחת ולא הבטחת חיסכון. מחירים זזים, ולכן כל מחיר אצלנו נושא את המועד שבו נראה לאחרונה.`,
+    deltaCaption: "יותר על אותם חמישה מוצרים בדיוק",
+    footnote: `סל אחד שנמדד ב־${measurement.measuredOn}, ברדיוס ${measurement.radiusKm} ק״מ סביב ${measurement.origin}, מול מחירונים שנטענו ב־${measurement.ingestedOn}. זו מדידה אחת ולא הבטחת חיסכון. מחירים זזים, ולכן כל מחיר אצלנו נושא את המועד שבו נראה לאחרונה.`,
   },
 
   integrity: {
@@ -132,8 +151,8 @@ export const he = {
         body: "פריט שלא מופיע במחירון של החנות מסומן כחסר, והתשובה אומרת כמה פריטים תומחרו מתוך כמה. חנות לא תיראה זולה רק מפני שהיא לא מוכרת את הפריט היקר.",
       },
       {
-        title: "מרחק אמיתי, לא מרחק שנוח לנו",
-        body: "לחנות עם כתובת מלאה יש מרחק מדויק. חנות שהרשת פרסמה עם שם עיר בלבד מקבלת מרחק משוער ואנחנו אומרים את זה, במקום להציג אותה כאילו היא ליד הבית.",
+        title: "דמי משלוח רק כשיש לנו ביטחון",
+        body: "כשהרשת מפרסמת תנאי משלוח ברורים, אנחנו מצטטים אותם עם מועד אימות. כשאין מספר מאומת, אנחנו לא ממציאים דמי משלוח ולא מציגים ניחוש כאילו זה המחיר שתשלמו.",
       },
     ],
   },
@@ -183,7 +202,7 @@ export const he = {
       },
       {
         title: "כותבים רשימה",
-        body: "״תכנן לי קנייה ליד הבית״, בעברית רגילה. התשובה חוזרת עם חנות, מחיר לכל פריט, ומה שחסר.",
+        body: "״תכנן לי קנייה למשלוח לכתובת שלי״, בעברית רגילה. התשובה חוזרת עם אתר, סל כולל משלוח, מחיר לכל פריט, ומה שחסר.",
       },
     ],
     assistantsLabel: "נבדק בתוך",
@@ -204,13 +223,12 @@ export const he = {
       copyJson: "העתקת JSON",
       copyUrl: "העתקת כתובת",
       secretWarning: "אל תדביקו כאן מפתח אמיתי. הבלוק מגיע עם מציין להחלפה.",
-      toolsLabel: "שמונה כלים, מפתח אחד",
-      toolsHint: "רשימה שלמה נכנסת בקריאה אחת ל־optimize_basket. שאר הכלים לשורות בודדות ולבירורים.",
+      toolsLabel: "שישה כלים, מפתח אחד",
+      toolsHint: "רשימה שלמה נכנסת בקריאה אחת ל־optimize_delivery. שאר הכלים לשורות בודדות ולבירורים.",
       groups: [
-        { title: "תכנון סל", tools: ["optimize_basket"] },
-        { title: "מוצרים", tools: ["search_products", "resolve_products", "get_product", "suggest_substitutes"] },
-        { title: "מחירים", tools: ["compare_prices"] },
-        { title: "חנויות ומבצעים", tools: ["list_stores", "get_promotions"] },
+        { title: "משלוח", tools: ["optimize_delivery", "list_delivery_options", "get_delivery_terms"] },
+        { title: "מוצרים", tools: ["search_products", "get_product"] },
+        { title: "מבצעים", tools: ["get_promotions"] },
       ],
       rateLimit: "מגבלת קצב הוגנת לכל מפתח, שמספיקה לשימוש אישי ולפיתוח.",
       selfHost: "אירוח עצמי",

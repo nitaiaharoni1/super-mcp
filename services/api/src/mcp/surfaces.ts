@@ -1,9 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { registerBasketTools } from "./tools/basket/index.js";
 import { registerDeliveryTools } from "./tools/delivery/index.js";
-import { registerOnlineProductTools, registerProductTools } from "./tools/products/index.js";
-import { registerOnlineStoreTools, registerStoreTools } from "./tools/stores/index.js";
-import { BASKET_PROTOCOL_ID, DELIVERY_PROTOCOL_ID, protocolIdentityLine } from "./protocolIdentity.js";
+import { registerOnlineProductTools } from "./tools/products/index.js";
+import { registerOnlineStoreTools } from "./tools/stores/index.js";
+import { DELIVERY_PROTOCOL_ID, protocolIdentityLine } from "./protocolIdentity.js";
 
 /**
  * Two MCP servers, because a shopper is asking two different questions.
@@ -32,7 +31,7 @@ import { BASKET_PROTOCOL_ID, DELIVERY_PROTOCOL_ID, protocolIdentityLine } from "
  * line resolution, unit normalisation, promo maths, freshness. That is the whole
  * reason this is one codebase and one database rather than a fork.
  */
-export type McpSurfaceId = "stores" | "online";
+export type McpSurfaceId = "online";
 
 export interface McpSurface {
   id: McpSurfaceId;
@@ -73,8 +72,8 @@ export function buildStoresInstructions(env: NodeJS.ProcessEnv = process.env): s
     "If pack_qty is paired with a count unit (unit/יח), the unit is ignored. " +
     "Location filters default to 10km when a " +
     "point is resolved. Use get_promotions to explain discounts. " +
-    "This server covers stores a shopper drives to. For groceries delivered to an " +
-    "address, use the super-mcp-online server and its optimize_delivery tool. " +
+    "This tool set prices shelves at physical branches. It is not mounted: the live " +
+    "SuperMCP server is online delivery at /mcp (optimize_delivery). " +
     protocolIdentityLine(env)
   );
 }
@@ -82,8 +81,7 @@ export function buildStoresInstructions(env: NodeJS.ProcessEnv = process.env): s
 export function buildOnlineInstructions(env: NodeJS.ProcessEnv = process.env): string {
   return (
     "Shopping list to be DELIVERED → call optimize_delivery exactly once with all items and " +
-    "the delivery address. Never price each line separately, and never call optimize_basket " +
-    "here: that is the drive-to-the-shop server. " +
+    "the delivery address. Never price each line separately. " +
     "Israeli online supermarket storefronts: catalogue, price and promotion data from the same " +
     "regulated feeds as the shelf prices, plus each storefront's delivery terms. " +
     "Online prices are NOT shelf prices — a chain's website runs its own price book, so quote " +
@@ -129,70 +127,52 @@ export function buildOnlineInstructions(env: NodeJS.ProcessEnv = process.env): s
     "Use list_delivery_options to answer 'who delivers to me' without pricing a basket, and " +
     "get_delivery_terms for one storefront's fee schedule, minimum and slots. " +
     "Use search_products / get_promotions for single lines only. " +
-    "This server covers delivery and click-and-collect. For shelf prices at branches a shopper " +
-    "drives to, use the super-mcp server and its optimize_basket tool. " +
+    "This is the SuperMCP server: Israeli online supermarket delivery and click-and-collect. " +
     protocolIdentityLine(env, DELIVERY_PROTOCOL_ID)
   );
 }
 
-const STORES_SURFACE: McpSurface = {
-  id: "stores",
-  serverName: "super-mcp",
-  path: "/mcp",
-  protocolId: BASKET_PROTOCOL_ID,
-  buildInstructions: buildStoresInstructions,
-  registerTools(server) {
-    // Order matters: the deployed-contract canary asserts optimize_basket is first.
-    registerBasketTools(server);
-    registerProductTools(server);
-    registerStoreTools(server);
-  },
-};
-
+/** The only live MCP: online supermarket delivery at the canonical /mcp path. */
 const ONLINE_SURFACE: McpSurface = {
   id: "online",
-  serverName: "super-mcp-online",
-  path: "/mcp/online",
+  serverName: "super-mcp",
+  path: "/mcp",
   protocolId: DELIVERY_PROTOCOL_ID,
   buildInstructions: buildOnlineInstructions,
   registerTools(server) {
-    // Same rule, same reason: optimize_delivery leads.
+    // Order matters: optimize_delivery leads tool discovery.
     registerDeliveryTools(server);
     registerOnlineProductTools(server);
     registerOnlineStoreTools(server);
   },
 };
 
+/** Same online tools at the old path so existing /mcp/online clients keep working. */
+const ONLINE_COMPAT_ALIAS: McpSurface = {
+  ...ONLINE_SURFACE,
+  path: "/mcp/online",
+};
+
 export const MCP_SURFACES: Record<McpSurfaceId, McpSurface> = {
-  stores: STORES_SURFACE,
   online: ONLINE_SURFACE,
 };
 
 /**
- * Which surfaces this process serves, from `SUPER_MCP_SURFACES`.
- *
- * Defaults to both, so one Cloud Run service answers both URLs and a self-hoster
- * gets everything from `pnpm dev`. Setting it to a single id is what splits them
- * onto separate deployments — same image, different env — without a second
- * codebase to keep in step.
+ * Surfaces this process mounts. Always the online supermarket MCP at `/mcp`,
+ * plus `/mcp/online` as a compatibility alias. Physical `stores` cannot be enabled.
  */
 export function enabledSurfaces(env: NodeJS.ProcessEnv = process.env): McpSurface[] {
   const raw = env.SUPER_MCP_SURFACES?.trim();
-  if (!raw) return [STORES_SURFACE, ONLINE_SURFACE];
-  const wanted = raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  const unknown = wanted.filter((id) => !(id in MCP_SURFACES));
-  if (unknown.length > 0) {
+  if (!raw || raw.toLowerCase() === "online") {
+    return [ONLINE_SURFACE, ONLINE_COMPAT_ALIAS];
+  }
+  if (raw.split(",").some((id) => id.trim().toLowerCase() === "stores")) {
     throw new Error(
-      `SUPER_MCP_SURFACES lists unknown surface(s): ${unknown.join(", ")}. ` +
-        `Valid ids: ${Object.keys(MCP_SURFACES).join(", ")}.`,
+      "SUPER_MCP_SURFACES=stores is disabled: SuperMCP serves only the online supermarket " +
+        "surface at /mcp (and /mcp/online as an alias). Unset SUPER_MCP_SURFACES or set it to online.",
     );
   }
-  const surfaces = wanted.map((id) => MCP_SURFACES[id as McpSurfaceId]);
-  if (surfaces.length === 0) {
-    throw new Error("SUPER_MCP_SURFACES is set but empty; unset it to serve both surfaces.");
-  }
-  return surfaces;
+  throw new Error(
+    `SUPER_MCP_SURFACES lists an unknown surface: ${raw}. Only online is served.`,
+  );
 }

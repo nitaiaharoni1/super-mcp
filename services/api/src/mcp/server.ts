@@ -9,19 +9,13 @@ import {
 import { authenticate, recordUsage } from "../auth.js";
 import { beginPrivilegedAudit, finalizePrivilegedAudit } from "../services/privilegedAudit.js";
 import { resolveBuildRevision } from "./protocolIdentity.js";
-import { buildStoresInstructions, enabledSurfaces, type McpSurface } from "./surfaces.js";
+import { buildOnlineInstructions, enabledSurfaces, type McpSurface } from "./surfaces.js";
 
-/**
- * Instructions for the physical-stores surface.
- *
- * Kept as a named export because the deployed-contract canary and its tests read
- * it directly; the text itself now lives with the surface definition, beside the
- * online one it has to stay distinguishable from.
- */
+/** Instructions for the live SuperMCP online-delivery surface. */
 export function buildMcpServerInstructions(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return buildStoresInstructions(env);
+  return buildOnlineInstructions(env);
 }
 
 /** Snapshot at module load for tests; recreate via buildMcpServerInstructions in createMcpServer. */
@@ -52,9 +46,8 @@ const METHOD_NOT_ALLOWED = {
  * instance as the REST API, sharing Bearer API-key auth. Query-string ?api_key= is
  * accepted only when SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1 (legacy MCP escape hatch).
  *
- * `/mcp` stays the physical-stores surface it has always been, so every key and
- * client configured against it keeps working; the delivery surface is additive at
- * `/mcp/online`. See `enabledSurfaces` for splitting them across deployments.
+ * Mounts the online supermarket surface at `/mcp` (canonical) and `/mcp/online`
+ * (compat alias). Physical stores are not served. See `enabledSurfaces`.
  */
 export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
   for (const surface of enabledSurfaces()) {

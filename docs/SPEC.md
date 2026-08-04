@@ -53,20 +53,17 @@ Be the **canonical, queryable, agent-native layer** over supermarket data: inges
 **Operator (internal)**
 - As the operator, I want per-adapter ingestion health (last run, files processed, parse errors, row deltas) so that a silently broken feed is caught within one cycle.
 
-## Two surfaces: physical stores and online delivery
+## One MCP surface: online supermarket delivery
 
-**Decision (2026-08-01): split the MCP in two, over one codebase and one database.**
+**Decision (2026-08-04): SuperMCP exposes only online delivery at `/mcp`.**
 
-### Why two
+`/mcp/online` is a compatibility alias for the same server and tools. The physical basket
+engine remains internal because delivery reuses its product resolution and pricing logic.
 
-Physical and online look like the same product and are not. They optimise different things:
+### Why delivery has its own objective
 
-| | physical (`/mcp`) | online (`/mcp/online`) |
-| --- | --- | --- |
-| objective | basket + travel | basket + delivery fee + service fee |
-| cost of distance | ₪/km, a smooth estimate we invented | a fee the retailer publishes, and a **step function** of the subtotal |
-| feasibility | a branch inside the radius | serves this address **and** clears the minimum order |
-| second stop | another trip, worth roughly ₪20 | another delivery fee, worth exactly what it says |
+The public MCP optimises basket price plus delivery and service fees. A storefront is
+eligible only when it serves the address and the basket clears its minimum order.
 
 Three consequences the physical engine has no way to express:
 
@@ -83,9 +80,6 @@ deterministic-first line resolver, product classes, unit normalisation, promotio
 Forking it doubles the maintenance and guarantees drift. One codebase also buys a feature neither half
 could have alone: `compare_in_store` prices the same basket at nearby branches and reports the delivery
 premium in shekels.
-
-`SUPER_MCP_SURFACES` splits the two across deployments from one image when that becomes a scaling or
-blast-radius question.
 
 ### Where online data comes from
 
@@ -198,17 +192,16 @@ A future global market (e.g., a scraped US chain) implements the same interface 
 - `GET /v1/products/{id}/history?store_id=&from=&to=`
 - `GET /v1/chains` · `GET /v1/stores?chain=&city=&near=&radius=` (default radius **10km** when `near` is set)
 - `GET /v1/promotions?store_id=&product_id=&active=true`
-- `POST /v1/basket/optimize` — **fast one-call default** (`resolution_mode=fast`, `response_detail=summary`): initial `{items[{product_id|gtin|query, pack_qty|amount+unit}], city|near|location}` returns compact `complete` with assumptions; `resolution_mode=strict` preserves resumable `{continuation, answers}` → `needs_confirmation`; plans are `bestSingleStore` / `cheapestCompleteStore` / `multiStore`. Protocol `basket-optimize-fast-v2`.
+- `POST /v1/delivery/optimize` — initial `{items[{product_id|gtin|query, pack_qty|amount+unit}], address|city|near}` ranks online storefronts on delivered cost; `resolution_mode=strict` preserves resumable `{continuation, answers}` → `needs_confirmation`.
 - Auth: `Authorization: Bearer <api_key>` · per-key rate limits + metering · OpenAPI JSON served at `/openapi.json`
 
 ### MCP server (v1 tools, thin wrappers over the same services)
 
-- `optimize_basket` — **registered first**; **location required** on initial call (`location` preferred for neighborhoods/addresses). Default fast mode completes a shopping list in one call with intentional commodity assumptions; set `resolution_mode=strict` for exact-product confirmation (`needs_confirmation` → resume with `{continuation, answers}` only). Complete plans: `bestSingleStore` / `cheapestCompleteStore` / `multiStore`. Prefer `response_detail` over deprecated `verbose`.
+- `optimize_delivery` — **registered first**; address, city, or coordinates required on an initial call. Ranks on `deliveredComparableTotal` and reports `deliveredTotal` as the shopper-facing total.
+- `list_delivery_options(address|city|near)`
+- `get_delivery_terms(service_slug)`
 - `search_products(query, filters?)`
 - `get_product(id | gtin)`
-- `compare_prices(product, location?, sort?)` — default 10km; `sort=unit_price` for per-100g
-- `suggest_substitutes(product, location?)` — cheaper similar products (location optional; nationwide if omitted)
-- `list_stores(chain?, city?, near?, radius_km?)` — default 10km when `near` is set
 - `get_promotions(store?, product?)`
 
 **Basket migration**

@@ -603,12 +603,8 @@ export const basketOptimizeResponseSchema = {
 };
 
 export const basketComponentSchemas = {
-  BasketOptimizeRequest: basketOptimizeRequestSchema,
-  BasketOptimizeResponse: basketOptimizeResponseSchema,
-  BasketInitialRequest: basketInitialRequestSchema,
-  BasketResumeRequest: basketResumeRequestSchema,
-  BasketNeedsConfirmationResponse: basketNeedsConfirmationResponseSchema,
-  BasketCompleteResponse: basketCompleteResponseSchema,
+  // Delivery plans $ref this shared line shape. Physical basket endpoints are not exposed.
+  BasketLine: basketLineSchema,
 };
 
 export const basketPaths = {

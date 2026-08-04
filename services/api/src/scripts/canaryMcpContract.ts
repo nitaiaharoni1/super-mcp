@@ -11,29 +11,29 @@
  * (useful for local CI without a live server).
  *
  * Requires:
- * - protocol basket-optimize-fast-v2
- * - optimize_basket registered first
- * - resolution_mode and response_detail in schema
- * - title/description contain one-call shopping-list keywords
- * - legacy prepare_basket absent
+ * - protocol delivery-optimize-v1
+ * - optimize_delivery registered first
+ * - physical optimize_basket absent
+ * - continuation, answers, resolution_mode and address in schema
+ * - title/description identify a shopping-list delivery tool
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { buildMcpServerInstructions } from "../mcp/server.js";
 import {
-  validateMcpBasketContract,
+  validateMcpDeliveryContract,
   type McpToolDescriptor,
 } from "../mcp/protocolIdentity.js";
-import { registerBasketTools } from "../mcp/tools/basket/index.js";
-import { registerProductTools } from "../mcp/tools/products/index.js";
-import { registerStoreTools } from "../mcp/tools/stores/index.js";
+import { registerDeliveryTools } from "../mcp/tools/delivery/index.js";
+import { registerOnlineProductTools } from "../mcp/tools/products/index.js";
+import { registerOnlineStoreTools } from "../mcp/tools/stores/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../../../.env") });
 
-/** Keywords that must appear in optimize_basket title or description (discovery copy). */
-const ONE_CALL_SHOPPING_LIST_KEYWORDS = ["shopping list", "one call"] as const;
+/** Keywords that must appear in optimize_delivery title or description. */
+const DELIVERY_DISCOVERY_KEYWORDS = ["shopping list", "delivery"] as const;
 
 type ToolSnapshot = McpToolDescriptor & {
   title?: string;
@@ -66,12 +66,12 @@ function collectInProcessTools(): {
         inputSchema: { properties },
       });
     },
-  } as unknown as Parameters<typeof registerBasketTools>[0];
+  } as unknown as Parameters<typeof registerDeliveryTools>[0];
 
-  // Match production registerTools order: basket first for discovery.
-  registerBasketTools(server);
-  registerProductTools(server);
-  registerStoreTools(server);
+  // Match production registerTools order: delivery first for discovery.
+  registerDeliveryTools(server);
+  registerOnlineProductTools(server);
+  registerOnlineStoreTools(server);
 
   return {
     toolNames: tools.map((t) => t.name),
@@ -154,17 +154,17 @@ async function fetchRemoteTools(url: string, apiKey: string): Promise<{
   };
 }
 
-/** Extra discovery checks beyond validateMcpBasketContract. */
-function validateOptimizeBasketDiscoveryCopy(tools: ToolSnapshot[]): string[] {
+/** Extra discovery checks beyond validateMcpDeliveryContract. */
+function validateOptimizeDeliveryDiscoveryCopy(tools: ToolSnapshot[]): string[] {
   const errors: string[] = [];
-  const optimize = tools.find((t) => t.name === "optimize_basket");
+  const optimize = tools.find((t) => t.name === "optimize_delivery");
   if (!optimize) return errors;
 
   const haystack = `${optimize.title ?? ""} ${optimize.description ?? ""}`.toLowerCase();
-  for (const keyword of ONE_CALL_SHOPPING_LIST_KEYWORDS) {
+  for (const keyword of DELIVERY_DISCOVERY_KEYWORDS) {
     if (!haystack.includes(keyword)) {
       errors.push(
-        `optimize_basket title/description must contain "${keyword}" (one-call shopping-list discovery)`,
+        `optimize_delivery title/description must contain "${keyword}"`,
       );
     }
   }
@@ -185,13 +185,13 @@ async function main(): Promise<void> {
       })()
     : collectInProcessTools();
 
-  const result = validateMcpBasketContract({
+  const result = validateMcpDeliveryContract({
     ...snapshot,
     expectedBuild,
     requireDeployedRevision: requireDeployed,
   });
 
-  const discoveryErrors = validateOptimizeBasketDiscoveryCopy(snapshot.tools);
+  const discoveryErrors = validateOptimizeDeliveryDiscoveryCopy(snapshot.tools);
   const errors = [...result.errors, ...discoveryErrors];
   const ok = errors.length === 0;
 

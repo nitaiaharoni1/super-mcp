@@ -19,7 +19,7 @@ export function getSiteUrl(): string {
 
 /** API origin for public endpoints, derived from the MCP URL (same host). */
 export function getApiBaseUrl(): string {
-  return getMcpUrl().replace(/\/mcp\/?$/, "");
+  return getMcpUrl().replace(/\/mcp(\/online)?\/?$/, "");
 }
 
 /** Authenticated Streamable HTTP MCP config. Never embeds a real key. */

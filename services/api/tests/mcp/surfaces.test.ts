@@ -5,6 +5,7 @@ import {
   buildStoresInstructions,
   enabledSurfaces,
 } from "../../src/mcp/surfaces.js";
+import { getOpenApiSpec } from "../../src/openapi/index.js";
 import {
   BASKET_PROTOCOL_ID,
   DELIVERY_PROTOCOL_ID,
@@ -15,7 +16,7 @@ import { DELIVERY_PLAN_FIELDS } from "../../src/services/delivery/types.js";
 /** camelCase words in the prose that name something other than a plan field. */
 const ALLOWED_NON_PLAN_TERMS = new Set([
   "optimize_delivery", "optimize_basket", "search_products", "get_promotions",
-  "list_delivery_options", "get_delivery_terms", "super-mcp-online",
+  "list_delivery_options", "get_delivery_terms",
   // Nested paths and sibling response fields, checked by the assertions above.
   "deliveryTerms.confidence", "deliveryTerms.verifiedAt", "unavailableStores",
   // Result-level recommendations, not per-plan fields.
@@ -35,53 +36,51 @@ function toolsOf(surface: keyof typeof MCP_SURFACES): string[] {
   return registered;
 }
 
-describe("the two surfaces answer two different questions", () => {
-  it("mounts the physical surface where it has always been", () => {
-    // Every key and client already configured against /mcp keeps working; the
-    // delivery surface is additive.
-    expect(MCP_SURFACES.stores.path).toBe("/mcp");
-    expect(MCP_SURFACES.stores.serverName).toBe("super-mcp");
+function toolDescriptionsOf(surface: keyof typeof MCP_SURFACES): Map<string, string> {
+  const descriptions = new Map<string, string>();
+  const server = {
+    registerTool: (name: string, definition: { description?: string }) => {
+      descriptions.set(name, definition.description ?? "");
+    },
+  } as unknown as Parameters<(typeof MCP_SURFACES)[typeof surface]["registerTools"]>[0];
+  MCP_SURFACES[surface].registerTools(server);
+  return descriptions;
+}
+
+describe("online supermarket is the only live MCP", () => {
+  it("mounts online delivery at the canonical /mcp path as super-mcp", () => {
+    expect(MCP_SURFACES.online.path).toBe("/mcp");
+    expect(MCP_SURFACES.online.serverName).toBe("super-mcp");
   });
 
-  it("mounts the delivery surface under its own name", () => {
-    expect(MCP_SURFACES.online.path).toBe("/mcp/online");
-    expect(MCP_SURFACES.online.serverName).toBe("super-mcp-online");
-  });
-
-  it("leads each surface with the tool that answers its question in one call", () => {
-    expect(toolsOf("stores")[0]).toBe("optimize_basket");
+  it("leads the live surface with optimize_delivery", () => {
     expect(toolsOf("online")[0]).toBe("optimize_delivery");
   });
 
-  it("never offers a delivery tool on the physical surface, or the reverse", () => {
-    const stores = toolsOf("stores");
+  it("never offers physical basket tools on the online surface", () => {
     const online = toolsOf("online");
-    expect(stores).not.toContain("optimize_delivery");
-    expect(stores).not.toContain("list_delivery_options");
     expect(online).not.toContain("optimize_basket");
-    // list_stores is a radius question; its online counterpart is list_delivery_options.
     expect(online).not.toContain("list_stores");
+    expect(online).not.toContain("compare_prices");
   });
 
-  it("shares the catalogue tools, because product identity is the same problem", () => {
+  it("includes the shared catalogue tools", () => {
     for (const shared of ["search_products", "get_product", "get_promotions"]) {
-      expect(toolsOf("stores")).toContain(shared);
       expect(toolsOf("online")).toContain(shared);
     }
   });
 
-  it("keeps compare_prices off the delivery surface", () => {
-    // It answers "where is this cheapest nearby", which returns shelf prices the
-    // shopper cannot get without driving.
-    expect(toolsOf("online")).not.toContain("compare_prices");
-    expect(toolsOf("stores")).toContain("compare_prices");
+  it("does not steer models toward disabled physical tools", () => {
+    const descriptions = toolDescriptionsOf("online");
+    expect(descriptions.get("search_products")).toContain("optimize_delivery");
+    expect(descriptions.get("search_products")).not.toContain("optimize_basket");
+    expect(descriptions.get("get_promotions")).toContain("optimize_delivery");
+    expect(descriptions.get("get_promotions")).not.toMatch(/compare_prices|optimize_basket/);
   });
 });
 
 describe("surface identity", () => {
-  it("gives each surface its own protocol id", () => {
-    // A canary that accepted either could not tell "the online server is at the
-    // wrong revision" from "the online server is not deployed".
+  it("gives each surface definition its own protocol id", () => {
     expect(parseProtocolIdentityLine(buildStoresInstructions({}))?.protocol).toBe(
       BASKET_PROTOCOL_ID,
     );
@@ -91,14 +90,12 @@ describe("surface identity", () => {
     expect(BASKET_PROTOCOL_ID).not.toBe(DELIVERY_PROTOCOL_ID);
   });
 
-  it("points each surface at the other for the question it does not answer", () => {
-    expect(buildStoresInstructions({})).toContain("super-mcp-online");
-    expect(buildOnlineInstructions({})).toContain("optimize_basket");
+  it("describes itself as the SuperMCP online delivery server", () => {
+    expect(buildOnlineInstructions({})).toMatch(/SuperMCP server/i);
+    expect(buildOnlineInstructions({})).toMatch(/delivery/i);
   });
 
   it("tells the delivery surface that online prices are not shelf prices", () => {
-    // Measured: Rami Levy's online store shares only 22% of its prices with its
-    // own branches, and Carrefour's runs ~8% below its shelves.
     expect(buildOnlineInstructions({})).toMatch(/online prices are NOT shelf prices/i);
   });
 
@@ -108,18 +105,11 @@ describe("surface identity", () => {
 
   it("requires the fee's confidence to be read before it is quoted", () => {
     const instructions = buildOnlineInstructions({});
-    // deliveryTerms.confidence, which is what a plan actually carries. This
-    // asserted `deliveryFeeConfidence` for as long as the instructions said it,
-    // and no plan has ever had a field by that name: the one direction a test
-    // over prose cannot catch is prose and payload being wrong together.
     expect(instructions).toContain("deliveryTerms.confidence");
     expect(instructions).toMatch(/meetsMinimum=false/);
   });
 
   it("names only fields a plan actually carries", () => {
-    // The instructions are the only documentation the model gets, so a field
-    // named here that does not exist is an instruction to check something
-    // uncheckable, which the model satisfies by quoting the fee unguarded.
     const instructions = buildOnlineInstructions({});
     const planFields = new Set(Object.keys(DELIVERY_PLAN_FIELDS));
     const referenced = instructions.match(/\b[a-z][A-Za-z]{4,}(?=[ .,=])/g) ?? [];
@@ -132,25 +122,48 @@ describe("surface identity", () => {
 });
 
 describe("which surfaces this process serves", () => {
-  it("serves both by default, so one deployment answers both URLs", () => {
-    expect(enabledSurfaces({}).map((s) => s.id)).toEqual(["stores", "online"]);
+  it("serves online at /mcp and the /mcp/online alias", () => {
+    expect(enabledSurfaces({}).map((s) => s.path)).toEqual(["/mcp", "/mcp/online"]);
+    expect(enabledSurfaces({}).every((s) => s.id === "online")).toBe(true);
+    expect(enabledSurfaces({}).every((s) => s.serverName === "super-mcp")).toBe(true);
   });
 
-  it("can be narrowed to one, which is how they split across deployments", () => {
-    expect(enabledSurfaces({ SUPER_MCP_SURFACES: "online" }).map((s) => s.id)).toEqual(["online"]);
-    expect(enabledSurfaces({ SUPER_MCP_SURFACES: "stores" }).map((s) => s.id)).toEqual(["stores"]);
-  });
-
-  it("accepts a list, in the order given", () => {
-    expect(enabledSurfaces({ SUPER_MCP_SURFACES: "online, stores" }).map((s) => s.id)).toEqual([
-      "online",
-      "stores",
+  it("accepts SUPER_MCP_SURFACES=online as the same mounts", () => {
+    expect(enabledSurfaces({ SUPER_MCP_SURFACES: "online" }).map((s) => s.path)).toEqual([
+      "/mcp",
+      "/mcp/online",
     ]);
   });
 
+  it("refuses to enable the physical stores surface", () => {
+    expect(() => enabledSurfaces({ SUPER_MCP_SURFACES: "stores" })).toThrow(/disabled/i);
+    expect(() => enabledSurfaces({ SUPER_MCP_SURFACES: "online, stores" })).toThrow(/disabled/i);
+  });
+
   it("refuses a typo instead of silently serving nothing", () => {
-    // Booting with no MCP at all because someone wrote "onlin" is a much worse
-    // failure than refusing to boot.
     expect(() => enabledSurfaces({ SUPER_MCP_SURFACES: "onlin" })).toThrow(/unknown surface/i);
+  });
+
+  it("documents /mcp as online delivery in OpenAPI, keeps BasketLine for delivery", () => {
+    const previous = process.env.SUPER_MCP_SURFACES;
+    delete process.env.SUPER_MCP_SURFACES;
+    try {
+      const spec = getOpenApiSpec() as {
+        paths: Record<string, unknown>;
+        components: { schemas: Record<string, unknown> };
+      };
+      expect(spec.paths).toHaveProperty("/mcp");
+      expect(spec.paths).toHaveProperty("/mcp/online");
+      expect(spec.paths).not.toHaveProperty("/v1/basket/optimize");
+      expect(spec.paths).toHaveProperty("/v1/delivery/optimize");
+      expect(spec.components.schemas).toHaveProperty("BasketLine");
+      expect(spec.components.schemas).not.toHaveProperty("BasketOptimizeRequest");
+      expect(spec.components.schemas).not.toHaveProperty("BasketOptimizeResponse");
+      const mcp = spec.paths["/mcp"] as { post: { summary: string } };
+      expect(mcp.post.summary).toMatch(/online|delivery/i);
+    } finally {
+      if (previous === undefined) delete process.env.SUPER_MCP_SURFACES;
+      else process.env.SUPER_MCP_SURFACES = previous;
+    }
   });
 });

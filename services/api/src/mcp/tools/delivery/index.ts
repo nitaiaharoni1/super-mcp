@@ -50,8 +50,8 @@ export function registerDeliveryTools(server: McpServer): void {
       description:
         "Price a whole shopping list at every Israeli online supermarket that delivers to an address, " +
         "and rank them on what the order actually costs: items + delivery fee + service fee. " +
-        "Call this ONCE with the full list — never price lines separately, and never use optimize_basket " +
-        "for a delivery question (that is the drive-to-the-shop tool). " +
+        "Call this ONCE with the full list — never price lines separately. " +
+        "This is SuperMCP's shopping-list tool for online supermarket delivery. " +
         "THE HEADLINE FIGURE IS deliveredTotal, not the item subtotal: a ₪35.90 delivery fee outweighs " +
         "most price differences between chains. " +
         "But RANK on deliveredComparableTotal, never on deliveredTotal: totalScope is priced_lines_only, " +

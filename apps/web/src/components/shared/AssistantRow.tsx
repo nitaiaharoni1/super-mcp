@@ -42,25 +42,28 @@ const ASSISTANTS = [
 export function AssistantRow({ label, note }: { label: string; note?: string }) {
   return (
     <div>
-      <p className="text-xs text-[var(--color-ink-muted)]">{label}</p>
-      <ul className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+      <p className="text-xs font-semibold text-ink-muted">{label}</p>
+      <ul className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-3">
         {ASSISTANTS.map((a) => (
-          <li key={a.name} className="flex items-center gap-2">
+          <li
+            key={a.name}
+            className="flex items-center gap-2 rounded-[var(--radius-pill)] border-2 border-ink bg-paper-raised px-3.5 py-1.5"
+          >
             <svg
               viewBox="0 0 24 24"
               aria-hidden
-              className="size-[1.05rem] shrink-0 text-[var(--color-ink)]"
+              className="size-[1.05rem] shrink-0 text-ink"
               fill="currentColor"
             >
               <path d={a.d} />
             </svg>
-            <span dir="ltr" className="text-sm font-medium text-[var(--color-ink)]">
+            <span dir="ltr" className="text-sm font-bold text-ink">
               {a.name}
             </span>
           </li>
         ))}
       </ul>
-      {note ? <p className="mt-2.5 text-xs text-[var(--color-ink-muted)]">{note}</p> : null}
+      {note ? <p className="mt-2.5 text-xs text-ink-muted">{note}</p> : null}
     </div>
   );
 }

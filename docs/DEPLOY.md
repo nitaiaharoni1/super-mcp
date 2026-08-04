@@ -23,7 +23,7 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `CORS_ORIGINS` | server (required for the marketing access form; comma-separated browser origins) |
 | `SUPER_MCP_READY_REQUIRE_AUTH` | server (`1` recommended on public hosts) |
 | `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY` | server (must stay unset/`0`) |
-| `SUPER_MCP_SURFACES` | server (optional). Unset serves both MCP surfaces; `stores` or `online` splits them across deployments. See below. |
+| `SUPER_MCP_SURFACES` | server (optional). Unset or `online` serves `/mcp` (+ `/mcp/online` alias). `stores` is rejected. |
 | `NOMINATIM_USER_AGENT` | **server (required)**. OSM returns 403 to the placeholder default, so address geocoding silently degrades to city centroids. See below. |
 | `SUPER_MCP_NO_CAP` | **ingest job (required, `1`)**. Without it the ingest silently covers ~1% of stores. See below. |
 | `NEXT_PUBLIC_MCP_URL` | web hosting only |
@@ -187,24 +187,14 @@ not complete there; the request path is unaffected (it never awaits it), but
 addresses will keep resolving at city precision until the cache is warmed some
 other way.
 
-## Two MCP surfaces, one image
+## One MCP surface
 
-`/mcp` (physical stores) and `/mcp/online` (delivery) are served by the same process by default, so a
-single Cloud Run service answers both URLs and nothing changes for existing clients: `/mcp` keeps its
-path, its tool set, and its `basket-optimize-fast-v2` protocol id.
+`/mcp` is SuperMCP for online supermarket delivery (`optimize_delivery`). `/mcp/online` is a
+compatibility alias for the same tools. Physical drive-to-store MCP is not mounted; setting
+`SUPER_MCP_SURFACES=stores` fails at boot.
 
-`SUPER_MCP_SURFACES` splits them without a second codebase. Deploy the same image twice:
-
-```bash
-gcloud run deploy super-mcp        --set-env-vars SUPER_MCP_SURFACES=stores  ...
-gcloud run deploy super-mcp-online --set-env-vars SUPER_MCP_SURFACES=online  ...
-```
-
-Both still need the same `DATABASE_URL`: the surfaces share one catalogue, and the online surface's
-`compare_in_store` option prices the basket at physical branches too. Splitting them is a scaling and
-blast-radius decision, not a data one.
-
-A typo in the variable throws at boot rather than serving no MCP at all.
+One Cloud Run service is enough. If you previously deployed a separate `super-mcp-online` service,
+point it (or retire it) at the same image: both URLs now serve online delivery.
 
 ### The online ingest is a separate job
 

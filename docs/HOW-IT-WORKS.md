@@ -222,7 +222,8 @@ GET  /v1/products/:id/substitutes         cheaper similar products by unit price
 GET  /v1/products/:id/history             price trend
 GET  /v1/chains  ·  /v1/stores            chains and (nearby) branches
 GET  /v1/promotions                       active deals
-POST /v1/basket/optimize                  resumable shopping list (see §9)
+POST /v1/delivery/optimize                delivery shopping list (live)
+POST /v1/basket/optimize                  physical basket (not mounted)
 GET  /v1/usage                            your own usage
 ```
 
@@ -235,17 +236,17 @@ higher traffic. OpenAPI JSON is served at `/openapi.json`; health at `/health`.
 
 ### MCP (for AI agents)
 
-The MCP server exposes the exact same capabilities as tools, over Streamable HTTP at
-`/mcp`. The tools:
+The MCP server exposes delivery tools over Streamable HTTP at `/mcp` (canonical) and
+`/mcp/online` (compat alias). Online tools:
 
 ```
-search_products · resolve_products · get_product · compare_prices ·
-suggest_substitutes · optimize_basket · list_stores · get_promotions
+optimize_delivery · list_delivery_options · get_delivery_terms ·
+search_products · get_product · get_promotions
 ```
 
 Each tool's description is written *for an LLM* — it says when to use it, what
-"location" accepts, and what freshness caveats apply. An agent that has only the MCP
-URL and a key can complete a real cross-chain basket comparison unassisted.
+the destination accepts, and what freshness caveats apply. An agent that has only the MCP
+URL and a key can complete a real delivery-basket comparison unassisted.
 
 ---
 
@@ -485,7 +486,7 @@ pnpm db:semantic-index -- --backend=hasher --limit=5000
 pnpm db:benchmark-semantic
 ```
 
-The MCP endpoint is `http://localhost:8787/mcp`; point any MCP client at it with the
+The MCP endpoint is `http://localhost:8787/mcp` (online supermarket delivery); point any MCP client at it with the
 same bearer key.
 
 ---

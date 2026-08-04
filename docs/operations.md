@@ -22,11 +22,11 @@ pnpm --filter @super-mcp/api canary:mcp-contract
 
 `canary:mcp-contract` asserts (in-process without `SUPER_MCP_URL`, or against a live MCP URL):
 
-- protocol `basket-optimize-fast-v2`;
-- `optimize_basket` registered first;
-- `resolution_mode` and `response_detail` in schema;
-- title/description contain one-call shopping-list keywords;
-- legacy `prepare_basket` absent.
+- protocol `delivery-optimize-v1`;
+- `optimize_delivery` registered first;
+- physical `optimize_basket` absent;
+- `continuation`, `answers`, `resolution_mode`, and `address` in schema;
+- title/description identify a shopping-list delivery tool.
 
 Against a deployed endpoint:
 

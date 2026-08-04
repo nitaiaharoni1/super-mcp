@@ -51,10 +51,10 @@ export function AccessRequestForm() {
     return (
       <div
         role="status"
-        className="rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-accent-soft)] px-5 py-4"
+        className="rounded-[var(--radius-card)] border-[2.5px] border-ink bg-lime-soft px-5 py-4 shadow-sticker-sm"
       >
-        <p className="font-semibold">{copy.successTitle}</p>
-        <p className="mt-1 text-sm leading-6 text-[var(--color-ink-muted)]">{copy.successBody}</p>
+        <p className="font-bold">{copy.successTitle}</p>
+        <p className="mt-1 text-sm leading-6 text-ink-muted">{copy.successBody}</p>
       </div>
     );
   }
@@ -62,7 +62,7 @@ export function AccessRequestForm() {
   return (
     <form onSubmit={handleSubmit} className="grid gap-4">
       <div className="grid gap-2">
-        <label htmlFor="access-email" className="text-sm font-medium">
+        <label htmlFor="access-email" className="text-sm font-bold">
           {copy.emailLabel}
         </label>
         <input
@@ -73,11 +73,11 @@ export function AccessRequestForm() {
           dir="ltr"
           autoComplete="email"
           placeholder={copy.emailPlaceholder}
-          className="h-11 rounded-[var(--radius-lg)] border border-[var(--color-line-strong)] bg-[var(--color-paper-raised)] px-4 text-start font-[family-name:var(--font-geist-mono)] text-sm text-[var(--color-ink)] placeholder:text-[var(--color-ink-faint)]"
+          className="h-11 rounded-[var(--radius-card)] border-[2.5px] border-ink bg-paper-raised px-4 text-start font-[family-name:var(--font-geist-mono)] text-sm text-ink placeholder:text-ink-faint focus:shadow-sticker-sm"
         />
       </div>
       <div className="grid gap-2">
-        <label htmlFor="access-use-case" className="text-sm font-medium">
+        <label htmlFor="access-use-case" className="text-sm font-bold">
           {copy.useCaseLabel}
         </label>
         <textarea
@@ -86,10 +86,10 @@ export function AccessRequestForm() {
           rows={2}
           maxLength={2000}
           placeholder={copy.useCasePlaceholder}
-          className="resize-y rounded-[var(--radius-lg)] border border-[var(--color-line-strong)] bg-[var(--color-paper-raised)] px-4 py-3 text-sm leading-6 text-[var(--color-ink)] placeholder:text-[var(--color-ink-faint)]"
+          className="resize-y rounded-[var(--radius-card)] border-[2.5px] border-ink bg-paper-raised px-4 py-3 text-sm leading-6 text-ink placeholder:text-ink-faint focus:shadow-sticker-sm"
         />
       </div>
-      <p className="text-xs leading-5 text-[var(--color-ink-muted)]">{copy.reassurance}</p>
+      <p className="text-xs leading-5 text-ink-muted">{copy.reassurance}</p>
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" size="lg" disabled={status === "submitting"}>

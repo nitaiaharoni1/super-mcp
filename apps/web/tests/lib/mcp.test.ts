@@ -36,14 +36,16 @@ describe("mcp helpers", () => {
     expect(snippet).toContain(API_KEY_PLACEHOLDER);
   });
 
-  it("defaults MCP url and derives API base by stripping /mcp", () => {
+  it("defaults MCP url to /mcp and derives API base by stripping it", () => {
     delete process.env.NEXT_PUBLIC_MCP_URL;
     expect(getMcpUrl()).toBe("http://localhost:8787/mcp");
     expect(getApiBaseUrl()).toBe("http://localhost:8787");
   });
 
-  it("strips a trailing /mcp/ suffix from a custom MCP url", () => {
+  it("strips a trailing /mcp/ or /mcp/online/ suffix from a custom MCP url", () => {
     process.env.NEXT_PUBLIC_MCP_URL = "https://api.example.com/mcp/";
+    expect(getApiBaseUrl()).toBe("https://api.example.com");
+    process.env.NEXT_PUBLIC_MCP_URL = "https://api.example.com/mcp/online/";
     expect(getApiBaseUrl()).toBe("https://api.example.com");
   });
 });

@@ -10,7 +10,6 @@ import { beginPrivilegedAudit, finalizePrivilegedAudit } from "./services/privil
 import {
   registerAccessRoutes,
   registerAdminRoutes,
-  registerBasketRoutes,
   registerDeliveryRoutes,
   registerProductRoutes,
   registerPromotionRoutes,
@@ -161,9 +160,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await registerProductRoutes(app);
+  // /v1/chains stays available; /v1/stores is the physical branch directory.
   await registerStoreRoutes(app);
   await registerPromotionRoutes(app);
-  await registerBasketRoutes(app);
   await registerDeliveryRoutes(app);
   await registerAdminRoutes(app);
   await registerAccessRoutes(app);

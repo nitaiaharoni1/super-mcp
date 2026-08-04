@@ -5,29 +5,26 @@ import type { ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 /*
- * Not every button is primary. `default` carries the one page-level intent
- * (request a key). `quiet` is the underlined text link that replaced the second
- * competing pill in the hero, so the eye has somewhere obvious to land.
+ * Not every button is primary. `default` (lime) carries the one page-level
+ * intent (request a key), `secondary` is the same physical sticker in cream
+ * for lower-stakes actions, and `quiet` is the underlined text link for
+ * tertiary paths like the developer docs.
  */
 const buttonVariants = cva(
   [
-    "inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-pill)] px-6",
-    "text-sm font-semibold",
-    "transition-[background-color,color,border-color,transform] duration-150 ease-out",
-    "active:translate-y-px",
+    "inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-card)] px-6",
+    "text-sm font-bold",
     "disabled:pointer-events-none disabled:opacity-50",
   ].join(" "),
   {
     variants: {
       variant: {
-        default: "bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-deep)]",
+        default:
+          "pressable border-[3px] border-[var(--color-ink)] bg-[var(--color-lime)] text-[var(--color-ink)] shadow-sticker",
         secondary:
-          "bg-[var(--color-paper-sunk)] text-[var(--color-ink)] hover:bg-[var(--color-accent-soft)]",
-        outline:
-          "border border-[var(--color-line-strong)] bg-[var(--color-paper-raised)] text-[var(--color-ink)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]",
+          "pressable border-[3px] border-[var(--color-ink)] bg-[var(--color-paper-raised)] text-[var(--color-ink)] shadow-sticker-sm hover:bg-[var(--color-lime-soft)]",
         quiet:
-          "px-1 text-[var(--color-ink)] underline decoration-[var(--color-line-strong)] decoration-1 underline-offset-[6px] hover:text-[var(--color-accent)] hover:decoration-[var(--color-accent)]",
-        onBand: "bg-[var(--color-band-ink)] text-[var(--color-accent-deep)] hover:bg-white",
+          "px-1 text-[var(--color-ink)] underline decoration-[var(--color-ink)] decoration-2 underline-offset-[6px] hover:text-[var(--color-grape-band)] hover:decoration-[var(--color-grape-band)]",
       },
       size: {
         default: "",

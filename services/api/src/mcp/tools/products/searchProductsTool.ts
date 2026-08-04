@@ -4,7 +4,10 @@ import { searchProducts } from "../../../services/search/index.js";
 import { registerTool } from "../register.js";
 import { locationShape, resolveToolLocation } from "../shared/location.js";
 
-export function registerSearchProductsTool(server: McpServer): void {
+export function registerSearchProductsTool(
+  server: McpServer,
+  shoppingListTool: "optimize_basket" | "optimize_delivery" = "optimize_basket",
+): void {
   registerTool(
     server,
     "search_products",
@@ -12,10 +15,10 @@ export function registerSearchProductsTool(server: McpServer): void {
       title: "Search products",
       description:
         "Search the canonical product catalog by free text (Hebrew or English), brand, category, or exact GTIN. " +
-        "Also matches chain listing names. Prefer optimize_basket with query items for shopping lists — use this " +
+        `Also matches chain listing names. Prefer ${shoppingListTool} with query items for shopping lists — use this ` +
         "only to disambiguate a low_confidence item or when browsing. " +
-        "Do not use this for a shopping list or after optimize_basket has started. " +
-        "Use optimize_basket directly; strict confirmation options are sufficient to resume. " +
+        `Do not use this for a shopping list or after ${shoppingListTool} has started. ` +
+        `Use ${shoppingListTool} directly; strict confirmation options are sufficient to resume. ` +
         "Returns canonical products (not per-chain detail); call get_product for listings.",
       inputSchema: {
         query: z.string().optional().describe("Free text search, Hebrew or English, e.g. 'חלב תנובה' or 'olive oil'."),

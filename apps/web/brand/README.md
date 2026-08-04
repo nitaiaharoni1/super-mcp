@@ -7,36 +7,37 @@ generated and committed, so the site build never depends on regenerating them.
 | --- | --- |
 | `../public/favicon.svg` | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` |
 | `og.html` | `og.png` (1200x630 social card) |
+| `mark-source.png` | Original raster of the mark, for reference |
 
 ## The mark
 
-A shopping basket with one item dropping into it. The concept came from Recraft
-(via Higgsfield, `model_type: vector`), then was rebuilt by hand: the model's own
-output was 1.9KB of bezier approximations whose details mushed together below
-about 24px, and this is the same idea in exact geometry at a fraction of the size.
-
-Two constraints, both found by rendering candidates at real sizes rather than by
-eye:
-
-- **No handle.** An arc over a rounded body reads as a padlock at every size.
-  Two of the first four variants had to be thrown out for this.
-- **The body flares outward at the rim.** A plain downward taper reads as a
-  waste bin.
-
-The item is drawn *before* the basket so the rim occludes it: it is going in, not
-sitting in front of it.
+A shopping basket whose body is a barcode: basket + price-scan in one shape.
+The handle is an open trapezoid (no base) so it never reads as a padlock; the
+body is eight vertical bars of uneven width.
 
 Geometry is duplicated in `../public/favicon.svg`,
 `../src/components/shared/Logo.tsx` and `og.html`. Change all three together.
 
 Colours are literal hex, not the `oklch` design tokens: favicon renderers are not
-full browsers. `#006598` is `--color-accent`, `#FC9B6F` is `--color-over-band`.
+full browsers. `#9747FF` is the brand grape on the mark tile. Site `--color-accent`
+stays a deeper blue so buttons can carry white text at AA.
 
 ## The wordmark
 
 One word, `SuperMCP`, set in Gabarito at 700 and used nowhere else on the site.
 MCP keeps its capitals because it is an acronym and lowercasing it loses the only
 part of the name that says what this connects to.
+
+## Regenerating the PNG icons
+
+From `apps/web`:
+
+```bash
+rsvg-convert -w 192 -h 192 public/favicon.svg -o public/icon-192.png
+rsvg-convert -w 512 -h 512 public/favicon.svg -o public/icon-512.png
+# Apple touch is square-cornered on purpose (iOS applies its own mask).
+rsvg-convert -w 180 -h 180 public/favicon.svg -o public/apple-touch-icon.png
+```
 
 ## Regenerating `og.png`
 
@@ -62,9 +63,6 @@ node -e '
 
 Check the result is set in Secular One and Geist Mono before committing: if the
 fonts fail to load the card silently falls back to system faces.
-
-The apple touch icon is square-cornered on purpose (iOS applies its own mask)
-with the bars inset so they survive the rounding.
 
 ## When the numbers change
 

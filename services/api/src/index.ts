@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./app.js";
+import { enabledSurfaces } from "./mcp/surfaces.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
@@ -12,7 +13,10 @@ const HOST = process.env.HOST ?? "0.0.0.0";
 async function main(): Promise<void> {
   const app = await buildApp();
   await app.listen({ port: PORT, host: HOST });
-  app.log.info(`super-mcp API + MCP listening on http://${HOST}:${PORT} (MCP at /mcp)`);
+  const mcpPaths = enabledSurfaces()
+    .map((surface) => surface.path)
+    .join(", ");
+  app.log.info(`super-mcp API + MCP listening on http://${HOST}:${PORT} (MCP at ${mcpPaths})`);
   void import("./services/search/queryEmbedding.js").then((m) =>
     m.getQueryEmbedding("warmup").catch(() => undefined),
   );

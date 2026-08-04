@@ -1,71 +1,95 @@
 @import "tailwindcss";
 
 /*
- * Design system: "operational ledger".
+ * Design system: "sticker ledger" (שלט השוק).
  *
- * The page argues with numbers, so the type system treats figures as a
- * first-class citizen: one mono face, always tabular, always aligned. The
- * recurring visual motif is the hairline rule, not the rounded card, because
- * the artifact this product actually produces is a price list.
+ * The page sells the moment a shopper sees which store is cheaper, so it looks
+ * like the artifact that carries that moment in the physical world: the shelf
+ * edge label and the shuk price sign. Thick marker borders, hard offset
+ * shadows, loud rotated stickers, and figures set in a tabular mono.
  *
- * Neutrals are tinted toward the brand hue (230) rather than pure gray, and
- * paper is never #fff. Both are deliberate: untinted neutrals next to a cyan
- * accent read as dirty.
+ * Colour semantics are locked and deliberate:
+ *   grape     the brand. Bands, the marquee, the logo tile, decorations.
+ *   lime      savings, wins, and the page's single CTA intent. Ink text only.
+ *   tangerine tiny decorative pops. `over` is its AA-safe deep form and is the
+ *             only colour allowed on a delta or a "missing" line.
+ * Soft tints (grape-soft, lime-soft, over-soft) are decorative and carry no
+ * meaning; the full-strength colours do.
+ *
+ * Shape lock: everything is radius 8px (`--radius-card`) or a full pill.
+ * Shadows offset down-LEFT because the page is RTL: the shadow mirrors the
+ * reading direction instead of fighting it.
  */
 
 @theme {
-  /* Surfaces, all tinted toward the brand hue. */
-  --color-paper: oklch(0.994 0.002 230);
-  --color-paper-raised: oklch(1 0 0);
-  --color-paper-sunk: oklch(0.972 0.008 230);
+  /* Paper: price-tag stock. Warm cream, never white. */
+  --color-paper: oklch(0.955 0.028 92);
+  --color-paper-raised: oklch(0.975 0.02 95);
+  --color-paper-sunk: oklch(0.925 0.035 90);
 
   /*
-   * Ink. Never pure black.
+   * Ink: warm near-black. Carries text, every border, and every shadow.
    *
-   * `ink-faint` is the lightest tint that still clears WCAG AA (4.5:1) at 12px
-   * against all three light surfaces, measured: 5.07 on paper, 4.78 on sunk,
-   * 4.55 on accent-soft. It carries footnotes and figure captions, which is
-   * exactly the copy people squint at, so it is not allowed to go lighter.
+   * `ink-faint` is the lightest tint still clearing WCAG AA (4.5:1) at 12px on
+   * cream (~4.9:1, measured against --color-paper). It carries footnotes and
+   * figure captions, exactly the copy people squint at, so it goes no lighter.
    */
-  --color-ink: oklch(0.22 0.022 250);
-  --color-ink-muted: oklch(0.47 0.021 250);
-  --color-ink-faint: oklch(0.53 0.018 250);
+  --color-ink: oklch(0.21 0.018 70);
+  --color-ink-muted: oklch(0.4 0.028 70);
+  --color-ink-faint: oklch(0.45 0.024 70);
 
-  /* Accent. Deep enough to carry white text at AA. */
-  --color-accent: oklch(0.47 0.135 232);
-  --color-accent-deep: oklch(0.36 0.115 235);
-  --color-accent-soft: oklch(0.955 0.026 230);
+  /*
+   * Grape. `grape` is the loud reference purple: graphics, large display text,
+   * and cream text at 18px+ only (3.2:1). `grape-band` is the band background
+   * that carries cream body text at ~5.9:1. `grape-deep` is the pressed state.
+   */
+  --color-grape: oklch(0.55 0.26 292);
+  --color-grape-band: oklch(0.45 0.21 292);
+  --color-grape-deep: oklch(0.38 0.185 292);
+  --color-grape-soft: oklch(0.93 0.045 295);
 
-  /* The ledger band: the page's one colour block. */
-  --color-band: oklch(0.31 0.098 236);
-  --color-band-raised: oklch(0.36 0.098 236);
-  --color-band-ink: oklch(0.98 0.006 230);
-  --color-band-muted: oklch(0.79 0.031 230);
-  --color-band-line: oklch(0.48 0.075 236);
+  /* Lime: savings, wins, the CTA. Ink text on it (~10:1), never cream. */
+  --color-lime: oklch(0.905 0.225 119);
+  --color-lime-soft: oklch(0.955 0.085 115);
 
-  /* Semantic figures. A delta is not decoration, it carries sign. */
-  /* Same AA floor as ink-faint: this colour labels the missing line at 12px. */
-  --color-over: oklch(0.545 0.155 32);
-  --color-over-band: oklch(0.78 0.13 45);
+  /*
+   * Tangerine is decoration only, at sizes where contrast is irrelevant.
+   * `over` is the semantic form: deltas and missing lines, AA-safe on cream
+   * (~4.7:1 at 12px).
+   */
+  --color-tangerine: oklch(0.74 0.18 55);
+  --color-over: oklch(0.46 0.14 50);
+  --color-over-soft: oklch(0.94 0.04 65);
 
-  /* Hairlines, the recurring motif. */
-  --color-line: oklch(0.89 0.011 230);
-  --color-line-strong: oklch(0.8 0.02 230);
+  /* Rare quiet separator. Most rules on this page are ink; this is the whisper. */
+  --color-line: oklch(0.85 0.02 85);
 
-  --radius-lg: 16px;
-  --radius-xl: 24px;
+  /* Cream text on ink surfaces (the footer). */
+  --color-cream-dim: oklch(0.75 0.03 85);
+
+  /*
+   * Hard offset shadows, the sticker signature. No blur, ever. Offset goes
+   * down-left to mirror RTL reading. `pressed` is the hover/active landing.
+   */
+  --shadow-sticker-sm: -3px 3px 0 0 var(--color-ink);
+  --shadow-sticker: -5px 5px 0 0 var(--color-ink);
+  --shadow-sticker-lg: -8px 8px 0 0 var(--color-ink);
+  --shadow-pressed: -2px 2px 0 0 var(--color-ink);
+
+  /* Shape lock: 8px cards and pills, nothing in between. */
+  --radius-card: 8px;
   --radius-pill: 999px;
 
   --font-sans: var(--font-heebo), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-secular), var(--font-heebo), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
-  /* Wordmark only. Never body copy, never headings. */
-  --font-wordmark: var(--font-gabarito), ui-sans-serif, system-ui, sans-serif;
+  /* Latin display only: wordmark and marquee numerals. Never body, never Hebrew. */
+  --font-wordmark: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
 }
 
 /*
- * Fluid type scale, ratio ~1.26 at the small end opening to ~1.33 at the
- * large end so headlines gain more on a wide screen than body copy does.
+ * Fluid type scale, ratio ~1.26 at the small end opening up at the large end
+ * so headlines gain more on a wide screen than body copy does.
  */
 :root {
   --step-0: clamp(0.9375rem, 0.92rem + 0.1vw, 1rem);
@@ -74,6 +98,7 @@
   --step-3: clamp(1.5rem, 1.32rem + 0.85vw, 2rem);
   --step-4: clamp(1.875rem, 1.55rem + 1.6vw, 2.875rem);
   --step-5: clamp(2.375rem, 1.75rem + 3.1vw, 4.25rem);
+  --step-6: clamp(2.625rem, 1.85rem + 3.9vw, 4.75rem);
 
   /* Spacing rhythm. Sections vary on purpose; monotone padding reads flat. */
   --space-section: clamp(4rem, 3rem + 4vw, 7.5rem);
@@ -102,15 +127,18 @@ body {
 }
 
 ::selection {
-  background: var(--color-accent-soft);
+  background: var(--color-lime);
   color: var(--color-ink);
 }
 
-/* Consistent, visible focus for keyboard users on every interactive surface. */
+/*
+ * Visible focus on every surface except the ink footer (which overrides to
+ * lime locally). Ink reads on cream, lime, and both grapes.
+ */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 3px solid var(--color-ink);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 /*
@@ -142,6 +170,87 @@ body {
 }
 
 /*
+ * The sticker press. Interactive bordered elements travel toward their shadow
+ * on hover and land nearly flat on active, so every clickable thing on the
+ * page feels like a physical price tag being pushed.
+ */
+.pressable {
+  transition:
+    transform 160ms ease-out,
+    box-shadow 160ms ease-out,
+    background-color 160ms ease-out,
+    color 160ms ease-out;
+}
+.pressable:hover {
+  transform: translate(-2px, 2px);
+  box-shadow: var(--shadow-pressed);
+}
+.pressable:active {
+  transform: translate(-4px, 4px);
+  box-shadow: -1px 1px 0 0 var(--color-ink);
+}
+
+/*
+ * Closed disclosures must hide their content, full stop. The UA rule that does
+ * this is author-overridable, and the developer disclosure's own grid class was
+ * beating it: the closed <details> kept laying out (and exposing to the a11y
+ * tree) everything inside, including a link that geometrically landed on the
+ * access form's submit button. Reinstate the hiding at author level.
+ */
+details:not([open]) > *:not(summary) {
+  display: none;
+}
+
+/* Faint dot grid behind the hero: graph paper under the sticker. */
+.dot-grid {
+  background-image: radial-gradient(
+    color-mix(in oklch, var(--color-ink) 13%, transparent) 1.2px,
+    transparent 1.2px
+  );
+  background-size: 22px 22px;
+}
+
+/*
+ * The ticker. One marquee per page, between the hero and the ledger. The track
+ * is duplicated once in the DOM and translated by half its width, so the loop
+ * is seamless. Direction is LTR on the wrapper to keep the translate math
+ * predictable; the Hebrew items handle their own bidi internally.
+ */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee {
+  direction: ltr;
+  overflow: hidden;
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 36s linear infinite;
+}
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track {
+    animation: none;
+  }
+  .pressable,
+  .pressable:hover,
+  .pressable:active {
+    transition: none;
+    transform: none;
+  }
+}
+
+/*
  * Reveals, as progressive enhancement.
  *
  * The previous implementation animated from opacity 0 in JavaScript, which meant
@@ -157,7 +266,7 @@ body {
 @keyframes rise-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(12px) rotate(0.5deg);
   }
   to {
     opacity: 1;
@@ -211,7 +320,8 @@ body {
 /* Nothing animates on paper, and nothing arrives mid-transition. */
 @media print {
   [data-enter],
-  [data-reveal] {
+  [data-reveal],
+  .marquee-track {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

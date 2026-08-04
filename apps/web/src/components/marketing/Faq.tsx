@@ -12,19 +12,22 @@ export function Faq() {
           </Reveal>
 
           <Reveal>
-            <div className="border-t border-[var(--color-line)]">
+            <div className="grid gap-4">
               {he.faq.items.map((item) => (
-                <details key={item.q} className="group border-b border-[var(--color-line)]">
-                  <summary className="flex cursor-pointer list-none items-baseline justify-between gap-4 py-4 font-semibold marker:content-none [&::-webkit-details-marker]:hidden">
+                <details
+                  key={item.q}
+                  className="group rounded-[var(--radius-card)] border-[2.5px] border-ink bg-paper-raised shadow-sticker-sm"
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-bold marker:content-none [&::-webkit-details-marker]:hidden">
                     {item.q}
                     <span
                       aria-hidden
-                      className="figure shrink-0 text-[var(--color-accent)] transition-transform duration-200 ease-out group-open:rotate-45"
+                      className="figure grid size-8 shrink-0 place-items-center rounded-[6px] border-2 border-ink bg-lime text-ink transition-transform duration-200 ease-out group-open:rotate-45"
                     >
                       +
                     </span>
                   </summary>
-                  <p className="max-w-[64ch] pb-5 leading-[1.7] text-[var(--color-ink-muted)]">
+                  <p className="max-w-[64ch] px-5 pb-5 leading-[1.7] text-ink-muted">
                     {item.a}
                   </p>
                 </details>

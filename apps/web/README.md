@@ -29,7 +29,7 @@ CORS_ORIGINS=http://localhost:3000
 
 Values prefixed with `NEXT_PUBLIC_` are baked into the client/server bundle at build time.
 
-- `NEXT_PUBLIC_MCP_URL` — Streamable HTTP MCP endpoint (also used to derive the API base URL for the access form by stripping `/mcp`)
+- `NEXT_PUBLIC_MCP_URL` — Streamable HTTP MCP endpoint (also used to derive the API base URL for the access form by stripping `/mcp` or legacy `/mcp/online`)
 - `CORS_ORIGINS` (API) — required for the access form; comma-separated browser origins allowed to call the API
 
 ## TypeScript note

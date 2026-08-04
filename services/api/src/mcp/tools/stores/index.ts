@@ -11,7 +11,7 @@ import { locationShape, resolveToolLocation } from "../shared/location.js";
 
 export function registerStoreTools(server: McpServer): void {
   registerListStoresTool(server);
-  registerGetPromotionsTool(server);
+  registerGetPromotionsTool(server, "stores");
 }
 
 /**
@@ -24,7 +24,7 @@ export function registerStoreTools(server: McpServer): void {
  * answers the same question in the terms that apply here.
  */
 export function registerOnlineStoreTools(server: McpServer): void {
-  registerGetPromotionsTool(server);
+  registerGetPromotionsTool(server, "online");
 }
 
 function registerListStoresTool(server: McpServer): void {
@@ -59,7 +59,14 @@ function registerListStoresTool(server: McpServer): void {
 
 }
 
-function registerGetPromotionsTool(server: McpServer): void {
+function registerGetPromotionsTool(
+  server: McpServer,
+  surface: "stores" | "online",
+): void {
+  const priceContext =
+    surface === "online"
+      ? "an optimize_delivery line price"
+      : "a compare_prices or optimize_basket effective_price";
   registerTool(
     server,
     "get_promotions",
@@ -68,7 +75,7 @@ function registerGetPromotionsTool(server: McpServer): void {
       description:
         "List promotions (e.g. '2 for 30₪', club-member price, second-unit discount), optionally filtered by " +
         "store_id or product_id, and by active=true to only return promotions currently running. Use this to " +
-        "explain why a compare_prices or optimize_basket effective_price is lower than list_price.",
+        `explain why ${priceContext} is lower than list_price.`,
       inputSchema: {
         store_id: z.string().uuid().optional().describe("Filter to promotions at this store."),
         product_id: z.string().uuid().optional().describe("Filter to promotions covering this canonical product."),

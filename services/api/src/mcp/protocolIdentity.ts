@@ -130,3 +130,58 @@ export function validateMcpBasketContract(input: ContractCheckInput): ContractCh
 
   return { ok: errors.length === 0, errors, identity };
 }
+
+/** Pure contract validation for the live online-delivery MCP surface. */
+export function validateMcpDeliveryContract(input: ContractCheckInput): ContractCheckResult {
+  const errors: string[] = [];
+  const names = new Set(input.toolNames);
+
+  if (!names.has("optimize_delivery")) {
+    errors.push("optimize_delivery is missing");
+  }
+  if (names.has("optimize_basket")) {
+    errors.push("disabled physical tool optimize_basket is still registered");
+  }
+  if (input.toolNames.length > 0 && input.toolNames[0] !== "optimize_delivery") {
+    errors.push("optimize_delivery must be the first registered tool");
+  }
+
+  const optimize = input.tools.find((tool) => tool.name === "optimize_delivery");
+  const props = optimize?.inputSchema?.properties ?? {};
+  if (optimize) {
+    for (const field of ["continuation", "answers", "resolution_mode", "address"]) {
+      if (!(field in props)) {
+        errors.push(`optimize_delivery schema lacks ${field}`);
+      }
+    }
+    if ("qty" in props) {
+      errors.push("optimize_delivery schema still accepts deprecated qty");
+    }
+  }
+
+  const identity = parseProtocolIdentityLine(input.instructions);
+  if (!identity) {
+    errors.push("server instructions lack protocol=…; build=… identity line");
+  } else if (identity.protocol !== DELIVERY_PROTOCOL_ID) {
+    errors.push(
+      `unexpected protocol identity ${identity.protocol} (want ${DELIVERY_PROTOCOL_ID})`,
+    );
+  }
+
+  const requireDeployed =
+    input.requireDeployedRevision === true ||
+    process.env.SUPER_MCP_REQUIRE_BUILD_REVISION === "1" ||
+    process.env.NODE_ENV === "production";
+
+  if (identity && requireDeployed && identity.build === DEV_FALLBACK_REVISION) {
+    errors.push("deployed build revision is missing (still 'dev')");
+  }
+
+  if (input.expectedBuild && identity && identity.build !== input.expectedBuild) {
+    errors.push(
+      `build mismatch: server reports ${identity.build}, expected ${input.expectedBuild}`,
+    );
+  }
+
+  return { ok: errors.length === 0, errors, identity };
+}

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildMcpServerInstructions } from "../../src/mcp/server.js";
 import {
   BASKET_PROTOCOL_ID,
+  DELIVERY_PROTOCOL_ID,
   parseProtocolIdentityLine,
   protocolIdentityLine,
   resolveBuildRevision,
   validateMcpBasketContract,
+  validateMcpDeliveryContract,
 } from "../../src/mcp/protocolIdentity.js";
 
 describe("protocol identity", () => {
@@ -31,15 +33,58 @@ describe("protocol identity", () => {
 
   it("embeds identity in MCP server instructions", () => {
     const instructions = buildMcpServerInstructions({ SUPER_MCP_BUILD_REVISION: "rev1" });
-    expect(instructions).toMatch(/optimize_basket/i);
-    expect(instructions).not.toMatch(/prepare_basket/i);
-    expect(instructions).toMatch(
-      /^Shopping list → call optimize_basket exactly once with all items and location\./,
-    );
+    expect(instructions).toMatch(/optimize_delivery/i);
+    expect(instructions).not.toMatch(/optimize_basket/i);
+    expect(instructions).toMatch(/^Shopping list to be DELIVERED/);
     expect(parseProtocolIdentityLine(instructions)).toEqual({
-      protocol: BASKET_PROTOCOL_ID,
+      protocol: DELIVERY_PROTOCOL_ID,
       build: "rev1",
     });
+  });
+});
+
+describe("validateMcpDeliveryContract", () => {
+  const goodInstructions = protocolIdentityLine(
+    { SUPER_MCP_BUILD_REVISION: "rev1" },
+    DELIVERY_PROTOCOL_ID,
+  );
+  const goodTools = [
+    {
+      name: "optimize_delivery",
+      inputSchema: {
+        properties: {
+          items: {},
+          address: {},
+          continuation: {},
+          answers: {},
+          resolution_mode: {},
+        },
+      },
+    },
+  ];
+
+  it("accepts the online delivery schema and protocol identity", () => {
+    const result = validateMcpDeliveryContract({
+      toolNames: ["optimize_delivery", "search_products"],
+      tools: goodTools,
+      instructions: goodInstructions,
+      expectedBuild: "rev1",
+    });
+    expect(result).toMatchObject({ ok: true, errors: [] });
+  });
+
+  it("rejects a physical or malformed live surface", () => {
+    const result = validateMcpDeliveryContract({
+      toolNames: ["optimize_basket", "optimize_delivery"],
+      tools: [{ name: "optimize_delivery", inputSchema: { properties: { qty: {} } } }],
+      instructions: protocolIdentityLine({}, BASKET_PROTOCOL_ID),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/optimize_basket/);
+    expect(result.errors.join(" ")).toMatch(/first registered tool/);
+    expect(result.errors.join(" ")).toMatch(/address/);
+    expect(result.errors.join(" ")).toMatch(/qty/);
+    expect(result.errors.join(" ")).toMatch(/unexpected protocol identity/);
   });
 });
 

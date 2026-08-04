@@ -28,6 +28,6 @@ export function registerProductTools(server: McpServer): void {
  * fees included.
  */
 export function registerOnlineProductTools(server: McpServer): void {
-  registerSearchProductsTool(server);
+  registerSearchProductsTool(server, "optimize_delivery");
   registerGetProductTool(server);
 }
