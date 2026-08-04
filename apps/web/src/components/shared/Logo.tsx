@@ -20,7 +20,7 @@ export function Logo() {
       <svg
         viewBox="0 0 32 32"
         aria-hidden
-        className="size-8 shrink-0 rounded-[var(--radius-card)] shadow-sticker-sm"
+        className="size-8 -translate-y-0.5 shrink-0 rounded-[var(--radius-card)] shadow-sticker-sm"
       >
         <rect
           width="32"

@@ -10,16 +10,14 @@ import { Reveal } from "@/components/shared/Reveal";
 import { TrackedAnchor } from "@/components/shared/TrackedAnchor";
 import { Button } from "@/components/ui/button";
 import { he } from "@/content/he";
-import { AnalyticsEvent, capture } from "@/lib/analytics";
+import { AnalyticsEvent } from "@/lib/analytics";
 import { buildMcpJsonSnippet, getMcpUrl } from "@/lib/mcp";
 
 /**
  * How a shopper gets from here to a priced basket, in three plain steps.
  *
  * Everything technical (the mcp.json block, the tool list, self-hosting) sits
- * behind one disclosure at the bottom. A shopper never opens it; someone wiring
- * this into their own tooling finds it in one click. Before this, the config was
- * the section, which meant the page answered a question shoppers never asked.
+ * together at the bottom, after the shopper-facing connection steps.
  */
 const STEP_TILTS = ["rotate-[0.5deg]", "rotate-[-0.5deg]", "rotate-[0.5deg]"];
 
@@ -90,34 +88,21 @@ export function Connect() {
         </div>
 
         <Reveal className="mt-14">
-          <DeveloperDetails />
+          <DeveloperSection />
         </Reveal>
       </Container>
     </section>
   );
 }
 
-function DeveloperDetails() {
+function DeveloperSection() {
   const { dev } = he.connect;
   const url = getMcpUrl();
   const json = buildMcpJsonSnippet(url);
 
   return (
-    <details
-      className="group rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised px-5 py-4 shadow-sticker md:px-7 md:py-5"
-      onToggle={(e) => {
-        if (e.currentTarget.open) capture(AnalyticsEvent.AccessDetailsOpened);
-      }}
-    >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-bold marker:content-none [&::-webkit-details-marker]:hidden">
-        <span className="underline-offset-4 decoration-2 group-open:underline">{dev.summary}</span>
-        <span
-          aria-hidden
-          className="figure grid size-8 shrink-0 place-items-center rounded-[6px] border-2 border-ink bg-lime text-ink transition-transform duration-200 ease-out group-open:rotate-45"
-        >
-          +
-        </span>
-      </summary>
+    <div className="rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised px-5 py-4 shadow-sticker md:px-7 md:py-5">
+      <h3 className="font-bold">{dev.summary}</h3>
 
       <div className="mt-5 grid gap-10 border-t-[3px] border-ink pt-6 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14">
         <div className="min-w-0">
@@ -196,6 +181,6 @@ function DeveloperDetails() {
           </div>
         </div>
       </div>
-    </details>
+    </div>
   );
 }

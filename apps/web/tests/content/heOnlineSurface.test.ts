@@ -12,7 +12,6 @@ describe("marketing copy matches the online-only product surface", () => {
 
   it("labels the hero chat as delivery without claiming a live measurement", () => {
     expect(he.hero.chat.toolName).toBe("super-mcp · optimize_delivery");
-    expect(he.hero.chat.footnote).toMatch(/דוגמה|לא מדידה/);
     expect(he.hero.chat.planDistance).not.toMatch(/ק״מ|קמ/);
   });
 

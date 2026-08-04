@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 import { AssistantRow } from "@/components/shared/AssistantRow";
 import { Container } from "@/components/shared/Container";
 import { HandArrow, PixelPlus, Sparkle } from "@/components/shared/doodles";
@@ -8,14 +10,14 @@ import { he } from "@/content/he";
 import { AnalyticsEvent } from "@/lib/analytics";
 
 /**
- * The hero shows the product instead of describing it, as one real exchange:
- * what a person typed, the tool the assistant reached for, and what came back.
- * Every figure is from the measured basket in `he.ts`, and the missing line is
- * shown rather than hidden, because "it tells you what it does not know" is the
- * whole positioning.
+ * The hero shows the product instead of describing it: a lively grocery photo
+ * as the visual plane, and on top of it one real exchange (what a person typed,
+ * the tool the assistant reached for, and what came back). Every figure is from
+ * the measured basket in `he.ts`, and the missing line is shown rather than
+ * hidden, because "it tells you what it does not know" is the whole positioning.
  */
 export function Hero() {
-  const { hero } = he;
+  const { coverage, hero } = he;
 
   return (
     <section id="top" className="relative isolate overflow-hidden">
@@ -34,28 +36,28 @@ export function Hero() {
         className="pointer-events-none absolute top-40 start-[44%] -z-10 hidden size-4 text-ink/30 lg:block"
       />
 
-      <Container className="grid items-center gap-10 pt-[clamp(2.5rem,1.75rem+3.5vw,5rem)] pb-[var(--space-section-tight)] lg:grid-cols-[1.02fr_0.98fr] lg:gap-16">
-        <Reveal on="load" beat={1} className="max-w-[38rem]">
+      <Container className="grid max-w-[1280px] items-center gap-10 pt-[clamp(2.5rem,1.75rem+3.5vw,5rem)] pb-[var(--space-section-tight)] lg:grid-cols-[1.3fr_0.7fr] lg:gap-10 xl:grid-cols-[1.15fr_0.85fr] xl:gap-16">
+        <Reveal on="load" beat={1} className="max-w-[46rem]">
           <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-pill)] border-2 border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
             {hero.eyebrow}
           </p>
 
-          <h1 className="display mt-6 text-[length:var(--step-6)]">
+          <h1 className="display mt-6 flex flex-col items-start gap-3 text-[length:clamp(2.25rem,1.5rem+3.1vw,4rem)] sm:flex-row sm:items-center sm:gap-4">
             {hero.titleLines.map((line) => (
-              <span key={line} className="block">
+              <span key={line} className="block whitespace-nowrap">
                 {line}
               </span>
             ))}
-            <span className="mt-3 inline-block rotate-[-1.2deg] rounded-[var(--radius-card)] border-[3px] border-ink bg-lime px-4 py-1 text-ink shadow-sticker">
+            <span className="inline-block whitespace-nowrap rotate-[-1.2deg] rounded-[var(--radius-card)] border-[3px] border-ink bg-lime px-4 py-1 text-ink shadow-sticker">
               {hero.titleAccent}
             </span>
           </h1>
 
-          <p className="mt-6 max-w-[44ch] text-[length:var(--step-1)] leading-[1.6] text-ink-muted">
+          <p className="mt-2 max-w-[44ch] text-[length:var(--step-1)] leading-[1.6] text-ink-muted">
             {hero.subtitle}
           </p>
 
-          <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-4">
+          <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-4">
             <Button asChild size="xl">
               <TrackedAnchor
                 href="#access"
@@ -70,18 +72,72 @@ export function Hero() {
             </Button>
           </div>
 
-          <p className="mt-4 text-xs text-ink-muted">{hero.ctaReassurance}</p>
-
+          {/* Above the hero/marquee divide: platforms, not a second CTA block. */}
           <div className="mt-9">
-            <AssistantRow label={hero.assistantsLabel} />
+            <AssistantRow label={hero.assistantsLabel} compact />
+            <p className="mt-3 font-semibold text-ink-muted text-[0.6875rem]">
+              {coverage.chainsLabel}
+            </p>
+            <ul
+              aria-label={coverage.chainsLabel}
+              className="mt-2.5 grid max-w-[28rem] grid-cols-5 gap-1.5"
+            >
+              {coverage.chains.map((chain) => (
+                <li
+                  key={chain.slug}
+                  className="flex h-7 items-center justify-center rounded-[4px] border border-ink/40 bg-paper-raised px-1"
+                >
+                  <Image
+                    src={`/chains/${chain.slug}.png`}
+                    alt={chain.name}
+                    width={64}
+                    height={24}
+                    className="h-auto max-h-4 w-auto max-w-full object-contain"
+                  />
+                </li>
+              ))}
+            </ul>
           </div>
         </Reveal>
 
         <Reveal on="load" beat={2}>
-          <ChatExchange />
+          <HeroVisual />
         </Reveal>
       </Container>
     </section>
+  );
+}
+
+/**
+ * Grocery photo as the right-column visual plane; the chat exchange is the
+ * sticker slapped on top of it. The photo carries atmosphere; the card carries
+ * the argument. No text is painted onto the photo.
+ */
+function HeroVisual() {
+  const { hero } = he;
+
+  return (
+    <div className="relative">
+      <div className="relative aspect-[4/3] overflow-hidden rounded-[var(--radius-card)] border-[3px] border-ink shadow-sticker-lg rotate-[-0.8deg]">
+        <Image
+          src="/hero-grocery.webp"
+          alt={hero.imageAlt}
+          fill
+          priority
+          sizes="(max-width: 1024px) 92vw, 40vw"
+          className="object-cover object-[50%_42%]"
+        />
+      </div>
+
+      <HandArrow
+        aria-hidden
+        className="pointer-events-none absolute -top-10 end-6 z-20 hidden w-24 text-ink lg:block"
+      />
+
+      <div className="relative z-10 -mt-20 ms-2 me-0 sm:-mt-24 sm:ms-6 lg:-mt-28 lg:ms-10">
+        <ChatExchange />
+      </div>
+    </div>
   );
 }
 
@@ -96,8 +152,6 @@ function ChatExchange() {
 
   return (
     <figure className="relative rotate-[1.2deg] rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised p-4 shadow-sticker-lg md:p-5">
-      <HandArrow className="absolute -top-14 right-2 hidden w-24 text-ink lg:block" />
-
       {/* What the person typed. */}
       <div className="flex justify-start">
         <p className="max-w-[92%] rounded-[var(--radius-card)] border-2 border-ink bg-grape-soft px-4 py-3 text-[0.9375rem] leading-[1.55] text-ink">
@@ -144,7 +198,6 @@ function ChatExchange() {
             {chat.planMissingLabel}
             <span className="font-bold">{chat.planMissing}</span>
           </span>
-          <figcaption className="ms-auto text-ink-faint">{chat.footnote}</figcaption>
         </div>
       </div>
     </figure>

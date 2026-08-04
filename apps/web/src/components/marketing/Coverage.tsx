@@ -9,26 +9,25 @@ import { he } from "@/content/he";
  * wall of hero metrics, and the chain names do the real persuading: an Israeli
  * reader recognises them instantly and knows what is and is not covered.
  *
- * This is also the one place photography lives, as a full-bleed strip framed
- * in ink with no text over it, so a photo never occupies a slot where an
- * argument belongs.
+ * Photography here is a full-bleed strip framed in ink with no text over it, so
+ * a photo never occupies a slot where an argument belongs.
  */
 
 /* Tiny rotations so the stat tags read as slapped-on stickers, not a grid template. */
 const TAG_TILTS = ["rotate-[-0.8deg]", "rotate-[0.6deg]", "rotate-[-0.4deg]", "rotate-[0.8deg]", "rotate-[-0.6deg]", "rotate-[0.4deg]"];
 
 export function Coverage() {
-  const { coverage } = he;
+  const { coverage, visuals } = he;
 
   return (
     <>
-      <div className="relative aspect-[21/6] w-full overflow-hidden border-y-[3px] border-ink bg-paper-sunk md:aspect-[24/5]">
+      <div className="relative aspect-[16/7] w-full overflow-hidden border-y-[3px] border-ink bg-paper-sunk md:aspect-[21/6]">
         <Image
           src="/shelf-prices.webp"
-          alt="מדפי סופרמרקט עמוסים עם פסי תגי מחיר לאורך כל מדף"
+          alt={visuals.shelfAlt}
           fill
           sizes="100vw"
-          className="object-cover object-center"
+          className="object-cover object-[50%_55%]"
         />
       </div>
 
@@ -71,17 +70,25 @@ export function Coverage() {
             </Reveal>
           </div>
 
-          <Reveal className="mt-14">
-            <h3 className="text-xs font-bold tracking-wide text-ink-muted">
+          {/* Small chain marks sit at the foot of the section, after the argument. */}
+          <Reveal className="mt-16 border-t-2 border-ink/10 pt-8 md:mt-20">
+            <h3 className="text-[0.6875rem] font-bold tracking-wide text-ink-muted">
               {coverage.chainsLabel}
             </h3>
-            <ul className="mt-5 flex flex-wrap items-center gap-3">
+            {/* Always five across: two equal rows of five on every breakpoint. */}
+            <ul className="mt-3 grid grid-cols-5 gap-1.5 sm:gap-2">
               {coverage.chains.map((chain) => (
                 <li
-                  key={chain}
-                  className="rounded-[var(--radius-pill)] border-[2.5px] border-ink bg-paper-raised px-4 py-1.5 text-base font-bold text-ink shadow-sticker-sm"
+                  key={chain.slug}
+                  className="flex h-14 items-center justify-center rounded-[6px] border-2 border-ink bg-paper-raised px-2 py-1.5 shadow-sticker-sm sm:h-20 sm:px-4 sm:py-2"
                 >
-                  {chain}
+                  <Image
+                    src={`/chains/${chain.slug}.png`}
+                    alt={chain.name}
+                    width={180}
+                    height={60}
+                    className="h-auto max-h-8 w-auto max-w-full object-contain sm:max-h-12"
+                  />
                 </li>
               ))}
             </ul>

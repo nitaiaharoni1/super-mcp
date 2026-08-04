@@ -72,7 +72,7 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "SuperMCP: אותו מוצר, שני מחירים, ואנחנו אומרים איזה",
+        alt: "SuperMCP: הסל הכי משתלם, עם AI!",
       },
     ],
   },
