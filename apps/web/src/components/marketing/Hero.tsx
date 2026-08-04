@@ -36,7 +36,7 @@ export function Hero() {
         className="pointer-events-none absolute top-40 start-[44%] -z-10 hidden size-4 text-ink/30 lg:block"
       />
 
-      <Container className="grid max-w-[1280px] items-center gap-10 pt-[clamp(2.5rem,1.75rem+3.5vw,5rem)] pb-[var(--space-section-tight)] lg:grid-cols-[1.3fr_0.7fr] lg:gap-10 xl:grid-cols-[1.15fr_0.85fr] xl:gap-16">
+      <Container className="grid max-w-[1280px] items-center gap-14 pt-[clamp(2.5rem,1.75rem+3.5vw,5rem)] pb-[var(--space-section-tight)] lg:grid-cols-[1.3fr_0.7fr] lg:gap-24 xl:grid-cols-[1.15fr_0.85fr] xl:gap-32">
         <Reveal on="load" beat={1} className="max-w-[46rem]">
           <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-pill)] border-2 border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
             {hero.eyebrow}
@@ -118,7 +118,7 @@ function HeroVisual() {
 
   return (
     <div className="relative">
-      <div className="relative aspect-[4/3] overflow-hidden rounded-[var(--radius-card)] border-[3px] border-ink shadow-sticker-lg rotate-[-0.8deg]">
+      <div className="relative aspect-[4/3] -translate-x-16 overflow-hidden rounded-[var(--radius-card)] border-[3px] border-ink shadow-sticker-lg rotate-[-0.8deg] sm:-translate-x-24 lg:-translate-x-36">
         <Image
           src="/hero-grocery.webp"
           alt={hero.imageAlt}
@@ -134,7 +134,7 @@ function HeroVisual() {
         className="pointer-events-none absolute -top-10 end-6 z-20 hidden w-24 text-ink lg:block"
       />
 
-      <div className="relative z-10 -mt-28 ms-0 me-0 sm:-mt-36 sm:ms-2 lg:-mt-44 lg:ms-4">
+      <div className="relative z-10 -mt-28 translate-x-10 sm:-mt-36 sm:translate-x-16 lg:-mt-44 lg:translate-x-28">
         <ChatExchange />
       </div>
     </div>
