@@ -21,7 +21,7 @@ export function Coverage() {
 
   return (
     <>
-      <div className="relative aspect-[16/7] w-full overflow-hidden border-y-[3px] border-ink bg-paper-sunk md:aspect-[21/6]">
+      <div className="relative aspect-[16/4] w-full overflow-hidden border-y-[3px] border-ink bg-paper-sunk md:aspect-[21/3]">
         <Image
           src="/shelf-prices.webp"
           alt={visuals.shelfAlt}

@@ -134,7 +134,7 @@ function HeroVisual() {
         className="pointer-events-none absolute -top-10 end-6 z-20 hidden w-24 text-ink lg:block"
       />
 
-      <div className="relative z-10 -mt-20 ms-2 me-0 sm:-mt-24 sm:ms-6 lg:-mt-28 lg:ms-10">
+      <div className="relative z-10 -mt-28 ms-0 me-0 sm:-mt-36 sm:ms-2 lg:-mt-44 lg:ms-4">
         <ChatExchange />
       </div>
     </div>

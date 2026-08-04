@@ -9,7 +9,7 @@ import { he } from "@/content/he";
  */
 export function StickerStrip() {
   return (
-    <div className="relative aspect-[16/6] w-full overflow-hidden border-y-[3px] border-ink bg-paper-sunk md:aspect-[21/5]">
+    <div className="relative aspect-[16/4] w-full overflow-hidden border-y-[3px] border-ink bg-paper-sunk md:aspect-[21/3]">
       <Image
         src="/price-stickers.webp"
         alt={he.visuals.stickersAlt}
