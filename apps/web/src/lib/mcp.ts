@@ -22,11 +22,21 @@ export function getApiBaseUrl(): string {
   return getMcpUrl().replace(/\/mcp(\/online)?\/?$/, "");
 }
 
-/** Authenticated Streamable HTTP MCP config. Never embeds a real key. */
-export function buildMcpServerConfig(url: string): {
+/**
+ * Streamable HTTP MCP config. Never embeds a real key.
+ *
+ * `requiresKey` comes from `mcpRequiresApiKey()` in ./mcpInstall so the whole page
+ * (this block, every deeplink, every CLI command) says the same thing about auth.
+ * It is a parameter rather than a direct read to keep this module pure.
+ */
+export function buildMcpServerConfig(
+  url: string,
+  requiresKey = true,
+): {
   url: string;
-  headers: { Authorization: string };
+  headers?: { Authorization: string };
 } {
+  if (!requiresKey) return { url };
   return {
     url,
     headers: {
@@ -35,11 +45,11 @@ export function buildMcpServerConfig(url: string): {
   };
 }
 
-export function buildMcpJsonSnippet(url: string): string {
+export function buildMcpJsonSnippet(url: string, requiresKey = true): string {
   return JSON.stringify(
     {
       mcpServers: {
-        [MCP_SERVER_NAME]: buildMcpServerConfig(url),
+        [MCP_SERVER_NAME]: buildMcpServerConfig(url, requiresKey),
       },
     },
     null,

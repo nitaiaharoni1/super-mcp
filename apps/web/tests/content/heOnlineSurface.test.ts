@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { he } from "@/content/he";
+import { buildInstallTargets } from "@/lib/mcpInstall";
 
 describe("marketing copy matches the online-only product surface", () => {
   it("connects developers to delivery tools, not physical basket tools", () => {
@@ -13,6 +14,17 @@ describe("marketing copy matches the online-only product surface", () => {
   it("labels the hero chat as delivery without claiming a live measurement", () => {
     expect(he.hero.chat.toolName).toBe("super-mcp · optimize_delivery");
     expect(he.hero.chat.planDistance).not.toMatch(/ק״מ|קמ/);
+  });
+
+  it("has an install card copy entry for every target, so no card renders blank", () => {
+    const copy = he.connect.install.targets as Record<string, { action: string; hint: string }>;
+    for (const target of buildInstallTargets("https://api.example.com/mcp")) {
+      expect(copy[target.id]?.action, target.id).toBeTruthy();
+      expect(copy[target.id]?.hint, target.id).toBeTruthy();
+    }
+    expect(Object.keys(copy)).toHaveLength(
+      buildInstallTargets("https://api.example.com/mcp").length,
+    );
   });
 
   it("does not frame the ledger around travel to a physical branch", () => {

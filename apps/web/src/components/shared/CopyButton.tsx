@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { capture } from "@/lib/analytics";
+import { AnalyticsEvent, capture } from "@/lib/analytics";
 
 const STATE_DURATION_MS = 1_800;
 
@@ -15,12 +15,14 @@ export function CopyButton({
   copiedLabel = "הועתק",
   failedLabel = "ההעתקה נכשלה",
   analyticsEvent,
+  analyticsProperties,
 }: {
   value: string;
   label: string;
   copiedLabel?: string;
   failedLabel?: string;
   analyticsEvent?: string;
+  analyticsProperties?: Record<string, unknown>;
 }) {
   const [state, setState] = useState<CopyState>("idle");
 
@@ -37,9 +39,13 @@ export function CopyButton({
     try {
       await navigator.clipboard.writeText(value);
       setState("copied");
-      if (analyticsEvent) capture(analyticsEvent);
+      if (analyticsEvent) capture(analyticsEvent, analyticsProperties);
     } catch {
       setState("failed");
+      // A refused clipboard is a silent funnel exit: the reader has nothing to paste.
+      if (analyticsEvent) {
+        capture(AnalyticsEvent.McpCopyFailed, { ...analyticsProperties, source: analyticsEvent });
+      }
     }
   }
 

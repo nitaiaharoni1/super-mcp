@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 
-import { AssistantRow } from "@/components/shared/AssistantRow";
+import { InstallButtons } from "@/components/marketing/InstallButtons";
 import { CodeBlock } from "@/components/shared/CodeBlock";
 import { Container } from "@/components/shared/Container";
 import { CopyButton } from "@/components/shared/CopyButton";
@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { he } from "@/content/he";
 import { AnalyticsEvent } from "@/lib/analytics";
 import { buildMcpJsonSnippet, getMcpUrl } from "@/lib/mcp";
+import { mcpRequiresApiKey } from "@/lib/mcpInstall";
 
 /**
  * How a shopper gets from here to a priced basket, in three plain steps.
@@ -63,9 +64,6 @@ export function Connect() {
               ))}
             </ol>
 
-            <div className="mt-9">
-              <AssistantRow label={connect.assistantsLabel} note={connect.assistantsNote} />
-            </div>
           </Reveal>
 
           <Reveal className="min-w-0">
@@ -88,6 +86,10 @@ export function Connect() {
         </div>
 
         <Reveal className="mt-14">
+          <InstallButtons />
+        </Reveal>
+
+        <Reveal className="mt-14">
           <DeveloperSection />
         </Reveal>
       </Container>
@@ -98,7 +100,8 @@ export function Connect() {
 function DeveloperSection() {
   const { dev } = he.connect;
   const url = getMcpUrl();
-  const json = buildMcpJsonSnippet(url);
+  const requiresKey = mcpRequiresApiKey();
+  const json = buildMcpJsonSnippet(url, requiresKey);
 
   return (
     <div className="rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised px-5 py-4 shadow-sticker md:px-7 md:py-5">
@@ -106,7 +109,9 @@ function DeveloperSection() {
 
       <div className="mt-5 grid gap-10 border-t-[3px] border-ink pt-6 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14">
         <div className="min-w-0">
-          <p className="max-w-[54ch] text-sm leading-7 text-ink-muted">{dev.body}</p>
+          <p className="max-w-[54ch] text-sm leading-7 text-ink-muted">
+            {requiresKey ? dev.body : dev.bodyKeyless}
+          </p>
 
           <div className="mt-6 min-w-0">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -115,6 +120,7 @@ function DeveloperSection() {
                 value={json}
                 label={dev.copyJson}
                 analyticsEvent={AnalyticsEvent.McpJsonCopied}
+                analyticsProperties={{ requires_key: requiresKey }}
               />
             </div>
             <CodeBlock code={json} className="mt-3" />
@@ -127,14 +133,17 @@ function DeveloperSection() {
                 value={url}
                 label={dev.copyUrl}
                 analyticsEvent={AnalyticsEvent.McpUrlCopied}
+                analyticsProperties={{ requires_key: requiresKey }}
               />
             </div>
             <CodeBlock code={url} className="mt-3" />
           </div>
 
-          <p className="mt-5 rounded-[var(--radius-card)] border-2 border-over bg-over-soft px-4 py-3 text-sm leading-6 text-ink">
-            {dev.secretWarning}
-          </p>
+          {requiresKey ? (
+            <p className="mt-5 rounded-[var(--radius-card)] border-2 border-over bg-over-soft px-4 py-3 text-sm leading-6 text-ink">
+              {dev.secretWarning}
+            </p>
+          ) : null}
         </div>
 
         <div className="min-w-0">

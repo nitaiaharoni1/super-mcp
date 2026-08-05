@@ -27,3 +27,6 @@ data/raw/
 .superpowers/
 
 .firebase/
+
+# Rendered from server.template.json by scripts/publish-registry.sh; carries the real host.
+/server.json

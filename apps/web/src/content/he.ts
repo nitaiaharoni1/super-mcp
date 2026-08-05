@@ -202,16 +202,50 @@ export const he = {
         body: "אנחנו שולחים לכם קוד חיבור אישי והוראות, תוך יום עסקים.",
       },
       {
-        title: "מדביקים פעם אחת",
-        body: "ההוראות הן העתק־הדבק לתוך ההגדרות של Claude או ChatGPT. לוקח שתי דקות, ולא צריך לדעת לתכנת.",
+        title: "מחברים בלחיצה",
+        body: "בוחרים למטה את כלי ה־AI שלכם ולוחצים. ב־Cursor וב־VS Code זו לחיצה אחת, ובשאר מדביקים שורה אחת שאנחנו מעתיקים לכם. לוקח פחות מדקה, ולא צריך לדעת לתכנת.",
       },
       {
         title: "כותבים רשימה",
         body: "״תכנן לי קנייה למשלוח לכתובת שלי״, בעברית רגילה. התשובה מראה מאיזו רשת הכי משתלם להזמין, את מחיר הסל כולל משלוח, את המחיר לכל פריט ומה חסר.",
       },
     ],
-    assistantsLabel: "נבדק עם",
-    assistantsNote: "אמור לעבוד גם עם כלי AI אחרים שמאפשרים חיבור לשירותים חיצוניים.",
+    /*
+     * The install grid. `keyNote` only appears when NEXT_PUBLIC_MCP_REQUIRES_KEY=1,
+     * so the page never tells a shopper to paste a key into a server that does not
+     * ask for one. Assistant names stay in Latin script: that is how they appear
+     * in the menus the reader is about to open.
+     */
+    install: {
+      title: "בחרו את כלי ה־AI שלכם",
+      body: "לוחצים על הכלי שאתם משתמשים בו, וזהו. ב־Cursor וב־VS Code ההתקנה נפתחת אצלכם בלחיצה אחת, ובשאר מעתיקים שורה אחת ומדביקים.",
+      keyNote: "אחרי החיבור מחליפים את המציין במפתח שקיבלתם במייל.",
+      otherTools: "עובד גם עם כלי AI אחרים שמאפשרים חיבור לשירותים חיצוניים. אם שלכם לא ברשימה, כתבו לנו.",
+      docsLabel: "מדריך",
+      settingsLabel: "פתיחת ההגדרות",
+      copiedLabel: "הועתק",
+      copyFailedLabel: "ההעתקה נכשלה",
+      targets: {
+        cursor: { action: "התקנה בלחיצה", hint: "נפתח אצלכם ב־Cursor ומוסיף את השרת." },
+        vscode: { action: "התקנה בלחיצה", hint: "נפתח אצלכם ב־VS Code ומוסיף את השרת." },
+        "claude-code": { action: "העתקת הפקודה", hint: "מדביקים בטרמינל ומריצים." },
+        claude: {
+          action: "העתקת הכתובת",
+          hint: "בהגדרות של Claude נכנסים ל־Connectors, לוחצים Add custom connector ומדביקים את הכתובת.",
+        },
+        chatgpt: {
+          action: "העתקת הכתובת",
+          hint: "בהגדרות של ChatGPT נכנסים ל־Apps, מפעילים Developer mode ומוסיפים connector עם הכתובת.",
+        },
+        "gemini-cli": { action: "העתקת הפקודה", hint: "מדביקים בטרמינל ומריצים." },
+        lmstudio: { action: "התקנה בלחיצה", hint: "נפתח אצלכם ב־LM Studio ומוסיף את השרת." },
+        prompt: {
+          action: "העתקת המשפט",
+          hint: "מדביקים את המשפט הזה לכלי ה־AI עצמו, והוא מוסיף את השרת בשבילכם. עובד בכלים שיודעים לערוך את ההגדרות שלהם, כמו Claude Code, Cursor ו־Gemini CLI.",
+        },
+      },
+    },
+
     proofCaption: "שיחה אמיתית, בלי עריכה: נמצאו מחירים ל־14 פריטים, וחמישה סומנו כחסרים במקום להיעלם מהסל.",
     proofImageSrc: "/example-chat-table.webp",
     proofImageAlt: "צילום מסך של שיחה: טבלת מחירים לכל פריט ורשימת פריטים שסומנו כחסרים",
@@ -223,6 +257,8 @@ export const he = {
     dev: {
       summary: "למפתחים: MCP, REST והרצה עצמאית",
       body: "SuperMCP הוא שרת MCP מרוחק. מדביקים את הבלוק לקובץ ההגדרות, מחליפים את המפתח, והכלים זמינים. אותה שכבה חשופה גם כ־REST, והפרויקט פתוח.",
+      /** Shown instead of `body` when the server takes no credential. */
+      bodyKeyless: "SuperMCP הוא שרת MCP מרוחק. מדביקים את הבלוק לקובץ ההגדרות והכלים זמינים. אותה שכבה חשופה גם כ־REST, והפרויקט פתוח.",
       jsonLabel: "mcp.json",
       urlLabel: "כתובת השרת",
       copyJson: "העתקת JSON",

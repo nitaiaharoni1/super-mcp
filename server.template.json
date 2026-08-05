@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.nitaiaharoni1/super-mcp",
+  "title": "SuperMCP",
+  "description": "Israeli supermarket delivery pricing. Give it a shopping list and an address and it returns which online storefront is cheapest delivered, priced from the regulated public price feeds, with missing items marked rather than dropped.",
+  "version": "0.1.0",
+  "websiteUrl": "${SUPER_MCP_PUBLIC_SITE_URL}",
+  "repository": {
+    "url": "https://github.com/nitaiaharoni1/super-mcp",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "${SUPER_MCP_PUBLIC_MCP_URL}"
+    }
+  ]
+}

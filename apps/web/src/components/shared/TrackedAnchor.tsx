@@ -7,15 +7,12 @@ type TrackedAnchorProps = ComponentPropsWithoutRef<"a"> & {
   children: ReactNode;
   event: string;
   eventProperties?: Record<string, unknown>;
-  /** Fired in addition when href is mailto: */
-  mailtoEvent?: string;
 };
 
 export function TrackedAnchor({
   children,
   event,
   eventProperties,
-  mailtoEvent,
   href,
   onClick,
   ...rest
@@ -26,9 +23,6 @@ export function TrackedAnchor({
       href={href}
       onClick={(e) => {
         capture(event, eventProperties);
-        if (mailtoEvent && typeof href === "string" && href.startsWith("mailto:")) {
-          capture(mailtoEvent, eventProperties);
-        }
         onClick?.(e);
       }}
     >
