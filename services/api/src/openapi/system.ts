@@ -16,8 +16,8 @@ export const readinessReportSchema = {
     localPrices: {
       type: "object",
       properties: {
-        currentRows: { type: "integer" },
-        storesWithCurrentPrices: { type: "integer" },
+        currentRows: { type: "integer", nullable: true },
+        storesWithCurrentPrices: { type: "integer", nullable: true },
         newestSourceTs: { type: "string", format: "date-time", nullable: true },
         freshnessHours: { type: "integer" },
       },

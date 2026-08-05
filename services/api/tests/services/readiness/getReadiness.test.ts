@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { query } = vi.hoisted(() => ({
+const { query, withTransaction } = vi.hoisted(() => ({
+  withTransaction: vi.fn(),
   query: vi.fn().mockResolvedValue({
     rows: [
       {
@@ -13,7 +14,7 @@ const { query } = vi.hoisted(() => ({
     ],
   }),
 }));
-vi.mock("@super-mcp/db", () => ({ query }));
+vi.mock("@super-mcp/db", () => ({ query, withTransaction }));
 
 import {
   _resetReadinessCacheForTests,
@@ -29,17 +30,25 @@ describe("getReadiness", () => {
   beforeEach(() => {
     _resetReadinessCacheForTests();
     query.mockReset();
+    // The cheap core query only.
     query.mockResolvedValue({
       rows: [
         {
           total_stores: "10",
           stores_with_valid_coordinates: "8",
-          current_price_rows: "125",
-          stores_with_current_prices: "6",
           newest_price_source_ts: "2026-07-17T18:00:00.000Z",
         },
       ],
     });
+    withTransaction.mockReset();
+    // The best-effort detail, run on its own client with a short timeout.
+    withTransaction.mockImplementation(async (fn: (c: unknown) => Promise<unknown>) =>
+      fn({
+        query: async () => ({
+          rows: [{ current_price_rows: "125", stores_with_current_prices: "6" }],
+        }),
+      }),
+    );
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
 
@@ -125,5 +134,31 @@ describe("getReadiness", () => {
     query.mockRejectedValue(new Error("timeout"));
 
     await expect(getReadiness()).rejects.toThrow("timeout");
+  });
+
+  // The whole point of the split: a heap scan that will not finish during the
+  // nightly ingest must cost two informational fields, not the endpoint.
+  it("still reports ready when the expensive counts time out", async () => {
+    withTransaction.mockRejectedValueOnce(new Error("canceling statement due to statement timeout"));
+
+    const report = await getReadiness();
+
+    expect(report.status).toBe("ready");
+    expect(report.localPrices.currentRows).toBeNull();
+    expect(report.localPrices.storesWithCurrentPrices).toBeNull();
+    // The signals that answer "did the ingest land" are still there.
+    expect(report.localPrices.newestSourceTs).toBe("2026-07-17T18:00:00.000Z");
+    expect(report.storeCoordinates.total).toBe(10);
+  });
+
+  it("is degraded only when the catalogue really is empty", async () => {
+    query.mockResolvedValueOnce({
+      rows: [
+        { total_stores: "0", stores_with_valid_coordinates: "0", newest_price_source_ts: null },
+      ],
+    });
+
+    const report = await getReadiness();
+    expect(report.status).toBe("degraded");
   });
 });

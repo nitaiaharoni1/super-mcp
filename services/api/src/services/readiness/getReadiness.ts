@@ -1,4 +1,4 @@
-import { query } from "@super-mcp/db";
+import { query, withTransaction } from "@super-mcp/db";
 import { ISRAEL_STORE_COORDINATE_BOUNDS } from "@super-mcp/shared";
 
 const CURRENT_PRICE_FRESHNESS_HOURS = 48;
@@ -43,12 +43,26 @@ export function _resetReadinessCacheForTests(): void {
   inflight = null;
 }
 
-interface ReadinessRow {
+/**
+ * Budget for the one part of this report that cannot be served from an index.
+ *
+ * Short on purpose. A readiness probe that waits 30s to fail is not a probe, and
+ * the two figures behind this budget are informational: the signals that actually
+ * answer "did tonight's ingest land" are the store counts and newestSourceTs,
+ * both of which are cheap and are fetched separately so they can never be held
+ * hostage by this one.
+ */
+const PRICE_DETAIL_TIMEOUT_MS = 5_000;
+
+interface CoreRow {
   total_stores: string;
   stores_with_valid_coordinates: string;
+  newest_price_source_ts: string | null;
+}
+
+interface PriceDetailRow {
   current_price_rows: string;
   stores_with_current_prices: string;
-  newest_price_source_ts: string | null;
 }
 
 export interface ReadinessReport {
@@ -60,8 +74,10 @@ export interface ReadinessReport {
     coverage: number;
   };
   localPrices: {
-    currentRows: number;
-    storesWithCurrentPrices: number;
+    /** Null when the count could not be produced inside its budget. */
+    currentRows: number | null;
+    /** Null when the count could not be produced inside its budget. */
+    storesWithCurrentPrices: number | null;
     newestSourceTs: string | null;
     freshnessHours: number;
   };
@@ -116,15 +132,50 @@ export async function getReadiness(): Promise<ReadinessReport> {
   return inflight;
 }
 
+/**
+ * The counts that need a heap scan, or null if they will not come cheaply.
+ *
+ * COUNT(DISTINCT store_id) needs a column store_price_source_ts_idx does not
+ * carry, so the planner reads ~4M heap tuples, and during the nightly ingest it
+ * does not finish at all. Best-effort with its own short budget, so a slow disk
+ * costs two fields rather than the whole endpoint.
+ */
+async function fetchPriceDetail(): Promise<PriceDetailRow | null> {
+  try {
+    return await withTransaction(async (client) => {
+      await client.query(`SET LOCAL statement_timeout = ${PRICE_DETAIL_TIMEOUT_MS}`);
+      const res = await client.query<PriceDetailRow>(
+        `SELECT
+           COUNT(*) FILTER (WHERE source_ts >= now() - ($1 * interval '1 hour'))::text
+             AS current_price_rows,
+           COUNT(DISTINCT store_id) FILTER (WHERE source_ts >= now() - ($1 * interval '1 hour'))::text
+             AS stores_with_current_prices
+         FROM store_price`,
+        [CURRENT_PRICE_FRESHNESS_HOURS],
+      );
+      return res.rows[0] ?? null;
+    });
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        severity: "WARNING",
+        msg: "readiness price detail skipped",
+        err: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return null;
+  }
+}
+
 async function runReadinessQuery(): Promise<ReadinessReport> {
   const bounds = ISRAEL_STORE_COORDINATE_BOUNDS;
-  const result = await query<ReadinessRow>(
+  // Cheap half: 979 store rows, plus MAX(source_ts) which the source_ts index
+  // answers with a backward scan. This is what has to keep working.
+  const result = await query<CoreRow>(
     `SELECT
        stores.total_stores,
        stores.stores_with_valid_coordinates,
-       prices.current_price_rows,
-       prices.stores_with_current_prices,
-       prices.newest_price_source_ts
+       (SELECT MAX(source_ts)::text FROM store_price) AS newest_price_source_ts
      FROM (
        SELECT
          COUNT(*)::text AS total_stores,
@@ -134,25 +185,22 @@ async function runReadinessQuery(): Promise<ReadinessReport> {
              AND lat <> 0 AND lng <> 0
          )::text AS stores_with_valid_coordinates
        FROM store
-     ) stores
-     CROSS JOIN (
-       SELECT
-         COUNT(*) FILTER (WHERE source_ts >= now() - ($5 * interval '1 hour'))::text
-           AS current_price_rows,
-         COUNT(DISTINCT store_id) FILTER (WHERE source_ts >= now() - ($5 * interval '1 hour'))::text
-           AS stores_with_current_prices,
-         MAX(source_ts)::text AS newest_price_source_ts
-       FROM store_price
-     ) prices`,
-    [bounds.minLat, bounds.maxLat, bounds.minLng, bounds.maxLng, CURRENT_PRICE_FRESHNESS_HOURS],
+     ) stores`,
+    [bounds.minLat, bounds.maxLat, bounds.minLng, bounds.maxLng],
   );
+  const detail = await fetchPriceDetail();
+
   const row = result.rows[0];
   const total = Number(row?.total_stores ?? 0);
   const valid = Number(row?.stores_with_valid_coordinates ?? 0);
-  const currentRows = Number(row?.current_price_rows ?? 0);
+  const currentRows = detail ? Number(detail.current_price_rows) : null;
+  const newestSourceTs = row?.newest_price_source_ts ?? null;
 
   return {
-    status: total > 0 && currentRows > 0 ? "ready" : "degraded",
+    // Readiness turns on what we can always establish: stores exist and the
+    // catalogue has priced rows. It must NOT depend on the best-effort counts,
+    // or a slow disk would report an unready service that is serving fine.
+    status: total > 0 && newestSourceTs != null ? "ready" : "degraded",
     checkedAt: new Date().toISOString(),
     storeCoordinates: {
       total,
@@ -161,8 +209,8 @@ async function runReadinessQuery(): Promise<ReadinessReport> {
     },
     localPrices: {
       currentRows,
-      storesWithCurrentPrices: Number(row?.stores_with_current_prices ?? 0),
-      newestSourceTs: row?.newest_price_source_ts ?? null,
+      storesWithCurrentPrices: detail ? Number(detail.stores_with_current_prices) : null,
+      newestSourceTs,
       freshnessHours: CURRENT_PRICE_FRESHNESS_HOURS,
     },
   };
