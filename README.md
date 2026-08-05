@@ -12,7 +12,7 @@ See [docs/SPEC.md](./docs/SPEC.md) for the full product/engineering plan.
 
 | Mode | What you get |
 |------|----------------|
-| **Hosted** (operator-run MCP/API) | Issued **standard** API keys for the operator’s endpoint. You do **not** get cloud credentials, database access, or deploy rights to that environment. |
+| **Hosted** (operator-run MCP/API) | Open access to the operator’s endpoint: point an MCP client at it and start calling, no key needed. `/v1/admin/*` stays behind a master key. You do **not** get cloud credentials, database access, or deploy rights to that environment. |
 | **Self-host** (this repo) | Run your own Postgres, secrets, and deploy. The open-source tree contains **no** path into the operator’s cloud. |
 
 Production hostnames and secrets are configured in the hosting environment only — never required defaults in git. Deploy boundary: [docs/DEPLOY.md](./docs/DEPLOY.md).
@@ -54,11 +54,16 @@ Auth: `Authorization: Bearer $(cat .local/api-key.txt)`
 
 Quick smoke:
 
+`AUTH` below is empty when the server runs keyless (`SUPER_MCP_ALLOW_ANONYMOUS=1`,
+which is how the hosted instance is configured) and carries a key otherwise.
+
 ```bash
-KEY=$(cat .local/api-key.txt)
+AUTH=()                                                   # keyless
+# AUTH=(-H "Authorization: Bearer $(cat .local/api-key.txt)")   # key required
+
 curl -s http://localhost:8787/health
-curl -s -H "Authorization: Bearer $KEY" 'http://localhost:8787/v1/products?q=חלב'
-curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+curl -s "${AUTH[@]}" 'http://localhost:8787/v1/products?q=חלב'
+curl -s "${AUTH[@]}" -H 'Content-Type: application/json' \
   -d '{"items":[{"query":"חלב","pack_qty":4},{"query":"קוטג","pack_qty":4}],"address":"מנדלסון 1, תל אביב"}' \
   http://localhost:8787/v1/delivery/optimize
 ```

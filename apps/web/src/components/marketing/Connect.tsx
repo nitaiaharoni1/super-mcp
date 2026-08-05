@@ -147,7 +147,9 @@ function DeveloperSection() {
         </div>
 
         <div className="min-w-0">
-          <h3 className="text-base font-bold">{dev.toolsLabel}</h3>
+          <h3 className="text-base font-bold">
+            {requiresKey ? dev.toolsLabel : dev.toolsLabelKeyless}
+          </h3>
           <p className="mt-2 max-w-[42ch] text-sm leading-6 text-ink-muted">
             {dev.toolsHint}
           </p>
@@ -170,7 +172,9 @@ function DeveloperSection() {
             ))}
           </dl>
 
-          <p className="mt-5 text-sm leading-6 text-ink-muted">{dev.rateLimit}</p>
+          <p className="mt-5 text-sm leading-6 text-ink-muted">
+            {requiresKey ? dev.rateLimit : dev.rateLimitKeyless}
+          </p>
 
           <div className="mt-7 border-t-2 border-ink/10 pt-5">
             <h4 className="text-sm font-bold">{dev.selfHost}</h4>

@@ -60,9 +60,9 @@ export function Hero() {
           <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-4">
             <Button asChild size="xl">
               <TrackedAnchor
-                href="#access"
+                href="#connect"
                 event={AnalyticsEvent.MarketingCtaClicked}
-                eventProperties={{ cta_id: "request_access", location: "hero" }}
+                eventProperties={{ cta_id: "connect", location: "hero" }}
               >
                 {hero.primaryCta}
               </TrackedAnchor>

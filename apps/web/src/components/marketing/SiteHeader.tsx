@@ -43,9 +43,9 @@ export function SiteHeader() {
             should not look like a tertiary control sitting in the corner. */}
         <Button asChild size="sm" className="ms-auto">
           <TrackedAnchor
-            href="#access"
+            href="#connect"
             event={AnalyticsEvent.MarketingCtaClicked}
-            eventProperties={{ cta_id: "request_access", location: "header" }}
+            eventProperties={{ cta_id: "connect", location: "header" }}
           >
             {he.header.cta}
           </TrackedAnchor>
