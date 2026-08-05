@@ -42,22 +42,33 @@ This app uses the TypeScript 6 npm alias for Next.js 15 compatibility:
 
 That is an intentional deviation from the rest of the monorepo. Do not bump to TypeScript 7 here without verifying Next 15 support.
 
-## Production deploy (Cloud Run)
+## Production deploy (Cloud Run behind Firebase Hosting)
 
-Operator deploy (project `super-mcp-il`, region `europe-west1`) builds `apps/web/Dockerfile` from the repo root and serves `super-mcp-web`.
+Operator deploy (region `europe-west1`) builds `apps/web/Dockerfile` from the repo root
+and serves `super-mcp-web`. Firebase Hosting sits in front and is the public origin:
+`/mcp` and `/v1/**` route to the `super-mcp` API service, everything else to this app.
+See [firebase.json](../../firebase.json).
+
+One origin for both means the marketing site calls the API same-origin, so the access
+form needs no `CORS_ORIGINS` entry for it.
 
 ```bash
-# Build args come from apps/web/.env.local (or Secret Manager) — never commit them.
-gcloud builds submit --project=super-mcp-il --config=<(...)  # see ops notes
+# Build args are NEXT_PUBLIC_*, baked in at build time. Do not read them from
+# apps/web/.env.local: that file holds dev values and will ship localhost URLs.
+# Take them from Secret Manager, or from the values already live on the site.
+gcloud builds submit --project=<PROJECT_ID> --region=europe-west1 --config=<(...)  # see ops notes
 gcloud run deploy super-mcp-web \
-  --project=super-mcp-il \
+  --project=<PROJECT_ID> \
   --region=europe-west1 \
-  --image=europe-west1-docker.pkg.dev/super-mcp-il/super-mcp/web:latest \
+  --image=europe-west1-docker.pkg.dev/<PROJECT_ID>/super-mcp/web:latest \
   --allow-unauthenticated
+firebase deploy --only hosting --project=<PROJECT_ID>
 ```
 
-Ensure the API service has `CORS_ORIGINS` set to the marketing site origin(s).
-`apphosting.yaml` remains for an optional Firebase App Hosting path; the live site is Cloud Run. Do not commit production URLs or secrets to the repo.
+`NEXT_PUBLIC_MCP_URL` must be the Hosting origin (`https://<site>.web.app/mcp`), never a
+raw `*.run.app` URL: that one carries the project number, so it breaks every saved client
+config the next time the project moves. `apphosting.yaml` remains for an optional Firebase
+App Hosting path; the live site is Cloud Run. Do not commit production URLs or secrets.
 
 ## Scripts
 

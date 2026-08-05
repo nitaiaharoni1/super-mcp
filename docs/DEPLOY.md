@@ -40,6 +40,41 @@ Filter PostHog insights with `product = super_mcp`. Design: [docs/superpowers/sp
 
 Self-hosters clone this repo and supply **their own** values; they receive no access to the operator’s cloud.
 
+## The Firebase Hosting front door
+
+Both Cloud Run services sit behind one Hosting site, which is the public origin. This is
+not decoration. A raw `*.run.app` URL embeds the **project number**, so every saved client
+config breaks the next time the project moves; a Hosting origin survives that. It also puts
+the marketing site and the API on the same origin, which is why the access form needs no
+`CORS_ORIGINS` entry for its own site.
+
+`firebase.json` is **gitignored** (it names the site and services), so a fresh clone cannot
+redeploy Hosting until it is recreated. The shape:
+
+```json
+{
+  "hosting": {
+    "site": "<SITE_ID>",
+    "public": "apps/web/firebase-hosting",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/mcp{,/**}", "run": { "serviceId": "super-mcp", "region": "europe-west1" } },
+      { "source": "/v1/**",     "run": { "serviceId": "super-mcp", "region": "europe-west1" } },
+      { "source": "**",         "run": { "serviceId": "super-mcp-web", "region": "europe-west1" } }
+    ]
+  }
+}
+```
+
+Order matters: Hosting takes the first matching rewrite, so the catch-all must stay last.
+Deploy with `firebase deploy --only hosting --project=<PROJECT_ID>`. It validates every
+rewrite target up front, so both Cloud Run services must already exist or the deploy is
+rejected whole.
+
+MCP replies are `text/event-stream`. Verified through Hosting: content type preserved,
+no buffering, ~0.4s to first byte. Re-check that after any Hosting change, because a CDN
+that buffers SSE breaks every MCP client at once and nothing else on the site would notice.
+
 ## SUPER_MCP_ALLOW_ANONYMOUS: what opening the door actually costs
 
 With the flag set, anyone can point an agent at `/mcp` and get answers. Three
