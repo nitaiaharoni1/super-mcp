@@ -95,6 +95,25 @@ const CITY_FILTER = `(
            )
          )`;
 
+/**
+ * Keeps $2 (product id) typed on the browse path, which does not otherwise use it.
+ *
+ * The browse and product paths share STORE_FILTER/ACTIVE_FILTER/CITY_FILTER, so
+ * they must agree on bind positions, which leaves $2 bound but unreferenced on
+ * this path. Postgres will not accept that: a placeholder that appears nowhere in
+ * the statement has no inferable type, and the server rejects the ENTIRE query
+ * with `could not determine data type of parameter $2`. get_promotions therefore
+ * failed on every browse call in production, with and without a city, while the
+ * product-scoped path worked fine.
+ *
+ * Mentioning it once with an explicit cast is enough to type it. The predicate is
+ * a tautology the planner folds away, so it costs nothing at runtime.
+ *
+ * This is not reachable by a test that mocks the driver and asserts on the bind
+ * array: the statement never reaches a parser there. Only real SQL catches it.
+ */
+const UNUSED_PRODUCT_BIND = `($2::uuid IS NULL OR TRUE)`;
+
 const DETAIL_SELECT = `
      SELECT
        pr.id, pr.chain_id, c.name_he AS chain_name, pr.store_id, pr.store_code, pr.promo_code,
@@ -163,11 +182,13 @@ async function listPromotionsBrowse(
        WHERE ${STORE_FILTER}
          AND ${ACTIVE_FILTER}
          AND ${CITY_FILTER}
+         AND ${UNUSED_PRODUCT_BIND}
        ORDER BY pr.end_ts ASC, pr.id
        LIMIT $5
      )
      ${DETAIL_SELECT}`,
-    // $2 unused in browse path — keep bind positions aligned with product path / unit tests.
+    // $2 is the product id, unused on this path; see UNUSED_PRODUCT_BIND for why
+    // it still has to appear in the SQL.
     [params.storeId ?? null, null, params.activeOnly ?? null, cityKeys, limit],
   );
   return res.rows.map(mapPromotion);
