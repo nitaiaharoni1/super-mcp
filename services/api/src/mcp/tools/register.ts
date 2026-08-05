@@ -1,8 +1,49 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { AppError } from "@super-mcp/shared";
 import { captureMcpToolOperation } from "../../analytics/capture.js";
 import { resolveAnalyticsContext } from "../../analytics/context.js";
 import { errorResult, textResult } from "./shared/result.js";
+
+/**
+ * Write a failed tool call to the log, because `errorResult` deliberately does not.
+ *
+ * Hiding pg/SQL text from the client is right, but until now that was the ONLY
+ * thing that happened to an unexpected failure: nothing reached Cloud Logging at
+ * any severity. get_promotions was consequently dead for every caller on every
+ * browse request, and the outage was invisible. It surfaced only because someone
+ * happened to call the tool by hand, and the cause had to be found by running the
+ * service code against the production database.
+ *
+ * AppError is the expected, client-safe path (validation, rate limit, not found),
+ * so it logs at WARNING and stays out of the error budget. Anything else is a bug
+ * on our side and logs at ERROR with its stack, which is what makes an alert
+ * policy on severity>=ERROR meaningful.
+ *
+ * Deliberately no tool arguments. The analytics module is metadata-only on
+ * purpose, and a shopping list plus an address is exactly the payload that should
+ * not be duplicated into logs to debug a stack trace. The tool name and the stack
+ * are what identify the bug.
+ */
+function logToolFailure(toolName: string, err: unknown, startedAt: number): void {
+  const expected = err instanceof AppError;
+  const entry: Record<string, unknown> = {
+    severity: expected ? "WARNING" : "ERROR",
+    msg: "mcp tool failed",
+    tool: toolName,
+    durationMs: Date.now() - startedAt,
+  };
+  if (err instanceof Error) {
+    entry.errName = err.name;
+    entry.errMessage = err.message;
+    if (!expected) entry.stack = err.stack;
+  } else {
+    entry.errMessage = String(err);
+  }
+  // Structured JSON on stderr: Cloud Run parses it and honours `severity`, and it
+  // matches the shape the Fastify logger already emits elsewhere.
+  console.error(JSON.stringify(entry));
+}
 
 type ToolMeta<T extends z.ZodRawShape> = {
   title: string;
@@ -35,6 +76,7 @@ export function registerTool<T extends z.ZodRawShape>(
       });
       return textResult(payload);
     } catch (err) {
+      logToolFailure(name, err, startedAt);
       captureMcpToolOperation({
         toolName: name,
         startedAt,
