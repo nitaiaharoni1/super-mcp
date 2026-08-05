@@ -3,6 +3,37 @@ import { ISRAEL_STORE_COORDINATE_BOUNDS } from "@super-mcp/shared";
 
 const CURRENT_PRICE_FRESHNESS_HOURS = 48;
 
+/**
+ * How long a report is reused before the aggregate is run again.
+ *
+ * The price half of this query cannot be served from an index: COUNT(DISTINCT
+ * store_id) needs a column `store_price_source_ts_idx` does not carry, so the
+ * planner reads heap tuples, and roughly 4M of the 7.3M rows fall inside the
+ * 48-hour window regardless of how the predicate is written. Measured at 15s
+ * against production on a warm instance, and it was one of the requests that hit
+ * the 30s pool-wide statement_timeout while the nightly ingest held the disk.
+ *
+ * Narrowing the WHERE clause does not fix that, because the rows really are
+ * recent. Not running it on every request does. `/ready` is public and
+ * unauthenticated by default, so before this cache any caller could ask a
+ * single-instance service to seq-scan 7.3M rows, as often as they liked, and
+ * each concurrent caller started its own scan.
+ *
+ * A minute is far inside the useful resolution of the answer: the underlying
+ * numbers move once a night when the ingest lands, not per request.
+ */
+const REPORT_TTL_MS = 60_000;
+
+let cachedReport: { report: ReadinessReport; expiresAt: number } | null = null;
+/** Collapses concurrent callers onto one scan instead of one scan each. */
+let inflight: Promise<ReadinessReport> | null = null;
+
+/** Test-only: drop the cached readiness report and any in-flight scan. */
+export function _resetReadinessCacheForTests(): void {
+  cachedReport = null;
+  inflight = null;
+}
+
 interface ReadinessRow {
   total_stores: string;
   stores_with_valid_coordinates: string;
@@ -28,6 +59,27 @@ export interface ReadinessReport {
 }
 
 export async function getReadiness(): Promise<ReadinessReport> {
+  const now = Date.now();
+  if (cachedReport && cachedReport.expiresAt > now) return cachedReport.report;
+  if (inflight) return inflight;
+
+  // `checkedAt` deliberately keeps the time the aggregate actually ran rather
+  // than the time of the request, so a cached answer says how old it is instead
+  // of claiming to be fresh.
+  inflight = runReadinessQuery()
+    .then((report) => {
+      cachedReport = { report, expiresAt: Date.now() + REPORT_TTL_MS };
+      return report;
+    })
+    .finally(() => {
+      // Cleared on failure too: a failed scan must not wedge every later caller
+      // on a rejected promise.
+      inflight = null;
+    });
+  return inflight;
+}
+
+async function runReadinessQuery(): Promise<ReadinessReport> {
   const bounds = ISRAEL_STORE_COORDINATE_BOUNDS;
   const result = await query<ReadinessRow>(
     `SELECT
