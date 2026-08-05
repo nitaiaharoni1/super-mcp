@@ -21,6 +21,10 @@ import { assertBasketContinuationSecret } from "./services/basket/continuation.j
 
 const PUBLIC_PATHS = new Set(["/health", "/ready", "/openapi.json", "/v1/access-requests"]);
 
+function isReadyPath(url: string): boolean {
+  return (url.split("?")[0] ?? url) === "/ready";
+}
+
 function isPublicPath(url: string): boolean {
   const path = url.split("?")[0] ?? url;
   if (path === "/ready" && process.env.SUPER_MCP_READY_REQUIRE_AUTH === "1") {
@@ -103,7 +107,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   // /mcp authenticates and meters itself (it hijacks the reply, so onResponse never fires for it).
   app.addHook("preHandler", async (request) => {
     if (isPublicPath(request.url) || request.url.startsWith("/mcp")) return;
-    const auth = await authenticate(request);
+    // An operator who closed /ready meant "show this to holders of a key", so keyless
+    // access must not re-open it just because the shopping surface is public.
+    const auth = await authenticate(request, {
+      allowAnonymous: !isReadyPath(request.url),
+    });
     authorize(auth, capabilityForUrl(request.url));
     if (auth.role === "master") {
       request.privilegedAuditId = await beginPrivilegedAudit({

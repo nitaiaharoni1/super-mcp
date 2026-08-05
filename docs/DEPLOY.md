@@ -23,10 +23,14 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `CORS_ORIGINS` | server (required for the marketing access form; comma-separated browser origins) |
 | `SUPER_MCP_READY_REQUIRE_AUTH` | server (`1` recommended on public hosts) |
 | `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY` | server (must stay unset/`0`) |
+| `SUPER_MCP_ALLOW_ANONYMOUS` | server (optional, `1`). Serves `/mcp` with no credential. Requires migration `035`. See below. |
+| `SUPER_MCP_ANONYMOUS_RATE_LIMIT` | server (optional, default 30/min per client address) |
+| `SUPER_MCP_ANONYMOUS_GLOBAL_RATE_LIMIT` | server (optional, default 600/min across all keyless traffic) |
 | `SUPER_MCP_SURFACES` | server (optional). Unset or `online` serves `/mcp` (+ `/mcp/online` alias). `stores` is rejected. |
 | `NOMINATIM_USER_AGENT` | **server (required)**. OSM returns 403 to the placeholder default, so address geocoding silently degrades to city centroids. See below. |
 | `SUPER_MCP_NO_CAP` | **ingest job (required, `1`)**. Without it the ingest silently covers ~1% of stores. See below. |
 | `NEXT_PUBLIC_MCP_URL` | web hosting only |
+| `NEXT_PUBLIC_MCP_REQUIRES_KEY` | web hosting only (optional, `1`). Install buttons default to keyless; set `1` unless the API runs with `SUPER_MCP_ALLOW_ANONYMOUS=1`. |
 | `NEXT_PUBLIC_POSTHOG_KEY` | web hosting only (Baliprop + Reflex project token) |
 | `NEXT_PUBLIC_POSTHOG_HOST` | web hosting only (`https://eu.i.posthog.com`) |
 | `POSTHOG_KEY` | API/MCP server (same project token) |
@@ -35,6 +39,26 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 Filter PostHog insights with `product = super_mcp`. Design: [docs/superpowers/specs/2026-07-21-posthog-analytics-design.md](./superpowers/specs/2026-07-21-posthog-analytics-design.md).
 
 Self-hosters clone this repo and supply **their own** values; they receive no access to the operator’s cloud.
+
+## SUPER_MCP_ALLOW_ANONYMOUS: what opening the door actually costs
+
+With the flag set, anyone can point an agent at `/mcp` and get answers. Three
+things to know before turning it on:
+
+1. **Migration `035` must be applied first.** Keyless traffic is metered against a
+   seeded `anonymous` key row. Without it every request still succeeds but each
+   `usage_event` insert fails its foreign key, so the metering log goes silent.
+2. **Capacity, not billing, is the ceiling.** The service answers from Postgres and
+   calls no model, so the marginal cost of a request is CPU-seconds. What breaks
+   first is `maxScale` (currently `1`): raise it before inviting a crowd, and note
+   the rate-limit windows are per instance and in memory, so N instances mean N
+   times the configured ceiling until the limiter moves to shared state.
+3. **Nominatim is a shared community service.** Address geocoding is cached, but a
+   traffic jump changes the load OSM sees from this host, and their usage policy is
+   what governs it. Watch for 403s after opening up.
+
+Turning it off is unsetting the variable: the next request goes back to demanding a
+key. No redeploy, no code change.
 
 ## NOMINATIM_USER_AGENT: unset means silently wrong distances
 

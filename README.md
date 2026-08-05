@@ -410,6 +410,41 @@ Query-string credentials are rejected by default. Legacy MCP-only query auth
 can be explicitly enabled with `SUPER_MCP_ALLOW_MCP_QUERY_API_KEY=1` — never on a
 public host.
 
+### Keyless (anonymous) access
+
+`SUPER_MCP_ALLOW_ANONYMOUS=1` lets a caller reach the shopping surface with no
+credential at all, so an agent can point at `/mcp` and start working. It is off by
+default; unsetting it is the kill switch and takes effect on the next request
+without a redeploy. Issued keys keep working alongside it, with their own quotas.
+
+Anonymous callers get the `standard` role, so `/v1/admin/*` still answers 403 —
+administration always requires a real master key. Presenting an invalid or revoked
+key is still a 401: a bad credential is never quietly downgraded to anonymous.
+
+Two ceilings protect the host, both per minute:
+
+| Variable | Default | Bucket |
+|----------|---------|--------|
+| `SUPER_MCP_ANONYMOUS_RATE_LIMIT` | 30 | one client address |
+| `SUPER_MCP_ANONYMOUS_GLOBAL_RATE_LIMIT` | 600 | all keyless traffic together |
+
+The per-address window is charged before the shared one, so a single flooding
+client cannot spend the global budget and lock everyone else out. Exceeding either
+returns 429 with `details.scope` naming which ceiling was hit.
+
+**Treat the per-address limit as best effort, not a security boundary.** It reads
+`request.ip`, which under `trustProxy` comes from the client-supplied
+`X-Forwarded-For` header, and Google's front end appends to that header rather than
+replacing it. A caller who rotates the value gets a fresh window each request. The
+shared ceiling is the guarantee; the per-address one is there to stop ordinary
+runaway clients. So the address map is capped at `MAX_ANONYMOUS_IP_BUCKETS` entries:
+past the cap, unseen addresses are limited by the shared ceiling alone, because
+otherwise a rotating flood would mint a window per request.
+
+Keyless traffic is metered against a seeded, permanently revoked `anonymous` key row
+(migration `035`), which the usage and audit foreign keys require — run migrations
+before enabling the flag.
+
 ## Packages
 
 | Path | Package | Role |
