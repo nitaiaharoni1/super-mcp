@@ -43,8 +43,25 @@ export const LAIB_BASE_URL = "https://laibcatalog.co.il/";
  *
  * The walk stops at the first day that yields prices, so a healthy portal
  * costs one request per chain and only a stalled one pays for the rest.
+ *
+ * Re-read 2026-08-05 by replaying searchDay over the full window. The quiet
+ * stretch above was backfilled: both chains now show daily PriceFull/PromoFull
+ * filings through 2026-07-28 and nothing after it, and H. Cohen is still
+ * posting its Stores document every morning, so the portal is up and these two
+ * chains specifically have stopped. That puts a date on the window: 07-28 ages
+ * out around 2026-08-11, after which discovery finds no price file and the
+ * source errors rather than degrades. Note the ceiling below before reacting to
+ * that by raising this number.
  */
 export const DISCOVER_DAY_LOOKBACK = 14;
+
+/**
+ * Raising DISCOVER_DAY_LOOKBACK past 14 on its own does nothing: the shared
+ * `jerusalemDateKeys` clamps to 14 days (publishprice/parseHtml.ts), so the
+ * extra days are silently dropped and the source still goes empty on schedule.
+ * Widening the window means changing that clamp, which every PublishPrice
+ * source also reads.
+ */
 
 /**
  * Age past which a chain's newest filing is reported as a stall rather than
