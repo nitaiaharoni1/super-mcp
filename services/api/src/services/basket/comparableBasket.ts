@@ -61,6 +61,83 @@ export function buildReferenceLinePrices(
 }
 
 /**
+ * How far above the other stores' median a single line may sit before it is
+ * treated as a mismatch rather than a price.
+ *
+ * Measured case: "נייר טואלט" resolved correctly, and six storefronts priced it
+ * between ₪34.50 and ₪45.90 while Shufersal returned a ₪350 catering case, which
+ * put that chain at ₪460 instead of ₪136 and inverted the ranking. The substitute
+ * survived every existing filter because both its size record and the primary's
+ * are wrong: the primary lost its roll count (stored as "1 unit", its name
+ * truncated mid-word) and the case claims to be 1 unit of 1000g, so the pack-size
+ * check saw two compatible singles.
+ *
+ * Cross-store agreement is the signal that survives bad catalogue data, because
+ * the other storefronts resolved the same line from the same query independently.
+ * A genuine price difference for one line between Israeli chains is well under
+ * 2x; 6x is far outside anything real and only fires on a substitution error.
+ */
+export const IMPLAUSIBLE_LINE_MULTIPLE = 6;
+
+/**
+ * A median needs enough independent opinions to be one. With two stores there is
+ * no majority, so an 6x gap is equally consistent with one absurd substitute and
+ * one genuine bargain, and dropping the wrong side would invent a cheap basket
+ * that does not exist.
+ */
+const MIN_STORES_FOR_OUTLIER_JUDGEMENT = 3;
+
+/**
+ * Discard per-store lines that cost a wild multiple of what everyone else charges
+ * for the same line.
+ *
+ * This is a backstop for substitution, not a pricing rule. It deliberately judges
+ * a line only against the SAME line at other storefronts, never against a global
+ * price table for its category: fresh produce and household goods have legitimate
+ * 8x spreads within a category (a measured attempt at the category-median version
+ * would have stripped 24 bell peppers and 15 milks), whereas the same shopping
+ * line resolved at six chains should not.
+ *
+ * A dropped line becomes a line that storefront does not price, which the
+ * comparable-cost machinery below already models: the store is charged the market
+ * reference for it and its pricedLines count falls. That is the honest outcome.
+ * Reporting a ₪350 substitute as if the shopper wanted it is not.
+ */
+export function dropImplausibleLines(
+  storeResults: BasketStoreResult[],
+): { results: BasketStoreResult[]; dropped: number } {
+  const reference = buildReferenceLinePrices(storeResults);
+  const storesPerItem = new Map<number, number>();
+  for (const store of storeResults) {
+    for (const line of store.lines) {
+      if (!Number.isFinite(line.lineTotal)) continue;
+      storesPerItem.set(line.itemIndex, (storesPerItem.get(line.itemIndex) ?? 0) + 1);
+    }
+  }
+
+  let dropped = 0;
+  const results = storeResults.map((store) => {
+    const kept = store.lines.filter((line) => {
+      const median = reference.get(line.itemIndex);
+      const voters = storesPerItem.get(line.itemIndex) ?? 0;
+      if (median == null || !(median > 0)) return true;
+      if (voters < MIN_STORES_FOR_OUTLIER_JUDGEMENT) return true;
+      if (!Number.isFinite(line.lineTotal)) return true;
+      if (line.lineTotal <= median * IMPLAUSIBLE_LINE_MULTIPLE) return true;
+      dropped += 1;
+      return false;
+    });
+    if (kept.length === store.lines.length) return store;
+    const removedTotal = store.lines
+      .filter((line) => !kept.includes(line))
+      .reduce((sum, line) => sum + (Number.isFinite(line.lineTotal) ? line.lineTotal : 0), 0);
+    return { ...store, lines: kept, total: round2(store.total - removedTotal) };
+  });
+
+  return { results, dropped };
+}
+
+/**
  * Comparable cost per store id.
  *
  * `priceableItemIndexes` is the set of lines at least one compared store prices;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildComparableCosts,
   buildReferenceLinePrices,
+  dropImplausibleLines,
 } from "../../../src/services/basket/comparableBasket.js";
 import {
   pickBestSingleStore,
@@ -278,5 +279,100 @@ describe("incomplete-basket penalty scales with how much is missing", () => {
     const costs = buildComparableCosts([full]);
     const opts = { distancePenaltyPerKm: 0, distanceReliable: true, comparableCosts: costs };
     expect(effectiveCost(full, opts)).toBe(full.total);
+  });
+});
+
+/**
+ * Backstop for substitution, from a measured production failure: six storefronts
+ * priced "נייר טואלט" between ₪34.50 and ₪45.90 and Shufersal returned a ₪350
+ * catering case, reporting that chain at ₪460 instead of ₪136 and inverting the
+ * ranking. Both size records involved were wrong, so no pack-size check could
+ * catch it; cross-store agreement on the SAME line is the signal that survives.
+ */
+describe("dropImplausibleLines", () => {
+  it("drops a substitute costing many times what other stores charge for that line", () => {
+    const stores = [
+      store("a", [line(0, 34.5)], 1),
+      store("b", [line(0, 41.3)], 1),
+      store("c", [line(0, 44.9)], 1),
+      store("shufersal", [line(0, 350)], 1),
+    ];
+    const { results, dropped } = dropImplausibleLines(stores);
+
+    expect(dropped).toBe(1);
+    const shufersal = results.find((r) => r.storeId === "shufersal")!;
+    expect(shufersal.lines).toHaveLength(0);
+    expect(shufersal.total).toBe(0);
+    // Everyone else is untouched.
+    expect(results.find((r) => r.storeId === "a")!.lines).toHaveLength(1);
+  });
+
+  it("leaves the store's other lines and subtracts only the dropped one", () => {
+    const stores = [
+      store("a", [line(0, 10), line(1, 20)], 1),
+      store("b", [line(0, 12), line(1, 22)], 1),
+      store("c", [line(0, 11), line(1, 400)], 1),
+    ];
+    const { results, dropped } = dropImplausibleLines(stores);
+
+    expect(dropped).toBe(1);
+    const c = results.find((r) => r.storeId === "c")!;
+    expect(c.lines.map((l) => l.itemIndex)).toEqual([0]);
+    expect(c.total).toBe(11);
+  });
+
+  // A genuine price difference between chains is nothing like 6x. Anything inside
+  // that band has to survive, or the guard starts inventing missing coverage.
+  it("keeps ordinary between-chain price differences", () => {
+    const stores = [
+      store("a", [line(0, 10)], 1),
+      store("b", [line(0, 18)], 1),
+      store("c", [line(0, 25)], 1),
+    ];
+    expect(dropImplausibleLines(stores).dropped).toBe(0);
+  });
+
+  it("keeps a line exactly at the threshold", () => {
+    const stores = [
+      store("a", [line(0, 10)], 1),
+      store("b", [line(0, 10)], 1),
+      store("c", [line(0, 60)], 1),
+    ];
+    expect(dropImplausibleLines(stores).dropped).toBe(0);
+  });
+
+  // Two opinions are not a majority: the 6x gap is equally consistent with one
+  // absurd substitute and one real bargain, and guessing would invent a cheap
+  // basket that does not exist.
+  it("refuses to judge when fewer than three stores price the line", () => {
+    const stores = [store("a", [line(0, 10)], 1), store("b", [line(0, 350)], 1)];
+    expect(dropImplausibleLines(stores).dropped).toBe(0);
+  });
+
+  it("returns the original objects untouched when nothing is dropped", () => {
+    const stores = [
+      store("a", [line(0, 10)], 1),
+      store("b", [line(0, 11)], 1),
+      store("c", [line(0, 12)], 1),
+    ];
+    const { results } = dropImplausibleLines(stores);
+    expect(results[0]).toBe(stores[0]);
+  });
+
+  // The dropped line must become "this storefront does not price it", which the
+  // comparable machinery already models by charging the market reference.
+  it("makes the dropped line imputed rather than free", () => {
+    const stores = [
+      store("a", [line(0, 10), line(1, 20)], 1),
+      store("b", [line(0, 12), line(1, 20)], 1),
+      store("c", [line(0, 11), line(1, 400)], 1),
+    ];
+    const { results } = dropImplausibleLines(stores);
+    const costs = buildComparableCosts(results);
+    const c = costs.get("c")!;
+
+    expect(c.imputedLines).toBe(1);
+    expect(c.imputedTotal).toBe(20);
+    expect(c.comparableTotal).toBe(31);
   });
 });

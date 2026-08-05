@@ -6,7 +6,7 @@ import {
   extractCityFromLocation,
 } from "@super-mcp/shared";
 import { enrichCommodityCoverage } from "../basket/commodityCoverage.js";
-import { buildComparableCosts } from "../basket/comparableBasket.js";
+import { buildComparableCosts, dropImplausibleLines } from "../basket/comparableBasket.js";
 import {
   createBasketContinuationPayload,
   decodeBasketContinuation,
@@ -453,6 +453,28 @@ async function runDeliveryOptimization(
       pricing.promoMap,
     );
     if (result && result.lines.length > 0) pricedByStore.set(storeId, result);
+  }
+
+  // Runs before comparable costs, because a substitute that is 6x what every
+  // other storefront charges for the same line would otherwise poison both the
+  // storefront's own total and the market reference the others are measured
+  // against. See dropImplausibleLines: cross-store agreement is the only signal
+  // that survives a wrong size record on both the primary and the substitute.
+  const { results: plausible, dropped: implausibleLines } = dropImplausibleLines([
+    ...pricedByStore.values(),
+  ]);
+  if (implausibleLines > 0) {
+    for (const store of plausible) {
+      if (store.lines.length > 0) pricedByStore.set(store.storeId, store);
+      else pricedByStore.delete(store.storeId);
+    }
+    console.error(
+      JSON.stringify({
+        severity: "WARNING",
+        msg: "dropped implausible basket lines",
+        lines: implausibleLines,
+      }),
+    );
   }
 
   const comparableCosts = buildComparableCosts([...pricedByStore.values()]);
