@@ -33,6 +33,34 @@ export function getPool(): pg.Pool {
       // like a large CREATE INDEX is intentionally long-running.
       options: "-c statement_timeout=30000",
     });
+
+    /**
+     * Without this listener a dropped IDLE connection is fatal to the process.
+     *
+     * `pg` emits 'error' on the Pool when a client sitting idle dies, and an
+     * 'error' event with no listener is rethrown by Node as an uncaught
+     * exception. It is not raised at a query, so no try/catch anywhere can see
+     * it. Observed 2026-08-05: every connection from the laibcatalog ingest was
+     * reset at once ("read: connection reset by peer"), and a job with hours of
+     * work left exited 1 twenty minutes in, taking both of its retries with it.
+     *
+     * A dropped idle connection is not a failure worth ending a run for. The
+     * pool discards the dead client and opens another on the next checkout, so
+     * logging and continuing is both correct and what the ingest needs: a
+     * six-hour national run must survive a momentary blip from a small Cloud SQL
+     * instance under load.
+     *
+     * Errors that belong to a real query still surface at that query, unchanged.
+     */
+    pool.on("error", (err) => {
+      console.error(
+        JSON.stringify({
+          severity: "WARNING",
+          msg: "idle postgres client dropped; pool will reconnect",
+          err: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    });
   }
   return pool;
 }
