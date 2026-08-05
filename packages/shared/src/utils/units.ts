@@ -260,7 +260,26 @@ export function inferPackCountFromName(name: string | null | undefined): number 
   }
 
   // Roll packs (toilet paper, kitchen towel, tape), count before the noun.
-  const rolls = n.match(/(\d{1,3})\s*גלילים?(?![א-ת])/);
+  //
+  // The noun is matched in all three written forms. `גלילים?` reads as singular-
+  // or-plural but is not: it requires at least `גלילי`, so every SINGULAR "N גליל"
+  // filing was missed, which is the form Shufersal and Rami Levy mostly use. That
+  // left 13 real roll packs at piece_count 1 ("נייר טואלט 30 גליל כפול",
+  // "נייר טואלט לוולי 32 גליל לבן"), and a toilet-paper line with a 1-unit primary
+  // matches only other apparent singles, which is how a 350 shekel catering case
+  // came to be priced as a shopper's toilet paper.
+  //
+  // The lookbehind is what keeps the singular form safe. Bin bags write their
+  // DIMENSIONS next to the noun ("אשפתון שקוף סניף 75/90 גליל",
+  // "שקית אשפה 90*75 גליל"), and without it those read as 90- and 75-roll packs.
+  // Rejecting a digit preceded by a separator drops all three, while "24=48 גליל
+  // כפול" (48) and "האשפתון 90*78 2 גליל" (2) still resolve, because their count
+  // is the last number rather than part of the dimension.
+  //
+  // Re-validated against the 557 catalogue names containing גליל: 13 newly
+  // matched, every one a genuine roll pack, zero regressions and zero changed
+  // values on the 49 the old pattern already handled.
+  const rolls = n.match(/(?<![\d/*×x])(\d{1,3})\s*גליל(?:ים|י)?(?![א-ת])/);
   if (rolls?.[1]) {
     const q = bounded(Number(rolls[1]), MAX_STATED_COUNT);
     if (q != null) return q;

@@ -56,6 +56,39 @@ describe("inferPackCountFromName", () => {
     expect(inferPackCountFromName("נייר טואלט 48 גלילים qve")).toBe(48);
   });
 
+  // `גלילים?` read as singular-or-plural but demanded at least `גלילי`, so every
+  // SINGULAR filing was missed. That is the form Shufersal and Rami Levy mostly
+  // use, and it left 13 real roll packs at piece_count 1 — which is how a 350
+  // shekel catering case got priced as a shopper's toilet paper.
+  it("reads the singular גליל, not just the plural", () => {
+    expect(inferPackCountFromName("נייר טואלט 30 גליל כפול עובי משולש")).toBe(30);
+    expect(inferPackCountFromName("נייר טואלט לוולי 32 גליל לבן")).toBe(32);
+    expect(inferPackCountFromName("נייר מגבת פרימיום 12 גליל")).toBe(12);
+    expect(inferPackCountFromName("מגבות מטבח 6גליל כפול כדור פורח")).toBe(6);
+    expect(inferPackCountFromName("נייר ט. לילי לבן 30 גליל")).toBe(30);
+  });
+
+  it("still reads the גלילי construct form", () => {
+    expect(inferPackCountFromName("מארז 6 גלילי סלוטייפ צבעוני+ 1.5 ס\"מ 5 מטר")).toBe(6);
+    expect(inferPackCountFromName("מארז 3 גלילי סלוטייפ + 3 מתקנים")).toBe(3);
+  });
+
+  // Bin bags print their DIMENSIONS beside the noun. Allowing the singular form
+  // without this guard turned "75/90 גליל" into a 90-roll pack.
+  it("does not read bin-bag dimensions as a roll count", () => {
+    expect(inferPackCountFromName("אשפתון שקוף סניף 75/90 גליל")).toBeNull();
+    expect(inferPackCountFromName("שקית אשפה 90*75 גליל רמי לוי")).toBeNull();
+    expect(inferPackCountFromName("שקיות שחור 75/90 גליל 50יח שווה")).not.toBe(90);
+  });
+
+  // The count is the last number in these, not part of the dimension, so the
+  // dimension guard must not swallow them.
+  it("keeps counts that follow an equals or a dimension", () => {
+    expect(inferPackCountFromName("נייר טואלט טאצ 24=48 גליל כפול")).toBe(48);
+    expect(inferPackCountFromName("האשפתון 90*78 2 גליל")).toBe(2);
+    expect(inferPackCountFromName("נייר טואלט ג'מבו גליל כפול 36=18 גלילים")).toBe(18);
+  });
+
   it("reads egg trays only when the name is about eggs", () => {
     expect(inferPackCountFromName("תבנית 30 ביצים L")).toBe(30);
     expect(inferPackCountFromName("12 ביצי משק S-הגליל משאב")).toBe(12);
