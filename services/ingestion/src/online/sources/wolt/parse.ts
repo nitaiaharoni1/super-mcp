@@ -8,7 +8,14 @@ import type { RawRecord } from "@super-mcp/shared";
  * explicit non-numeric id. That also makes it obvious in any query that these
  * rows did not come from a regulated feed.
  */
-export const WOLT_CHAIN_ID = "IL-WOLT";
+/**
+ * Retained only so an old row or an external reference to "IL-WOLT" is still
+ * recognisable. Nothing writes it any more: every venue is filed under its
+ * BRAND's chain (see brands.ts), because a single "Wolt" chain made
+ * Victory-on-Wolt and Shufersal-on-Wolt indistinguishable in results while their
+ * price books are genuinely different.
+ */
+export const LEGACY_WOLT_CHAIN_ID = "IL-WOLT";
 
 export interface VenueMeta {
   name: string;
@@ -118,6 +125,7 @@ export function* parseVenuePage(
   html: string,
   slug: string,
   meta: VenueMeta,
+  chainId: string,
 ): Generator<RawRecord> {
   const [venue] = objectsContaining(html, "delivery_base_price", 1);
   const v = (venue ?? {}) as Record<string, unknown>;
@@ -125,7 +133,7 @@ export function* parseVenuePage(
 
   yield {
     kind: "store",
-    chainId: WOLT_CHAIN_ID,
+    chainId,
     storeId: slug,
     name: meta.name,
     address: meta.address ?? `https://wolt.com/he/isr/venue/${slug}`,
@@ -154,7 +162,11 @@ export function* parseVenuePage(
 }
 
 /** Priced items off one category page. */
-export function* parseCategoryPage(html: string, slug: string): Generator<RawRecord> {
+export function* parseCategoryPage(
+  html: string,
+  slug: string,
+  chainId: string,
+): Generator<RawRecord> {
   const seen = new Set<string>();
   const ts = new Date();
   for (const raw of objectsContaining(html, "barcode_gtin")) {
@@ -169,7 +181,7 @@ export function* parseCategoryPage(html: string, slug: string): Generator<RawRec
     const size = parseUnitInfo(item["unit_info"]);
     yield {
       kind: "price",
-      chainId: WOLT_CHAIN_ID,
+      chainId,
       storeId: slug,
       itemCode: gtin,
       // 1 means "this code is a real barcode" in the feeds, which is what makes

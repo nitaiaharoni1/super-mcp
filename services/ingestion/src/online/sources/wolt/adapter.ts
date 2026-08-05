@@ -5,7 +5,8 @@ import type {
   SourceAdapter,
 } from "@super-mcp/shared";
 import { fetchAllowedFeed } from "../../../sources/common/allowedFetch.js";
-import { parseVenuePage, parseCategoryPage, WOLT_CHAIN_ID } from "./parse.js";
+import { parseVenuePage, parseCategoryPage } from "./parse.js";
+import { WOLT_CHAIN_IDS, woltBrandForVenue, type WoltBrand } from "./brands.js";
 
 /**
  * Wolt as a chain in its own right, not as a storefront of the chains it hosts.
@@ -189,7 +190,7 @@ export function createWoltAdapter(options: WoltAdapterOptions = {}): SourceAdapt
   return {
     sourceId: "il-wolt",
     market: "IL",
-    expectedChainIds: [WOLT_CHAIN_ID],
+    expectedChainIds: [...WOLT_CHAIN_IDS],
 
     async discover(): Promise<FeedFile[]> {
       const venues = new Map<string, WoltVenue>();
@@ -206,16 +207,30 @@ export function createWoltAdapter(options: WoltAdapterOptions = {}): SourceAdapt
         }
       }
 
-      const selected = [...venues.values()]
-        .filter((v) => filter.length === 0 || filter.some((f) => v.slug.toLowerCase().includes(f)))
+      // Brand allowlist BEFORE maxVenues, or the cap spends itself on whichever
+      // 25 slugs sort first: an uncapped run reached 517 venues across 276 brands,
+      // and a capped one filled up on Adidas and a hookah shop while never
+      // reaching Wolt Market. See brands.ts for what earns a place.
+      const branded: Array<WoltVenue & { brand: WoltBrand }> = [];
+      for (const v of venues.values()) {
+        const brand = woltBrandForVenue(v.name);
+        if (!brand) continue;
+        if (filter.length > 0 && !filter.some((f) => v.slug.toLowerCase().includes(f))) continue;
+        branded.push({ ...v, brand });
+      }
+      const selected = branded
         .sort((a, b) => a.slug.localeCompare(b.slug))
         .slice(0, maxVenues);
 
+      const perBrand: Record<string, number> = {};
+      for (const v of selected) perBrand[v.brand.chainId] = (perBrand[v.brand.chainId] ?? 0) + 1;
       console.log(
         JSON.stringify({
           event: "wolt_discovery",
           venuesFound: venues.size,
+          venuesOnAllowlist: branded.length,
           venuesSelected: selected.length,
+          perBrand,
           filtered: filter.length > 0,
         }),
       );
@@ -249,7 +264,7 @@ export function createWoltAdapter(options: WoltAdapterOptions = {}): SourceAdapt
           kind: "stores",
           remotePath: venueUrl,
           fileName: `venue-${venue.slug}.html`,
-          chainId: WOLT_CHAIN_ID,
+          chainId: venue.brand.chainId,
           storeId: venue.slug,
         });
         // One file per category page: this is where the priced items live.
@@ -265,7 +280,7 @@ export function createWoltAdapter(options: WoltAdapterOptions = {}): SourceAdapt
             kind: "prices",
             remotePath: `${venueUrl}/items/${category}`,
             fileName: `${venue.slug}--${category}.html`,
-            chainId: WOLT_CHAIN_ID,
+            chainId: venue.brand.chainId,
             storeId: venue.slug,
           });
         }
@@ -283,18 +298,26 @@ export function createWoltAdapter(options: WoltAdapterOptions = {}): SourceAdapt
     async *parse(blob: RawBlob): AsyncIterable<RawRecord> {
       const html = blob.bytes.toString("utf8");
       const slug = blob.file.storeId ?? "";
+      // Read off the FeedFile rather than the discovery cache: a blob replayed
+      // from data/raw, or fetched in a later process, still knows its brand.
+      const chainId = blob.file.chainId ?? "";
       if (blob.file.kind === "stores") {
         const meta = landingCache.get(slug);
-        yield* parseVenuePage(html, slug, {
-          name: meta?.name ?? slug,
-          city: meta?.city ?? null,
-          address: meta?.address ?? null,
-          lat: meta?.lat ?? null,
-          lng: meta?.lng ?? null,
-        });
+        yield* parseVenuePage(
+          html,
+          slug,
+          {
+            name: meta?.name ?? slug,
+            city: meta?.city ?? null,
+            address: meta?.address ?? null,
+            lat: meta?.lat ?? null,
+            lng: meta?.lng ?? null,
+          },
+          chainId,
+        );
         return;
       }
-      yield* parseCategoryPage(html, slug);
+      yield* parseCategoryPage(html, slug, chainId);
     },
   };
 }

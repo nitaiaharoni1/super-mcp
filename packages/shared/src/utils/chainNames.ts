@@ -20,7 +20,14 @@ const CHAIN_NAMES: Record<string, ChainDisplayNames> = {
   "7290785400000": { he: "קשת טעמים", en: "Keshet Taamim" },
   // Marketplaces are chains in their own right here, because they set their own
   // prices rather than passing a chain's through. See the Wolt adapter.
+  // One chain per Wolt BRAND, not one "Wolt". A Wolt venue sets Wolt's price, not
+  // the chain's (about +25% on the venue that also files a feed), so
+  // "Victory on Wolt" is a different price book from "Victory" and a shopper has
+  // to see them as two named options. "IL-WOLT" is the retired single-chain id.
   "IL-WOLT": { he: "וולט", en: "Wolt" },
+  "IL-WOLT-MARKET": { he: "וולט מרקט", en: "Wolt Market" },
+  "IL-WOLT-VICTORY": { he: "ויקטורי-וולט", en: "Victory (Wolt)" },
+  "IL-WOLT-MACHSANEI": { he: "מחסני השוק-וולט", en: "Machsanei Hashuk (Wolt)" },
   "IL-SUPER-YUDA": { he: "סופר יודה", en: "Super Yuda" },
   "IL-POLITZER": { he: "פוליצר", en: "Politzer" },
 };

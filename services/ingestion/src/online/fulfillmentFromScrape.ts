@@ -6,7 +6,7 @@ import {
 import type { CoverageRule, DeliveryTariffBand } from "@super-mcp/shared";
 import { fetchAllowedFeed } from "../sources/common/allowedFetch.js";
 import { WOLT_HOSTS } from "./sources/wolt/adapter.js";
-import { WOLT_CHAIN_ID } from "./sources/wolt/parse.js";
+import { WOLT_CHAIN_IDS } from "./sources/wolt/brands.js";
 import { STORAI_RETAILERS } from "./sources/storai/adapter.js";
 import { FULFILLMENT_CATALOG } from "../fulfillment/catalog.js";
 import { expandDeliveryArea } from "../fulfillment/deliveryAreas.js";
@@ -138,7 +138,10 @@ export async function syncScrapedFulfillment(): Promise<ScrapedFulfillmentResult
   const curatedChains = chainsCoveredByCuratedCatalogue();
 
   for (const store of stores) {
-    if (store.chainId === WOLT_CHAIN_ID) {
+    // Any Wolt BRAND chain, not one "Wolt": each brand is its own chain now, and
+    // this branch is about how the terms are read (from the venue payload), which
+    // is the same for all of them.
+    if (WOLT_CHAIN_IDS.includes(store.chainId)) {
       const citySlug = (store.city ?? "tel-aviv")
         .trim()
         .toLowerCase()
