@@ -174,7 +174,13 @@ export async function syncScrapedFulfillment(): Promise<ScrapedFulfillmentResult
         slug: `wolt-${store.storeCode}`,
         chainId: store.chainId,
         storeId: store.storeId,
-        brand: store.name,
+        // The venue name alone hides where the price came from. Wolt writes its
+        // venues as "ויקטורי | ויצמן", so a delivery list showed that beside
+        // "רמי לוי אונליין" with nothing to say the first is Wolt's own price
+        // book, roughly 25% above the chain's. The shopper has to be able to see
+        // it, so the marker goes on the brand a plan reports, not only on the
+        // chain id underneath it.
+        brand: store.name.includes("וולט") ? store.name : `${store.name} (וולט)`,
         serviceType: "marketplace",
         marketplace: "wolt",
         storefrontUrl: url,
