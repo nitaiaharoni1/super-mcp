@@ -25,12 +25,21 @@ const CURRENT_PRICE_FRESHNESS_HOURS = 48;
 const REPORT_TTL_MS = 60_000;
 
 let cachedReport: { report: ReadinessReport; expiresAt: number } | null = null;
+/**
+ * The last report that actually succeeded, kept past its cache expiry.
+ *
+ * Separate from `cachedReport` on purpose: that one answers "is a fresh answer
+ * still valid", this one answers "have we ever had an answer at all", and only
+ * the second can rescue a scan that is failing right now.
+ */
+let lastGood: ReadinessReport | null = null;
 /** Collapses concurrent callers onto one scan instead of one scan each. */
 let inflight: Promise<ReadinessReport> | null = null;
 
 /** Test-only: drop the cached readiness report and any in-flight scan. */
 export function _resetReadinessCacheForTests(): void {
   cachedReport = null;
+  lastGood = null;
   inflight = null;
 }
 
@@ -69,7 +78,35 @@ export async function getReadiness(): Promise<ReadinessReport> {
   inflight = runReadinessQuery()
     .then((report) => {
       cachedReport = { report, expiresAt: Date.now() + REPORT_TTL_MS };
+      lastGood = report;
       return report;
+    })
+    .catch((err: unknown) => {
+      // A failed scan is not evidence the service is unready, and saying it is
+      // was worse than saying nothing. During the nightly ingest this aggregate
+      // exceeds the 30s statement_timeout, so /ready answered 500 for the whole
+      // six-hour window while /mcp served baskets normally throughout. Anything
+      // watching readiness would have paged every night over a healthy service.
+      //
+      // So the last successful report is served instead, carrying its own
+      // checkedAt, which is what makes it honest: a reader sees the numbers are
+      // hours old rather than being told they are current. Only a service that
+      // has never once succeeded reports failure.
+      if (lastGood) {
+        console.error(
+          JSON.stringify({
+            severity: "WARNING",
+            msg: "readiness scan failed; serving last good report",
+            staleSinceMs: Date.now() - Date.parse(lastGood.checkedAt),
+            err: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        // Briefly cached so a stampede during a long ingest does not queue a new
+        // doomed scan per request.
+        cachedReport = { report: lastGood, expiresAt: Date.now() + REPORT_TTL_MS };
+        return lastGood;
+      }
+      throw err;
     })
     .finally(() => {
       // Cleared on failure too: a failed scan must not wedge every later caller
