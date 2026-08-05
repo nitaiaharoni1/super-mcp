@@ -20,12 +20,79 @@ import { closePool, getPool } from "../client/index.js";
  */
 const SOURCE = "concept";
 
+/**
+ * A product priced this many times its concept's median is not answering the
+ * plain word, whatever the classifier decided.
+ *
+ * Writing the concept's everyday Hebrew against a product asserts something
+ * specific: that it is a plausible answer to that bare word. The classifier is
+ * good at the shelf a thing belongs on and reliably bad at the device/consumable
+ * line, so it filed electric toothbrushes under toothpaste, a coffee machine and
+ * several eau de toilettes under instant coffee, decorative bins under bin bags
+ * and catering cases of toilet paper alongside a household four-pack. Each then
+ * inherited the plain word and could be picked for it: a measured basket priced
+ * "נייר טואלט" at Shufersal as a 350 shekel case and reported the chain at 460
+ * instead of 136, which is enough to invert the ranking the whole product exists
+ * to give.
+ *
+ * Price is the cheap, language-independent signal for that mistake, and it works
+ * because the failure is always the same shape: the thing that dispenses or
+ * holds the everyday item costs many times the everyday item. The guard belongs
+ * here rather than in the classification, because the classification is often
+ * defensible on its own terms (a 130 shekel bath oil really is a body wash) and
+ * it is only the claim "type this word and mean this" that does not survive.
+ *
+ * Deliberately loose. At 8x it also drops premium-but-genuine members of a
+ * concept, and that is the correct direction to err: losing one expensive way to
+ * answer "sabon rechitsa" costs a shopper nothing, since cheaper real ones
+ * remain, while keeping one 866 shekel toothbrush under "mishchat shinayim"
+ * ruins a basket.
+ */
+const OUTLIER_PRICE_RATIO = 8;
+/** Concepts thinner than this have no median worth trusting, so leave them be. */
+const MIN_CONCEPT_SAMPLE = 20;
+
+/**
+ * Products whose cheapest price is an extreme outlier for their own L3.
+ * Computed once and applied to every concept, so the cost is one query.
+ */
+async function outlierProductIds(
+  pool: Pick<ReturnType<typeof getPool>, "query">,
+): Promise<Set<string>> {
+  const { rows } = await pool.query<{ product_id: string }>(
+    `WITH priced AS (
+       SELECT p.id AS product_id, pcm.class_l3, min(sp.price) AS price
+         FROM product p
+         JOIN product_class_map pcm ON pcm.product_id = p.id
+         JOIN listing l ON l.product_id = p.id
+         JOIN store_price sp ON sp.listing_id = l.id
+        WHERE pcm.class_l3 IS NOT NULL AND sp.price > 0
+        GROUP BY p.id, pcm.class_l3
+     ), stats AS (
+       SELECT class_l3,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY price)::numeric AS median
+         FROM priced
+        GROUP BY class_l3
+       HAVING count(*) >= $2
+     )
+     SELECT priced.product_id
+       FROM priced JOIN stats USING (class_l3)
+      WHERE priced.price > stats.median * $1`,
+    [OUTLIER_PRICE_RATIO, MIN_CONCEPT_SAMPLE],
+  );
+  return new Set(rows.map((r) => r.product_id));
+}
+
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
   const pool = getPool();
 
   let totalPairs = 0;
+  let totalSkipped = 0;
   const perConcept: Array<{ l3: string; products: number; phrases: number }> = [];
+
+  const outliers = await outlierProductIds(pool);
+  console.log(`[alias] ${outliers.size} price-outlier products will not receive concept words`);
 
   // Authoritative, not additive. These rows are DERIVED from the classification,
   // so a product that loses its L3 must lose the concept's words with it.
@@ -47,10 +114,12 @@ async function main(): Promise<void> {
 
   try {
   for (const [l3, phrases] of Object.entries(L3_QUERY_PHRASES)) {
-    const { rows } = await pool.query<{ product_id: string }>(
+    const { rows: classified } = await pool.query<{ product_id: string }>(
       `SELECT product_id FROM product_class_map WHERE class_l3 = $1`,
       [l3],
     );
+    const rows = classified.filter((r) => !outliers.has(r.product_id));
+    totalSkipped += classified.length - rows.length;
     if (rows.length === 0) continue;
     perConcept.push({ l3, products: rows.length, phrases: phrases.length });
     totalPairs += rows.length * phrases.length;
@@ -81,6 +150,7 @@ async function main(): Promise<void> {
     console.log(`[alias] ${c.l3}: ${c.products} products x ${c.phrases} phrases`);
   }
   console.log(`[alias] ${dryRun ? "would write" : "wrote"} up to ${totalPairs} alias pairs`);
+  console.log(`[alias] skipped ${totalSkipped} product/concept pairs as price outliers`);
 
   if (!dryRun) {
     const { rows } = await pool.query<{ n: string }>(
