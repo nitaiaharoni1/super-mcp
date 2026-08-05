@@ -20,6 +20,23 @@ import { parseVenuePage, parseCategoryPage, WOLT_CHAIN_ID } from "./parse.js";
  * Wolt sets these prices, and `show_zero_markup` is false on all 613 Israeli
  * grocery venues, which is Wolt's own admission that none of them commit to
  * shelf parity.
+ *
+ * NOT READY FOR A SCHEDULED NATIONAL RUN. Measured 2026-08-05 from me-west1
+ * against the live site, uncapped: Wolt answers `429 Too Many Requests` for most
+ * category pages once a crawl gets going. The run "succeeded" in 6.6 minutes
+ * having collected 889 price rows across 23 venues, because nearly every fetch
+ * was rejected rather than served. A partial crawl is worse than none here: a
+ * venue with 4 of a shopper's 12 lines reports a small total precisely because it
+ * cannot fill the basket.
+ *
+ * What this needs before it is scheduled: honour 429 with backoff and a retry
+ * budget, throttle to a request rate Wolt tolerates, and treat a venue whose
+ * category pages mostly failed as not-ingested rather than as an empty venue.
+ * Until then the job exists but nothing schedules it, deliberately.
+ *
+ * The parser itself is sound and is not the problem: run against a real grocery
+ * venue it returned 239 rows with zero errors, and the category parser reads 17
+ * to 42 barcoded products per page.
  */
 export const WOLT_HOSTS = ["wolt.com", "consumer-api.wolt.com"] as const;
 
@@ -30,23 +47,24 @@ const USER_AGENT =
 /**
  * Product lines that are groceries rather than restaurants.
  *
- * `alcohol` was here and is deliberately gone. Wolt files a dedicated wine and
- * spirits shop under it, and those venues carry none of a shopping list: a trial
- * run whose first three venues were "123 יין ואלכוהול" branches produced 3 store
- * rows and zero price rows, and because a storefront row is enough to become an
- * active delivery service, all three appeared in the live Tel Aviv delivery
- * options as stores that stock nothing. A basket comparison offering a shopper a
- * wine shop is worse than offering nothing.
+ * Narrowed to the two that actually sell a shopping list, after a full national
+ * run measured what the wider set admits. `alcohol` brought in "123 יין
+ * ואלכוהול" branches, and `general_merchandise` brought in Adidas stores, a
+ * hookah shop, a sweets shop and a cosmetics shop. `pharmacy` reads plausible
+ * (Super-Pharm does stock household lines) but is not a supermarket and cannot
+ * fill a basket.
  *
- * `pharmacy` and `general_merchandise` stay: those venues do stock the household
- * and personal-care lines a real basket contains.
+ * The damage is not merely irrelevant rows. A store row alone is enough to become
+ * an active fulfillment_service, so of 23 venues that run created, 19 had ZERO
+ * prices and they were live in the Tel Aviv delivery options as storefronts
+ * stocking nothing. A basket comparison that offers a shopper Adidas is worse
+ * than one that offers nothing.
+ *
+ * `grocery` covers Victory and the supermarket venues; `convenience` covers am:pm
+ * and the 7-Eleven-style express shops, which is where the 889 real price rows in
+ * that run came from.
  */
-const GROCERY_PRODUCT_LINES = new Set([
-  "grocery",
-  "convenience",
-  "pharmacy",
-  "general_merchandise",
-]);
+const GROCERY_PRODUCT_LINES = new Set(["grocery", "convenience"]);
 
 /**
  * Where to look for venues.
