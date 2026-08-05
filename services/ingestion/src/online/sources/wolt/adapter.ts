@@ -142,18 +142,70 @@ function collectVenues(node: unknown, out: Map<string, WoltVenue>): void {
   for (const value of Object.values(obj)) collectVenues(value, out);
 }
 
+/**
+ * Wolt rate-limits on SUSTAINED volume, not on burst, so lowering concurrency is
+ * not enough on its own and this retry is not optional.
+ *
+ * Measured against the live site from me-west1. A 93-page run at 8 concurrent saw
+ * zero 429s, which is what made "just go slower" look sufficient. The allowlisted
+ * run of 907 pages at 4 concurrent then took 680 rejections out of 907, and the
+ * two brands whose pages happened to come last, Wolt Market and Victory, ended
+ * with ZERO price rows while Machsanei Hashuk got 2,377. A run that silently
+ * drops whole brands is worse than one that fails: those venues still get store
+ * rows, and a store row alone becomes an orderable storefront with nothing in it.
+ *
+ * So a 429 is treated as "wait, then ask again" rather than as an error. Wolt's
+ * Retry-After is honoured when present; otherwise the wait doubles from a second,
+ * with a ceiling so one hostile response cannot stall a whole run.
+ */
+const RATE_LIMIT_MAX_ATTEMPTS = 6;
+const RATE_LIMIT_BASE_MS = 1_000;
+const RATE_LIMIT_CEILING_MS = 30_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Seconds from a Retry-After header, when it is the numeric form Wolt sends. */
+function retryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header.trim());
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return Math.min(seconds * 1_000, RATE_LIMIT_CEILING_MS);
+}
+
 async function getText(url: string): Promise<string> {
-  const res = await fetchAllowedFeed(url, WOLT_HOSTS, {
-    headers: {
-      "User-Agent": USER_AGENT,
-      "Accept-Language": "he,en",
-      // Category pages are ~2 MB raw and ~300 KB gzipped. A full venue is 46 of
-      // them, so this is the difference between 14 MB and 100 MB per venue.
-      "Accept-Encoding": "gzip, deflate, br",
-    },
-  });
-  if (!res.ok) throw new Error(`Wolt fetch ${res.status} for ${url}`);
-  return res.text();
+  let wait = RATE_LIMIT_BASE_MS;
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetchAllowedFeed(url, WOLT_HOSTS, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Accept-Language": "he,en",
+        // Category pages are ~2 MB raw and ~300 KB gzipped. A full venue is 46 of
+        // them, so this is the difference between 14 MB and 100 MB per venue.
+        "Accept-Encoding": "gzip, deflate, br",
+      },
+    });
+    if (res.ok) return res.text();
+
+    // Only 429 is worth waiting on. A 404 or a 500 will not improve by asking
+    // again, and retrying them would multiply the request volume that caused the
+    // throttling in the first place.
+    if (res.status !== 429 || attempt >= RATE_LIMIT_MAX_ATTEMPTS) {
+      throw new Error(`Wolt fetch ${res.status} for ${url}`);
+    }
+    const delay = retryAfterMs(res.headers.get("retry-after")) ?? wait;
+    console.log(
+      JSON.stringify({
+        event: "wolt_rate_limited",
+        attempt,
+        waitMs: delay,
+        url,
+      }),
+    );
+    await sleep(delay);
+    wait = Math.min(wait * 2, RATE_LIMIT_CEILING_MS);
+  }
 }
 
 /** Wolt's own URL slug for a venue's city, taken from the venue page redirect path. */
