@@ -27,13 +27,25 @@ const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
 
-/** Product lines that are groceries rather than restaurants. */
+/**
+ * Product lines that are groceries rather than restaurants.
+ *
+ * `alcohol` was here and is deliberately gone. Wolt files a dedicated wine and
+ * spirits shop under it, and those venues carry none of a shopping list: a trial
+ * run whose first three venues were "123 יין ואלכוהול" branches produced 3 store
+ * rows and zero price rows, and because a storefront row is enough to become an
+ * active delivery service, all three appeared in the live Tel Aviv delivery
+ * options as stores that stock nothing. A basket comparison offering a shopper a
+ * wine shop is worse than offering nothing.
+ *
+ * `pharmacy` and `general_merchandise` stay: those venues do stock the household
+ * and personal-care lines a real basket contains.
+ */
 const GROCERY_PRODUCT_LINES = new Set([
   "grocery",
   "convenience",
   "pharmacy",
   "general_merchandise",
-  "alcohol",
 ]);
 
 /**
