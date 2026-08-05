@@ -58,13 +58,22 @@ redeploy Hosting until it is recreated. The shape:
     "public": "apps/web/firebase-hosting",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
-      { "source": "/mcp{,/**}", "run": { "serviceId": "super-mcp", "region": "europe-west1" } },
-      { "source": "/v1/**",     "run": { "serviceId": "super-mcp", "region": "europe-west1" } },
-      { "source": "**",         "run": { "serviceId": "super-mcp-web", "region": "europe-west1" } }
+      { "source": "/mcp{,/**}",   "run": { "serviceId": "super-mcp", "region": "europe-west1" } },
+      { "source": "/v1/**",       "run": { "serviceId": "super-mcp", "region": "europe-west1" } },
+      { "source": "/openapi.json","run": { "serviceId": "super-mcp", "region": "europe-west1" } },
+      { "source": "/health",      "run": { "serviceId": "super-mcp", "region": "europe-west1" } },
+      { "source": "**",           "run": { "serviceId": "super-mcp-web", "region": "europe-west1" } }
     ]
   }
 }
 ```
+
+Every API path the front door must serve needs its own entry: anything unlisted falls to
+the catch-all and is answered by the *marketing site*, which returns a plausible-looking
+404 rather than an error. `/openapi.json` and `/health` were missed on the first pass
+exactly that way. `/ready` is deliberately absent: it reports catalogue row counts and
+freshness, which do not belong on the marketing domain. It stays reachable on the Cloud
+Run URL for ops.
 
 Order matters: Hosting takes the first matching rewrite, so the catch-all must stay last.
 Deploy with `firebase deploy --only hosting --project=<PROJECT_ID>`. It validates every
