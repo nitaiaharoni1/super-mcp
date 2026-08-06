@@ -156,13 +156,30 @@ describe("selectFeedFilesForChain", () => {
     expect(knownLocations).not.toHaveBeenCalled();
   });
 
-  // "This chain produced no price rows" is an alarm worth keeping, and for eight
-  // of the sixteen chains we hold it is now the correct outcome. Reporting them
-  // would mark a healthy nightly run degraded and turn the alarm into noise.
+  // "This chain produced no price rows" is an alarm worth keeping, and under the
+  // online filter it is now the correct outcome for most chains we hold.
+  // Reporting them would mark a healthy nightly run degraded every night.
   it("marks a chain with nowhere to order from, so the run does not cry wolf", async () => {
     knownLocations.mockResolvedValue([]);
     await selectFeedFilesForChain(CHAIN, files, [{ storeId: "001", city: "תל אביב" }], 50);
     expect(chainsWithNoStorefront()).toEqual([CHAIN]);
+  });
+
+  // Yohananof, measured 2026-08-06: three pickup points, zero PriceFull files
+  // for any of them. It HAS storefronts, so a storefront-shaped test passes it
+  // and the run still reports degraded nightly. What matters is whether there
+  // was a file to download.
+  it("marks a chain whose storefronts publish no price file", async () => {
+    const storesOnly = files.filter((f) => f.kind === "stores");
+    await selectFeedFilesForChain(CHAIN, storesOnly, [], 50);
+    expect(chainsWithNoStorefront()).toEqual([CHAIN]);
+  });
+
+  // A file we DID download and got nothing from is a real failure, and has to
+  // stay reportable. This is the line between the two.
+  it("does not mark a chain whose price file was selected", async () => {
+    await selectFeedFilesForChain(CHAIN, files, [{ storeId: "001", city: "תל אביב" }], 50);
+    expect(chainsWithNoStorefront()).toEqual([]);
   });
 
   it("clears the mark once the chain has a storefront again", async () => {

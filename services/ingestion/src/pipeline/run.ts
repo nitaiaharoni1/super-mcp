@@ -92,9 +92,10 @@ function findEmptyChains(
   const expected = adapter.expectedChainIds ?? expectedChainIdsForSource(adapter.sourceId);
   const priceExempt = new Set([
     ...(adapter.priceExemptChainIds ?? []),
-    // Discovered, not configured: under the online filter a chain with no
-    // storefront has nothing to price, and eight of the sixteen we hold are in
-    // that position. Leaving them in would mark a healthy run `degraded` nightly.
+    // Discovered, not configured: under the online filter, a chain we selected
+    // no price file for had nothing to download. Eight of the sixteen we hold
+    // have no storefront at all, and Yohananof publishes no PriceFull for its
+    // three pickup points. Leaving them in marks a healthy run degraded nightly.
     ...chainsWithNoStorefront(),
   ]);
   const chainsWithNoFiles = expected.filter((id) => !discoveredChainIds.has(id));

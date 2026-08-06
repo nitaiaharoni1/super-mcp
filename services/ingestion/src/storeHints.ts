@@ -34,38 +34,49 @@ export async function selectFeedFilesForChain(
   maxStores: number,
 ): Promise<FeedFile[]> {
   const hints = await withKnownOrderable(chainId, locations);
-  if (onlineStoresOnly() && !hints.some(isOrderableStorefront)) {
-    storefrontlessChains.add(chainId);
+  const selected = selectRegionalFeedFiles(files, hints, maxStores);
+
+  if (onlineStoresOnly() && !selected.some((f) => f.kind === "pricesfull")) {
+    nothingToPrice.add(chainId);
   } else {
-    storefrontlessChains.delete(chainId);
+    nothingToPrice.delete(chainId);
   }
-  return selectRegionalFeedFiles(files, hints, maxStores);
+  return selected;
 }
 
 /**
- * Chains this run found no orderable storefront for.
+ * Chains this run selected no price file for.
  *
  * Module state because it is a fact about the current process: the ingest is a
  * one-shot CLI, discovery decides this, and the run summary needs it afterwards.
  * Threading it back would mean widening the `SourceAdapter` contract for every
  * adapter to carry a value only one filter produces.
  *
- * The run summary needs it because "this chain produced no price rows" is an
- * alarm worth keeping and, for eight of our sixteen chains, now the correct
- * outcome. Without this the nightly run would report `degraded` every night on a
- * healthy ingest, and the alarm that caught Osher Ad's prices going a fortnight
- * stale would be noise inside a week.
+ * The run summary needs it because `classifyStatus` marks a run degraded when a
+ * configured chain yields no price rows, and under the online filter that is now
+ * the correct outcome for most of the chains we hold. Eight have no storefront
+ * at all. Yohananof has three pickup points and publishes no PriceFull for any
+ * of them, measured 2026-08-06. Reporting either nightly would turn the alarm
+ * into noise inside a week.
+ *
+ * Keyed on "no file was selected" rather than "no storefront exists" because
+ * that is the question the gate is really asking: a chain we DID download a
+ * price file for and got no rows from is still a genuine failure, and still
+ * reported. The case the old gate existed for, a chain's prices going quietly
+ * stale, is now answered by freshness (`/ready` newestSourceTs and each store's
+ * last_seen_at) rather than by a per-run file count, because a run cannot tell
+ * a chain that published nothing today from one that has nothing to publish.
  */
-const storefrontlessChains = new Set<string>();
+const nothingToPrice = new Set<string>();
 
-/** Chains exempt from "no price rows" because they have nowhere to order from. */
+/** Chains exempt from "no price rows" because there was nothing to download. */
 export function chainsWithNoStorefront(): string[] {
-  return [...storefrontlessChains];
+  return [...nothingToPrice];
 }
 
 /** Test-only: forget what earlier runs in this process discovered. */
 export function _resetStorefrontlessChains(): void {
-  storefrontlessChains.clear();
+  nothingToPrice.clear();
 }
 
 async function withKnownOrderable(
