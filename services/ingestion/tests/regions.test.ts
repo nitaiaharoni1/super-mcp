@@ -76,6 +76,38 @@ describe("isStoreInIngestRegion", () => {
     expect(isStoreInIngestRegion({ storeId: "3", name: "מרכז יהודה הלוי" })).toBe(false);
   });
 
+  // A storefront is judged on where it delivers, and where it physically sits
+  // says nothing about that. Only one call site ever set isDeliveryStorefront;
+  // the Stores-file path did not, so it judged storefronts like any branch.
+  // Measured 2026-08-06: Tiv Taam's Ashdod and Caesarea picking stores were both
+  // outside every box while live, priced and being quoted.
+  it("never filters out somewhere an order can be placed", () => {
+    expect(
+      isStoreInIngestRegion({ storeId: "502", city: "70", name: "ליקוט טיב טעם אשדוד" }),
+    ).toBe(true);
+    expect(
+      isStoreInIngestRegion({ storeId: "523", city: "1167", name: "ליקוט קיסריה" }),
+    ).toBe(true);
+    // Somewhere genuinely remote, which is the case that would have been lost.
+    expect(
+      isStoreInIngestRegion({ storeId: "9", name: "ליקוט אילת", city: "אילת", lat: 29.55, lng: 34.95 }),
+    ).toBe(true);
+    // Declared online by the chain, whatever its name reads like.
+    expect(
+      isStoreInIngestRegion({ storeId: "39", name: "מרלוג אינטרנט", city: "אילת", storeType: 2 }),
+    ).toBe(true);
+  });
+
+  it("still filters an ordinary branch out of region", () => {
+    // The storefront exemption must not become a hole in the volume control.
+    expect(
+      isStoreInIngestRegion({ storeId: "1", name: "שופרסל דיל אילת", city: "אילת", storeType: 1 }),
+    ).toBe(false);
+    expect(
+      isStoreInIngestRegion({ storeId: "2", name: "רמי לוי טבריה", city: "טבריה", lat: 32.79, lng: 35.53 }),
+    ).toBe(false);
+  });
+
   it("matches the city field prefix only on whole-word boundaries", () => {
     expect(isStoreInIngestRegion({ storeId: "1", city: "יהודה" })).toBe(false);
     expect(isStoreInIngestRegion({ storeId: "2", city: "תל אביב יפו - מרכז" })).toBe(true);

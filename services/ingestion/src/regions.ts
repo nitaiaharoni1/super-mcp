@@ -320,7 +320,18 @@ function nameHintsCoveredCity(name: string | undefined): boolean {
  */
 export function isStoreInIngestRegion(store: StoreLocationHint): boolean {
   // A depot we quote deliveries from is always worth refreshing, wherever it is.
-  if (store.isDeliveryStorefront) return true;
+  //
+  // Derived, not just taken from the caller's flag. Only one call site ever set
+  // `isDeliveryStorefront`; the Stores-file path did not, so it judged storefronts
+  // on geography like any branch. Tiv Taam's Ashdod and Caesarea picking stores
+  // both fall outside every box and both serve addresses inside them: measured
+  // 2026-08-06, `isStoreInIngestRegion` returned false for both while they were
+  // live, priced and being quoted. They kept their rows only because the price
+  // path re-invents a store it cannot find, which meant their city never
+  // refreshed. A storefront opening somewhere genuinely remote, Eilat say, would
+  // have been filed as a placeholder branch and quietly dropped out of the
+  // delivery surface.
+  if (isOrderableStorefront(store)) return true;
   if (cityAllowed(store.city)) return true;
   if (geoAllowed(store.lat, store.lng)) return true;
   if (!store.city && cityAllowed(localityFromStoreName(store.name) ?? undefined)) return true;

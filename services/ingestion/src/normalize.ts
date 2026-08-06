@@ -480,6 +480,12 @@ export class Normalizer {
             lat: record.geo?.lat,
             lng: record.geo?.lng,
             name,
+            // Both fields matter to the storefront test above, and neither was
+            // being passed: without them every storefront is judged on where it
+            // physically sits, which is the one thing that says nothing about
+            // where it delivers.
+            address,
+            storeType: record.storeType,
           })
         ) {
           stats.regionFiltered++;
