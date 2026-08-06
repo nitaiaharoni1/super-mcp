@@ -21,7 +21,7 @@ vi.mock("@super-mcp/db", () => ({
 }));
 
 import * as db from "@super-mcp/db";
-import type { RawRecord } from "@super-mcp/shared";
+import { classifyStoreKind, type RawRecord } from "@super-mcp/shared";
 import { Normalizer } from "../src/normalize.js";
 
 const upsertStore = vi.mocked(db.upsertStore);
@@ -279,5 +279,57 @@ describe("price rows tracked per store for reconciliation", () => {
     ]);
 
     expect(stats.pricesByStore.get("store-1")).toBe(1);
+  });
+});
+
+/**
+ * A store invented from a price row, when the venue's own page never arrived.
+ *
+ * The stub carried no name and no type, so `classifyStoreKind` had nothing but
+ * an English slug to go on and filed the venue as a walk-in branch. Two Wolt
+ * venues sat in production that way, "Store victory-ashdod" and
+ * "Store machsanei-hashuk-kiryat-malachi", scraped nightly and reachable by
+ * nobody, because the online filter that decides what to download reads exactly
+ * that field.
+ */
+describe("stub stores invented from a price row", () => {
+  withoutRegionFilter();
+
+  const priceRecord = (chainId: string, storeId: string): RawRecord =>
+    ({
+      kind: "price",
+      chainId,
+      storeId,
+      itemCode: "7290000000001",
+      itemType: 1,
+      name: "חלב 3%",
+      price: 6.9,
+      sourceTs: new Date("2026-08-06T00:00:00Z"),
+      raw: {},
+    }) as RawRecord;
+
+  it("files a scraped venue as a storefront, not a branch", async () => {
+    const n = new Normalizer("il-wolt");
+    await n.apply([priceRecord("IL-WOLT-VICTORY", "victory-ashdod")]);
+    // upsertStore derives the kind from this, and 2 is the only value that
+    // survives a name the classifier would otherwise read as a warehouse.
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        storeCode: "victory-ashdod",
+        feedStoreType: 2,
+        priceSource: "scraped",
+      }),
+    );
+    expect(classifyStoreKind("Store victory-ashdod", undefined, 2)).toBe("online");
+  });
+
+  it("leaves a feed stub a branch, because those really are branches", async () => {
+    // PublishPrice portals publish real branches and no Stores file. Calling
+    // those online would be the same bug pointed the other way.
+    const n = new Normalizer("il-cerberus");
+    await n.apply([priceRecord(YOHANANOF, "550")]);
+    expect(upsertStore).toHaveBeenCalledWith(
+      expect.objectContaining({ storeCode: "550", feedStoreType: undefined }),
+    );
   });
 });

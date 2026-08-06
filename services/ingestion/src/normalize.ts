@@ -1,6 +1,7 @@
 import {
   canonicalItemCode,
   classifyStoreKind,
+  FEED_STORE_TYPE,
   priceSourceForIngestSource,
   computeUnitPrice,
   inferPackSizeFromName,
@@ -211,6 +212,27 @@ export class Normalizer {
   /** Count an actually-written price row against its store (reconcile input). */
   private notePriceWritten(stats: NormalizeStats, storeUuid: string): void {
     stats.pricesByStore.set(storeUuid, (stats.pricesByStore.get(storeUuid) ?? 0) + 1);
+  }
+
+  /**
+   * The `<StoreType>` to stamp on a store invented from a price row.
+   *
+   * A scraped source has no branches: we scrape marketplaces, and every venue
+   * on one is somewhere an order is placed, never a shop you walk into. Saying
+   * nothing meant `classifyStoreKind` fell back to the slug and filed the venue
+   * as a branch, which then failed the online filter that decides what to
+   * download. Two Wolt venues sat in production that way, named
+   * "Store victory-ashdod" and "Store machsanei-hashuk-kiryat-malachi",
+   * scraped every night and reachable by nobody.
+   *
+   * Feed sources keep guessing: PublishPrice HTML portals publish real branches
+   * with no Stores file, and calling those online would be the same bug pointed
+   * the other way.
+   */
+  private stubStoreType(): number | undefined {
+    return priceSourceForIngestSource(this.sourceId) === "scraped"
+      ? FEED_STORE_TYPE.online
+      : undefined;
   }
 
   private noteMiss(kind: MatchMiss["kind"], term: string, context?: Record<string, unknown>): void {
@@ -496,13 +518,14 @@ export class Normalizer {
         const storeKey = `${record.chainId}:${storeCode}`;
         let storeUuid = this.storeIds.get(storeKey);
         if (!storeUuid) {
-          // Price files are already region-capped at discover time; stub is OK
+          // Price files are already scope-capped at discover time; stub is OK
           // when Stores XML lacked this branch (e.g. PublishPrice HTML portals).
           storeUuid = await upsertStore({
             chainId: scrubNullChars(record.chainId),
             storeCode,
             name: `Store ${storeCode}`,
             priceSource: priceSourceForIngestSource(this.sourceId),
+            feedStoreType: this.stubStoreType(),
           });
           this.storeIds.set(storeKey, storeUuid);
         }
@@ -592,6 +615,7 @@ export class Normalizer {
             storeCode,
             name: `Store ${storeCode}`,
             priceSource: priceSourceForIngestSource(this.sourceId),
+            feedStoreType: this.stubStoreType(),
           });
           this.storeIds.set(storeKey, storeUuid);
         }
