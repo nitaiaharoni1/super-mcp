@@ -41,16 +41,18 @@ Security vulnerabilities → [SECURITY.md](./SECURITY.md) / private GitHub Secur
 - Do not commit `.env`, `.local/`, `data/raw/`, credential JSON, or Firebase project files.
 - Prefer Bearer auth; do not add new query-string credential paths.
 - Master keys: CLI only (`pnpm create-key -- --role=master`). Admin HTTP mints **standard** keys only.
-- Run `pnpm test` before opening a PR. CI also runs gitleaks and the semantic benchmark job.
+- Run `pnpm test` before opening a PR. CI is manual (`gh workflow run ci.yml`) and adds gitleaks and the semantic benchmark job.
 
 ## Pull requests
 
-`main` is protected: changes land only via pull request. Required checks: `test`, `gitleaks`, `benchmark`. Approving reviews are not required (solo-maintainer friendly); CI must be green.
+`main` is protected: changes land only via pull request. Approving reviews are not required (solo-maintainer friendly).
+
+CI does not start on its own. `.github/workflows/ci.yml` is `workflow_dispatch` only, to avoid burning Actions minutes on a check that already runs locally before every commit, so `test`, `gitleaks`, and `benchmark` report only on a run you start yourself.
 
 1. Fork or branch from `main` (do not push commits directly to `main`).
 2. Keep PRs focused; mention any security or data-license impact.
 3. Link related issues when applicable.
-4. Wait for CI, then merge (squash is fine).
+4. Run `gh workflow run ci.yml` if the change warrants it, then merge (squash is fine).
 
 ## Deploy / cloud access
 

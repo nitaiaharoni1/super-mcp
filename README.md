@@ -68,6 +68,20 @@ curl -s "${AUTH[@]}" -H 'Content-Type: application/json' \
   http://localhost:8787/v1/delivery/optimize
 ```
 
+### Tests
+
+```bash
+pnpm test        # builds every package, then runs Vitest across the workspace
+```
+
+Tests live in a `tests/` tree per package, mirroring that package's `src/`. The default suite
+needs no database. The live suites do, and skip silently without one:
+
+```bash
+pnpm --filter @super-mcp/api test:live    # needs DATABASE_URL pointing at a seeded Postgres
+pnpm --filter @super-mcp/api test:perf
+```
+
 ## MCP: online supermarket delivery
 
 `/mcp` is **super-mcp** for groceries delivered to an address (`optimize_delivery`). `/mcp/online` is

@@ -14,7 +14,7 @@ Target layout for the `super-mcp` pnpm monorepo. Prefer updating this doc when m
 | `.local/` | Machine-local secrets (API keys); gitignored |
 | `tsconfig.base.json` | Shared TypeScript compiler defaults |
 
-There is no root `scripts/` folder — package scripts live in each workspace `package.json`; DB/ingest CLIs live under `packages/db/src/scripts/` and `services/*/src/`.
+Root `scripts/` holds only repo-level tooling that belongs to no package (`free-dev.mjs`, `publish-registry.sh`). Package scripts live in each workspace `package.json`; DB/ingest CLIs live under `packages/db/src/scripts/` and `services/*/src/`.
 
 ## `@super-mcp/shared` (`packages/shared/src/`)
 
