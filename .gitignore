@@ -35,3 +35,6 @@ coverage/
 # Generated at deploy time from apps/web/public (Hosting serves these before Cloud Run rewrites).
 apps/web/firebase-hosting/*
 !apps/web/firebase-hosting/.gitkeep
+
+# Local editor settings (personal, not shared)
+.vscode/
