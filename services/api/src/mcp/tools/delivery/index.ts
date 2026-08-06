@@ -105,13 +105,6 @@ export function registerDeliveryTools(server: McpServer): void {
           .boolean()
           .optional()
           .describe("Apply coupon item prices. Default true; they are flagged couponOnly."),
-        compare_in_store: z
-          .boolean()
-          .optional()
-          .describe(
-            "Also price the same basket at nearby physical branches and report the delivery premium. " +
-              "Costs extra latency; use when the shopper is weighing delivery against going themselves.",
-          ),
         resolution_mode: z
           .enum(["fast", "strict"])
           .optional()
@@ -167,7 +160,6 @@ export function registerDeliveryTools(server: McpServer): void {
           memberships: args.memberships,
           includeClub: args.include_club,
           includeCoupon: args.include_coupon,
-          compareInStore: args.compare_in_store,
           resolutionMode: args.resolution_mode,
           locationOrigin: loc.locationOrigin,
         },

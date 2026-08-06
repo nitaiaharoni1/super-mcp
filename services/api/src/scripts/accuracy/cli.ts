@@ -29,7 +29,6 @@ import type { BenchmarkReport } from "./types.js";
 interface Args {
   only: string[];
   concurrency: number;
-  radiusKm: number;
   out: string | null;
   baseline: string | null;
   tolerance: number;
@@ -40,7 +39,6 @@ function parseArgs(argv: string[]): Args {
   const a: Args = {
     only: [],
     concurrency: 2,
-    radiusKm: 10,
     out: null,
     baseline: null,
     tolerance: 0.02,
@@ -49,7 +47,6 @@ function parseArgs(argv: string[]): Args {
   for (const arg of argv) {
     if (arg.startsWith("--only=")) a.only = arg.slice(7).split(",").filter(Boolean);
     else if (arg.startsWith("--concurrency=")) a.concurrency = Number(arg.slice(14));
-    else if (arg.startsWith("--radius-km=")) a.radiusKm = Number(arg.slice(12));
     else if (arg.startsWith("--out=")) a.out = arg.slice(6);
     else if (arg.startsWith("--baseline=")) a.baseline = arg.slice(11);
     else if (arg.startsWith("--tolerance=")) a.tolerance = Number(arg.slice(12));
@@ -126,7 +123,6 @@ async function main(): Promise<void> {
   const report = await runBenchmark({
     only: args.only,
     concurrency: args.concurrency,
-    radiusKm: args.radiusKm,
   });
 
   if (args.json) console.log(JSON.stringify(report, null, 2));

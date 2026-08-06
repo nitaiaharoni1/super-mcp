@@ -77,9 +77,13 @@ Three consequences the physical engine has no way to express:
 
 Everything below the objective function is shared and hard-won: GTIN identity, Hebrew search, the
 deterministic-first line resolver, product classes, unit normalisation, promotion mechanics, freshness.
-Forking it doubles the maintenance and guarantees drift. One codebase also buys a feature neither half
-could have alone: `compare_in_store` prices the same basket at nearby branches and reports the delivery
-premium in shekels.
+Forking it doubles the maintenance and guarantees drift.
+
+The shelf-versus-delivery comparison this once bought (`compare_in_store`) is gone with the branch
+prices it read. Since 2026-08-06 the ingest downloads only storefronts a shopper can order from:
+branches were 97.7% of every price row and nothing on the mounted surface could route an order to
+one. Set `SUPER_MCP_ONLINE_STORES_ONLY=0` to sweep branches again, which is what reviving that
+comparison would need.
 
 ### Where online data comes from
 

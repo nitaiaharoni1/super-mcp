@@ -1,6 +1,20 @@
 import { query } from "./query.js";
+
+export interface KnownStoreLocation {
+  storeId: string;
+  city: string | null;
+  lat: number | null;
+  lng: number | null;
+  name: string | null;
+  address: string | null;
+  /** The chain's own `<StoreType>` as last filed. */
+  storeType: number | null;
+  /** What the last classification made of it: branch / online / pickup / warehouse. */
+  storeKind: string | null;
+}
+
 /**
- * Store locations already known for a chain, as region-filter hints.
+ * Store locations already known for a chain, as discovery-filter hints.
  *
  * Some chains publish price files but no Stores file at all: Fresh Market
  * publishes 51 PriceFull and 51 PromoFull files and zero Stores files. The
@@ -10,17 +24,28 @@ import { query } from "./query.js";
  * including Tel Aviv, Herzliya, Petah Tikva and Haifa.
  *
  * Losing a Stores file should not blind us to shops we already know about.
+ *
+ * Carries the store kind as well as the location because the online filter runs
+ * on the same hints: without it, a chain whose Stores file broke would fall back
+ * to guessing from the name, and a delivery depot whose name reads like a
+ * warehouse ("מרלוג אינטרנט") would stop being priced the moment its feed
+ * hiccuped.
  */
 export async function knownStoreLocationsForChain(
   chainId: string,
-): Promise<Array<{ storeId: string; city: string | null; lat: number | null; lng: number | null }>> {
+): Promise<KnownStoreLocation[]> {
   const res = await query<{
     store_code: string;
     city: string | null;
     lat: number | null;
     lng: number | null;
+    name: string | null;
+    address: string | null;
+    feed_store_type: number | null;
+    store_kind: string | null;
   }>(
-    `SELECT store_code, city, lat, lng FROM store WHERE chain_id = $1`,
+    `SELECT store_code, city, lat, lng, name, address, feed_store_type, store_kind
+       FROM store WHERE chain_id = $1`,
     [chainId],
   );
   return res.rows.map((r) => ({
@@ -28,5 +53,9 @@ export async function knownStoreLocationsForChain(
     city: r.city,
     lat: r.lat,
     lng: r.lng,
+    name: r.name,
+    address: r.address,
+    storeType: r.feed_store_type,
+    storeKind: r.store_kind,
   }));
 }

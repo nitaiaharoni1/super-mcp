@@ -23,7 +23,6 @@ export const deliveryInitialBodySchema = z
     memberships: z.array(z.string().trim().min(1)).max(10).optional(),
     include_club: z.boolean().optional().default(true),
     include_coupon: z.boolean().optional().default(true),
-    compare_in_store: z.boolean().optional(),
     resolution_mode: z.enum(["fast", "strict"]).optional(),
   })
   .strict()

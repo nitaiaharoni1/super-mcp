@@ -9,8 +9,12 @@ import { decodeFeedBytes, parseFeedXml, parseStoresXml } from "../../xml/index.j
 import { classifyFeedFile, parseFeedFileMeta } from "../common/feedMeta.js";
 import { fetchAllowedFeed } from "../common/allowedFetch.js";
 import { storeCountCap } from "../../ingestCaps.js";
-import { selectRegionalFeedFiles } from "../../selectRegionalFiles.js";
-import type { StoreLocationHint } from "../../regions.js";
+import { selectFeedFilesForChain } from "../../storeHints.js";
+import {
+  toStoreLocationHints,
+  toStoreLocationHintsFromDb,
+  type StoreLocationHint,
+} from "../../regions.js";
 import { fetchSearchTokens, laibFileUrl, laibSearchDates, searchDay } from "./search.js";
 import {
   DISCOVER_DAY_LOOKBACK,
@@ -96,13 +100,7 @@ async function locationsForChain(
       });
       if (res.ok) {
         const xml = decodeFeedBytes(Buffer.from(await res.arrayBuffer()));
-        const parsed = parseStoresXml(xml, chain.chainId).map((s) => ({
-          storeId: s.storeId,
-          city: s.city,
-          lat: s.geo?.lat,
-          lng: s.geo?.lng,
-          name: s.name,
-        }));
+        const parsed = toStoreLocationHints(parseStoresXml(xml, chain.chainId));
         if (parsed.length > 0) return parsed;
       }
     } catch {
@@ -125,12 +123,7 @@ async function locationsForChain(
         locations: known.length,
       }),
     );
-    return known.map((s) => ({
-      storeId: s.storeId,
-      city: s.city ?? undefined,
-      lat: s.lat ?? undefined,
-      lng: s.lng ?? undefined,
-    }));
+    return toStoreLocationHintsFromDb(known);
   } catch (err) {
     console.warn(
       `laibcatalog ${chain.name} store-location fallback failed: ${
@@ -207,7 +200,9 @@ export function createLaibcatalogAdapter(chains: LaibChainConfig[] = LAIB_CHAINS
           const chainFiles = [...stores, ...priced].map((p) => toFeedFile(chain.chainId, p));
           const storesFile = chainFiles.find((f) => f.kind === "stores");
           const locations = await locationsForChain(chain, storesFile);
-          discovered.push(...selectRegionalFeedFiles(chainFiles, locations, maxStores));
+          discovered.push(
+            ...(await selectFeedFilesForChain(chain.chainId, chainFiles, locations, maxStores)),
+          );
         } catch (err) {
           errors.push(`${chain.name}: ${err instanceof Error ? err.message : String(err)}`);
         }

@@ -47,8 +47,6 @@ export interface DeliveryOptimizeInput extends DeliveryAddressInput {
   includeCoupon?: boolean;
   resolutionMode?: BasketResolutionMode;
   responseDetail?: BasketResponseDetail;
-  /** Also price the basket at nearby physical branches, for comparison. */
-  compareInStore?: boolean;
   locationOrigin?: LocationOriginMeta;
   geocodeMs?: number;
 }
@@ -194,16 +192,6 @@ export interface UnavailableStorefront {
   amountToMinimum: number | null;
 }
 
-/** What ordering the same basket in person would cost, when asked for. */
-export interface InStoreComparison {
-  storeName: string;
-  chainName: string;
-  distanceKm: number | null;
-  comparableTotal: number;
-  /** deliveredComparableTotal of the best delivery plan minus this. */
-  deliveryPremium: number;
-}
-
 export interface DeliveryOptimizeCompleteResult {
   status: "complete";
   currency: string;
@@ -241,7 +229,6 @@ export interface DeliveryOptimizeCompleteResult {
   bestSingleOrder: DeliveryPlanSummary | null;
   plans: DeliveryPlan[];
   unavailableStores: UnavailableStorefront[];
-  inStoreComparison: InStoreComparison | null;
   items: BasketItemStatus[];
   assumptions: BasketAssumption[];
   storefrontsCompared: number;
@@ -266,7 +253,7 @@ export type DeliveryOptimizeResult =
  * It lives in `src` and not beside the test that uses it because only `src` is
  * typechecked (`tsconfig.json` includes `src/**` alone), so a `Record<keyof
  * DeliveryPlan, true>` written in a test compiles no matter what it says. One
- * did: it listed `storeName`, which belongs to `InStoreComparison`, and nothing
+ * did: it listed `storeName`, which no delivery plan carries, and nothing
  * complained.
  *
  * Here the compiler enforces both directions — a new field on `DeliveryPlan` is

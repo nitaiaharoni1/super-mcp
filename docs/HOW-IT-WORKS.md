@@ -196,9 +196,14 @@ Once a record is parsed, normalization does the real work:
 
 - Every price carries a **source timestamp** and an **ingested-at** time, so an agent
   can qualify its answers ("as of this morning").
-- By default ingestion is filtered to a **geographic region** (Gush Dan–Sharon,
-  Jerusalem, Haifa, Beersheva) to keep local runs fast. Flags widen it:
-  `SUPER_MCP_REGION_FILTER=0`, `SUPER_MCP_FULL=1`, `SUPER_MCP_NO_CAP=1`.
+- By default ingestion downloads prices **only for storefronts a shopper can order
+  from** (`<StoreType>` 2, or a delivery/pickup name). Branches were 97.7% of every
+  price row and no mounted tool can route an order to one. `SUPER_MCP_ONLINE_STORES_ONLY=0`
+  sweeps branches too, and then a **geographic region** filter applies (Gush Dan–Sharon,
+  Jerusalem, Haifa, Beersheva) to keep local runs fast; `SUPER_MCP_REGION_FILTER=0`,
+  `SUPER_MCP_FULL=1` and `SUPER_MCP_NO_CAP=1` widen that in turn.
+- The Stores file is always fetched, whatever the filter: it is how the next run
+  learns that a chain has opened a storefront.
 - Each run writes an `ingestion_run` row with files/rows/errors and a status
   (`success` / `degraded` / `failed` / `empty`), so a silently-broken feed is caught
   within one cycle. A run that ingests prices but fails to refresh the semantic index

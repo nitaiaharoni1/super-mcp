@@ -7,8 +7,8 @@ import {
 import { decodeFeedBytes, parseFeedXml, parseStoresXml } from "../../xml/index.js";
 import { classifyFeedFile, parseFeedFileMeta } from "../common/feedMeta.js";
 import { storeCountCap } from "../../ingestCaps.js";
-import { selectRegionalFeedFiles } from "../../selectRegionalFiles.js";
-import type { StoreLocationHint } from "../../regions.js";
+import { selectFeedFilesForChain } from "../../storeHints.js";
+import { toStoreLocationHints, type StoreLocationHint } from "../../regions.js";
 import { fetchAllowedFeed } from "../common/allowedFetch.js";
 import {
   BROWSER_UA,
@@ -149,13 +149,7 @@ export function createShufersalAdapter(): SourceAdapter {
           });
           if (storesRes.ok) {
             const xml = decodeFeedBytes(Buffer.from(await storesRes.arrayBuffer()));
-            const fromXml = parseStoresXml(xml, SHUFERSAL_CHAIN_ID).map((s) => ({
-              storeId: s.storeId,
-              city: s.city,
-              lat: s.geo?.lat,
-              lng: s.geo?.lng,
-              name: s.name,
-            }));
+            const fromXml = toStoreLocationHints(parseStoresXml(xml, SHUFERSAL_CHAIN_ID));
             if (fromXml.length) locations = fromXml;
           }
         } catch (err) {
@@ -163,7 +157,12 @@ export function createShufersalAdapter(): SourceAdapter {
         }
       }
 
-      const files = selectRegionalFeedFiles(allFiles, locations, maxStores);
+      const files = await selectFeedFilesForChain(
+        SHUFERSAL_CHAIN_ID,
+        allFiles,
+        locations,
+        maxStores,
+      );
       if (files.length === 0) {
         throw new Error(
           `Shufersal: no feed files in coverage region (${lastError ?? "ok"}). Use --fixture.`,

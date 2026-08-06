@@ -32,7 +32,7 @@ import type {
   BasketStoreResult,
   ResolvedItem,
 } from "../basket/types.js";
-import { listStores, type StoreSummary } from "../stores/index.js";
+import type { StoreSummary } from "../stores/index.js";
 import {
   buildDeliveryPlan,
   coverageReport,
@@ -51,7 +51,6 @@ import type {
   DeliveryPlan,
   DeliveryPlanSummary,
   DeliveryPreference,
-  InStoreComparison,
   UnavailableStorefront,
 } from "./types.js";
 
@@ -63,7 +62,6 @@ export interface DeliveryOptimizeOptions {
 export const DEFAULT_DELIVERY_PREFERENCE: DeliveryPreference = "balanced";
 
 /** Nearby branches sampled for the in-store comparison. Enough to find a floor. */
-const IN_STORE_COMPARISON_RADIUS_KM = 8;
 
 function isResume(request: DeliveryOptimizeRequest): request is {
   continuation: string;
@@ -192,67 +190,6 @@ function preDiscountTotal(priced: BasketStoreResult): number {
   return sum > 0 ? sum : priced.total;
 }
 
-async function buildInStoreComparison(
-  resolvedItems: ResolvedItem[],
-  destination: { lat?: number | null; lng?: number | null; city?: string | null },
-  bestDelivered: DeliveryPlan | null,
-  includeClub: boolean,
-  includeCoupon: boolean,
-): Promise<InStoreComparison | null> {
-  if (!bestDelivered) return null;
-  const near =
-    destination.lat != null && destination.lng != null
-      ? { lat: destination.lat, lng: destination.lng }
-      : undefined;
-  if (!near && !destination.city) return null;
-
-  const branches = await listStores({
-    near,
-    city: destination.city ?? undefined,
-    radiusKm: near ? IN_STORE_COMPARISON_RADIUS_KM : undefined,
-    shoppableOnly: true,
-  });
-  if (branches.length === 0) return null;
-
-  const productIds = resolvedItems
-    .map((item) => item.productId)
-    .filter((id): id is string => id != null);
-  if (productIds.length === 0) return null;
-
-  const branchIds = branches.map((b) => b.id);
-  const pricing = await loadBasketPricingData(productIds, branchIds, includeClub, includeCoupon);
-  const priced = branches
-    .map((store) =>
-      priceStoreBasket(
-        store,
-        resolvedItems,
-        pricing.listingByChainAndProduct,
-        pricing.priceByListingAndStore,
-        pricing.promoMap,
-      ),
-    )
-    .filter((r): r is BasketStoreResult => r != null && r.lines.length > 0);
-  if (priced.length === 0) return null;
-
-  const costs = buildComparableCosts(priced);
-  const best = priced
-    .map((store) => ({
-      store,
-      comparableTotal: costs.get(store.storeId)?.comparableTotal ?? store.total,
-    }))
-    .sort((a, b) => a.comparableTotal - b.comparableTotal)[0];
-  if (!best) return null;
-
-  return {
-    storeName: best.store.storeName,
-    chainName: best.store.chainName,
-    distanceKm: best.store.distanceKm,
-    comparableTotal: Math.round(best.comparableTotal * 100) / 100,
-    deliveryPremium:
-      Math.round((bestDelivered.deliveredComparableTotal - best.comparableTotal) * 100) / 100,
-  };
-}
-
 export async function optimizeDelivery(
   request: DeliveryOptimizeRequest,
   options: DeliveryOptimizeOptions,
@@ -319,7 +256,6 @@ async function runDeliveryOptimization(
       bestSingleOrder: null,
       plans: [],
       unavailableStores: unavailable,
-      inStoreComparison: null,
       items: [],
       assumptions: [],
       storefrontsCompared: 0,
@@ -624,16 +560,6 @@ async function runDeliveryOptimization(
     );
   }
 
-  const inStoreComparison = input.compareInStore
-    ? await buildInStoreComparison(
-        pricingItems,
-        destination,
-        cheapestDelivered,
-        includeClub,
-        includeCoupon,
-      )
-    : null;
-
   return {
     status: "complete",
     currency: cheapestDelivered?.currency ?? "ILS",
@@ -645,7 +571,6 @@ async function runDeliveryOptimization(
     bestSingleOrder: asSummary(bestSingleOrder),
     plans: allPlans,
     unavailableStores: unavailable,
-    inStoreComparison,
     // Rebuilt from the items that were actually priced, not from the pre-policy
     // snapshot. The fast policy swaps products (a bare "קוטג 5%" resolved to a
     // garlic-and-dill tub, then upgraded to the plain one every storefront

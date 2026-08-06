@@ -159,8 +159,11 @@ GROUP BY 1 ORDER BY 3 DESC;
 
 `refreshed_today` in the low single digits per chain means the caps are still in force.
 
-`SUPER_MCP_REGION_FILTER` is a separate, deliberate scope limit (Gush Dan/Sharon,
-Jerusalem, Haifa, Beersheva). Leave it on unless you want national coverage.
+`SUPER_MCP_ONLINE_STORES_ONLY` (default on) limits prices to orderable storefronts.
+Under it, a chain with no delivery correctly ingests zero price files, so a chain
+sitting at zero is not by itself evidence of a broken feed — check whether it has a
+storefront first. `SUPER_MCP_REGION_FILTER` (Gush Dan/Sharon, Jerusalem, Haifa,
+Beersheva) only applies once the online filter is off.
 
 ## Two ingest env vars that change what production does
 
@@ -171,6 +174,7 @@ stating outright.
 | --- | --- | --- | --- |
 | `SUPER_MCP_EXCLUDE_SOURCES` | `super-mcp-ingest` (europe-west1) = `il-laibcatalog` | Comma-separated source ids dropped from the `all` registry. Excluding every source throws rather than exiting 0 having ingested nothing. | Every source runs. |
 | `SUPER_MCP_PROMO_RETENTION_DAYS` | `super-mcp-ingest` (europe-west1) = `14` | After a run, deletes promotions whose `end_ts` is older than this, cascading to `promotion_item`. **Irreversible.** | The sweep does not run at all. |
+| `SUPER_MCP_ONLINE_STORES_ONLY` | nowhere; the default is what production wants | `=0` restores the branch sweep and hands scope back to `SUPER_MCP_REGION_FILTER`. | Prices are downloaded only for orderable storefronts. |
 
 `SUPER_MCP_EXCLUDE_SOURCES` exists because `laibcatalog.co.il` silently drops TCP
 connects from outside Israel, so the europe-west1 job books a guaranteed failure
@@ -180,6 +184,13 @@ variable: the exclusion only applies to `--source=all`, so an explicit
 `--source=il-laibcatalog` still runs. That asymmetry is the point, and it is the
 reason a typo in the variable is not fatal. It is also the reason a typo is easy
 to miss: check the `ingestion_sources_excluded` log line names what you meant.
+
+`SUPER_MCP_ONLINE_STORES_ONLY` is the one variable here whose default is the
+production setting, which is deliberate: the expensive behaviour should need
+asking for. Turning it off restores 7.3M price rows and the nightly job that could
+not finish. The failure it guards against is not a crash but a silence, so the
+ingest logs `ingestion_orderable_backstop_applied` whenever the database had to
+rescue a storefront the day's Stores file no longer described as one.
 
 `SUPER_MCP_PROMO_RETENTION_DAYS` is opt-in so that no deployment starts deleting
 history merely by picking up a new image. It buys a smaller working set, not a

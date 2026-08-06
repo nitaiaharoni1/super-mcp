@@ -212,10 +212,6 @@ const optimizeDeliveryBody = {
     },
     include_club: { type: "boolean", default: true },
     include_coupon: { type: "boolean", default: true },
-    compare_in_store: {
-      type: "boolean",
-      description: "Also price the basket at nearby branches and report the delivery premium.",
-    },
     resolution_mode: { type: "string", enum: ["fast", "strict"] },
     continuation: { type: "string" },
     answers: {
@@ -265,7 +261,6 @@ export const deliveryPaths = {
             bestSingleOrder: { $ref: "#/components/schemas/DeliveryPlanSummary" },
             plans: { type: "array", items: { $ref: "#/components/schemas/DeliveryPlan" } },
             unavailableStores: { type: "array", items: { type: "object" } },
-            inStoreComparison: { type: "object", nullable: true },
             items: { type: "array", items: { type: "object" } },
             assumptions: { type: "array", items: { type: "object" } },
             storefrontsCompared: { type: "integer" },

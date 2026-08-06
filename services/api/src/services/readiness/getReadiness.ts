@@ -169,8 +169,13 @@ async function fetchPriceDetail(): Promise<PriceDetailRow | null> {
 
 async function runReadinessQuery(): Promise<ReadinessReport> {
   const bounds = ISRAEL_STORE_COORDINATE_BOUNDS;
-  // Cheap half: 979 store rows, plus MAX(source_ts) which the source_ts index
-  // answers with a backward scan. This is what has to keep working.
+  // Cheap half: the storefront rows, plus MAX(source_ts) which the source_ts
+  // index answers with a backward scan. This is what has to keep working.
+  //
+  // Scoped to storefronts because those are the only stores this deployment
+  // prices. Counting branches made the coverage figure describe a population we
+  // no longer ingest, so a healthy service would have reported a falling
+  // percentage every time a chain filed a new branch.
   const result = await query<CoreRow>(
     `SELECT
        stores.total_stores,
@@ -185,6 +190,7 @@ async function runReadinessQuery(): Promise<ReadinessReport> {
              AND lat <> 0 AND lng <> 0
          )::text AS stores_with_valid_coordinates
        FROM store
+       WHERE store_kind IN ('online', 'pickup')
      ) stores`,
     [bounds.minLat, bounds.maxLat, bounds.minLng, bounds.maxLng],
   );

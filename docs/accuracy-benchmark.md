@@ -58,7 +58,14 @@ for resolution changes.
 
 ## Baseline, measured on the full Israeli catalog
 
-Herzliya and nearby locations, 10km radius, 10 baskets, 100 scored lines.
+Herzliya and nearby locations, 10 baskets, 100 scored lines.
+
+> Measured against the PHYSICAL basket surface, before the 2026-08-06 change that
+> narrowed the ingest to online storefronts. The runner now drives
+> `optimize_delivery`, so these figures are a record, not a baseline to compare
+> against: `coverage` is now "priced at the recommended storefront" out of far
+> fewer stores, and the total it scores includes delivery and service fees.
+> Re-baseline before gating on a tolerance.
 
 ```
 resolutionAccuracy   76.0%

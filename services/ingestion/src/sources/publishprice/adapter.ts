@@ -7,8 +7,8 @@ import {
 import { decodeFeedBytes, parseFeedXml, parseStoresXml } from "../../xml/index.js";
 import { classifyFeedFile, parseFeedFileMeta } from "../common/feedMeta.js";
 import { storeCountCap } from "../../ingestCaps.js";
-import { selectRegionalFeedFiles } from "../../selectRegionalFiles.js";
-import type { StoreLocationHint } from "../../regions.js";
+import { selectFeedFilesForChain } from "../../storeHints.js";
+import { toStoreLocationHints, type StoreLocationHint } from "../../regions.js";
 import { fetchAllowedFeed } from "../common/allowedFetch.js";
 import { fetchPublishPriceDay } from "./fetchDay.js";
 import { fileUrl, jerusalemDateKeys, mergePublishPriceDayFiles } from "./parseHtml.js";
@@ -95,13 +95,7 @@ export function createPublishPriceAdapter(portal: PublishPricePortal): SourceAda
           });
           if (storesRes.ok) {
             const xml = decodeFeedBytes(Buffer.from(await storesRes.arrayBuffer()));
-            locations = parseStoresXml(xml, portal.chainId).map((s) => ({
-              storeId: s.storeId,
-              city: s.city,
-              lat: s.geo?.lat,
-              lng: s.geo?.lng,
-              name: s.name,
-            }));
+            locations = toStoreLocationHints(parseStoresXml(xml, portal.chainId));
           }
         } catch {
           // fall through to HTML branch labels
@@ -114,7 +108,7 @@ export function createPublishPriceAdapter(portal: PublishPricePortal): SourceAda
         }));
       }
 
-      const out = selectRegionalFeedFiles(candidates, locations, maxStores);
+      const out = await selectFeedFilesForChain(portal.chainId, candidates, locations, maxStores);
       if (out.length === 0) {
         throw new Error(
           `${portal.name}: no feed files in coverage region. Use --fixture or SUPER_MCP_REGION_FILTER=0.`,

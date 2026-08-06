@@ -1,14 +1,26 @@
 import { query } from "@super-mcp/db";
 import { mapPool } from "@super-mcp/shared";
-import { optimizeBasket } from "../../services/basket/index.js";
-import { resolveLocationInput } from "../../lib/locationInput.js";
+import { optimizeDelivery } from "../../services/delivery/index.js";
 import { BENCHMARK_BASKETS, LABELS_BY_ID, STAPLE_LABELS } from "./labels/staples.js";
-import { aggregate, byCategory, scoreBasket, type ProductFacts } from "./scorer.js";
+import {
+  aggregate,
+  byCategory,
+  scoreBasket,
+  type ProductFacts,
+  type ScorableBasket,
+} from "./scorer.js";
+import type { DeliveryOptimizeCompleteResult } from "../../services/delivery/types.js";
 import type { BasketScore, BenchmarkReport, StapleLabel } from "./types.js";
 
 /**
- * Runs the labelled baskets through the basket service directly (not over HTTP), so
+ * Runs the labelled baskets through the delivery service directly (not over HTTP), so
  * the benchmark measures the engine rather than the transport, and needs no server.
+ *
+ * It measures the surface that is actually mounted. It used to drive
+ * `optimizeBasket`, which prices shelves at physical branches, and once the ingest
+ * narrowed to storefronts a shopper can order from there were no branch prices left
+ * for it to find: every basket would have scored zero and the benchmark would have
+ * reported a catastrophe instead of a change of scope.
  */
 
 export interface RunOptions {
@@ -16,8 +28,6 @@ export interface RunOptions {
   only?: string[];
   /** Baskets to run concurrently. Each takes seconds against a live catalog. */
   concurrency?: number;
-  /** Radius passed to every basket. */
-  radiusKm?: number;
 }
 
 function labelsFor(ids: string[]): StapleLabel[] {
@@ -31,9 +41,9 @@ function labelsFor(ids: string[]): StapleLabel[] {
 }
 
 /**
- * Class, preparation and nearby-store count for every resolved product, in two
- * queries rather than per line. `nearbyStores` counts BRANCHES only, matching what
- * the recommendation layer will actually consider.
+ * Class, preparation and stocking count for every resolved product, in two
+ * queries rather than per line. `nearbyStores` counts the storefronts that deliver
+ * to this address, matching what the recommendation layer will actually consider.
  */
 async function loadFacts(
   productIds: string[],
@@ -83,37 +93,62 @@ async function loadFacts(
   return facts;
 }
 
-/** Branch store ids inside `radiusKm` of a point, the denominator for availability. */
-async function nearbyBranchIds(
-  lat: number,
-  lng: number,
-  radiusKm: number,
-): Promise<string[]> {
-  const res = await query<{ id: string }>(
-    `SELECT id FROM store
-      WHERE (store_kind IS NULL OR store_kind = 'branch')
-        AND lat IS NOT NULL AND lng IS NOT NULL
-        AND 6371 * 2 * asin(sqrt(
-              power(sin(radians(lat - $1) / 2), 2)
-              + cos(radians($1)) * cos(radians(lat)) * power(sin(radians(lng - $2) / 2), 2)
-            )) <= $3`,
-    [lat, lng, radiusKm],
-  );
-  return res.rows.map((r) => r.id);
+/**
+ * The storefronts that quoted this address, the denominator for availability.
+ *
+ * Taken from the plans the run itself produced rather than queried separately:
+ * a storefront that could not serve the address never had a chance to stock the
+ * line, and counting it would score the catalogue for a shop the shopper cannot
+ * order from.
+ */
+function servingStoreIds(plans: Array<{ storeId: string | null }>): string[] {
+  return [...new Set(plans.map((p) => p.storeId).filter((id): id is string => Boolean(id)))];
+}
+
+/**
+ * A delivery result in the shape the scorer grades.
+ *
+ * `bestSingleOrder` is the delivery surface's answer to "the one place that
+ * fills this basket", the same question `bestSingleStore` answered on the
+ * physical one, so the metrics stay comparable across the change. The summary
+ * carries totals only, so the priced lines come from the matching plan.
+ *
+ * Scored on `deliveredComparableTotal`, which includes the fees. That is a real
+ * difference from the old figure, not a translation of it: what an order costs
+ * delivered is the number this product exists to get right.
+ */
+function toScorable(result: DeliveryOptimizeCompleteResult): ScorableBasket {
+  const best = result.bestSingleOrder;
+  const plan = best ? result.plans.find((p) => p.serviceSlug === best.serviceSlug) : undefined;
+  return {
+    items: result.items.map((item) => ({
+      index: item.index,
+      productId: item.productId ?? null,
+      name: item.name ?? null,
+      resolutionStatus: item.resolutionStatus,
+    })),
+    bestSingleStore: plan
+      ? {
+          storeName: plan.brand,
+          comparableTotal: plan.deliveredComparableTotal,
+          imputedLines: plan.imputedLines,
+          lines: plan.lines.map((line) => ({
+            itemIndex: line.itemIndex,
+            clubOnly: line.clubOnly,
+            couponOnly: line.couponOnly,
+          })),
+        }
+      : null,
+  };
 }
 
 async function runOneBasket(
   basket: (typeof BENCHMARK_BASKETS)[number],
-  radiusKm: number,
 ): Promise<BasketScore> {
   const labels = labelsFor(basket.labelIds);
   const started = Date.now();
   try {
-    const loc = await resolveLocationInput(
-      { location: basket.location, radiusKm },
-      { geocodeStrategy: "fast" },
-    );
-    const result = await optimizeBasket(
+    const result = await optimizeDelivery(
       {
         items: labels.map((l) => ({
           query: l.query,
@@ -121,11 +156,7 @@ async function runOneBasket(
           amount: l.amount,
           unit: l.unit,
         })),
-        city: loc.city,
-        near: loc.near,
-        radiusKm: loc.radiusKm,
-        locationOrigin: loc.locationOrigin,
-        geocodeMs: loc.geocodeMs,
+        address: basket.location,
         // standard keeps every priced line; summary caps and prunes them.
         responseDetail: "standard",
         resolutionMode: "fast",
@@ -161,16 +192,14 @@ async function runOneBasket(
     const productIds = [
       ...new Set(items.map((i) => i.productId).filter((id): id is string => Boolean(id))),
     ];
-    const storeIds = loc.near
-      ? await nearbyBranchIds(loc.near.lat, loc.near.lng, radiusKm)
-      : [];
+    const storeIds = servingStoreIds(result.plans);
     const facts = await loadFacts(productIds, storeIds);
 
     return scoreBasket({
       basketId: basket.id,
       name: basket.name,
       labels,
-      response: result as never,
+      response: toScorable(result),
       facts: (id) => facts.get(id),
       elapsedMs,
       nearbyStoreTotal: storeIds.length,
@@ -195,14 +224,13 @@ async function runOneBasket(
 }
 
 export async function runBenchmark(opts: RunOptions = {}): Promise<BenchmarkReport> {
-  const radiusKm = opts.radiusKm ?? 10;
   const selected = opts.only?.length
     ? BENCHMARK_BASKETS.filter((b) => opts.only!.includes(b.id))
     : BENCHMARK_BASKETS;
   if (selected.length === 0) throw new Error("no baskets selected");
 
   const baskets = await mapPool(selected, opts.concurrency ?? 2, (basket) =>
-    runOneBasket(basket, radiusKm),
+    runOneBasket(basket),
   );
 
   return {

@@ -10,8 +10,12 @@ import { decodeFeedBytes, parseFeedXml, parseStoresXml } from "../../xml/index.j
 import { classifyFeedFile, parseFeedFileMeta } from "../common/feedMeta.js";
 import { allChainsEnabled, storeCountCap } from "../../ingestCaps.js";
 import { fileConcurrency, mapPool } from "@super-mcp/shared";
-import { selectRegionalFeedFiles } from "../../selectRegionalFiles.js";
-import type { StoreLocationHint } from "../../regions.js";
+import { selectFeedFilesForChain } from "../../storeHints.js";
+import {
+  toStoreLocationHints,
+  toStoreLocationHintsFromDb,
+  type StoreLocationHint,
+} from "../../regions.js";
 import { knownStoreLocationsForChain } from "@super-mcp/db";
 import { FtpPool } from "../common/ftpPool.js";
 
@@ -184,13 +188,7 @@ export function createCerberusAdapter(
             try {
               const bytes = await downloadBuffer(client, storeFiles[0].name);
               const xml = decodeFeedBytes(bytes);
-              locations = parseStoresXml(xml, chain.chainId).map((s) => ({
-                storeId: s.storeId,
-                city: s.city,
-                lat: s.geo?.lat,
-                lng: s.geo?.lng,
-                name: s.name,
-              }));
+              locations = toStoreLocationHints(parseStoresXml(xml, chain.chainId));
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               errors.push(`${chain.ftpUser} stores: ${msg}`);
@@ -231,12 +229,9 @@ export function createCerberusAdapter(
             // never "we have no idea".
             const reason = storeFiles[0] ? "stores_file_unusable" : "no_stores_file_published";
             try {
-              locations = (await knownStoreLocationsForChain(chain.chainId)).map((s) => ({
-                storeId: s.storeId,
-                city: s.city ?? undefined,
-                lat: s.lat ?? undefined,
-                lng: s.lng ?? undefined,
-              }));
+              locations = toStoreLocationHintsFromDb(
+                await knownStoreLocationsForChain(chain.chainId),
+              );
               console.log(
                 JSON.stringify({
                   event: "ingestion_store_locations_from_db",
@@ -266,7 +261,7 @@ export function createCerberusAdapter(
             }
           }
 
-          return selectRegionalFeedFiles(chainFiles, locations, maxStores);
+          return selectFeedFilesForChain(chain.chainId, chainFiles, locations, maxStores);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`${chain.ftpUser}: ${msg}`);

@@ -59,7 +59,6 @@ export async function registerDeliveryRoutes(app: FastifyInstance): Promise<void
           memberships: initial.memberships,
           includeClub: initial.include_club,
           includeCoupon: initial.include_coupon,
-          compareInStore: initial.compare_in_store,
           resolutionMode: initial.resolution_mode,
           locationOrigin: loc.locationOrigin,
           geocodeMs: loc.geocodeMs,
