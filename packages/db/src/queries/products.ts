@@ -179,5 +179,21 @@ export async function refreshProductStoreCounts(): Promise<StoreCountRefreshResu
         AND (p.store_count IS DISTINCT FROM c.n
              OR p.branch_store_count IS DISTINCT FROM c.branch_n)`,
   );
-  return { updated: res.rowCount ?? 0 };
+
+  // A product that lost its LAST price has no row in that aggregate, so the
+  // UPDATE above cannot reach it and its old count stands forever. Delisting one
+  // SKU hid this: the counts only ever drifted by one. Narrowing the ingest to
+  // online storefronts did not. It left 91,718 products carrying a popularity
+  // score earned across hundreds of branches that no longer price them, and
+  // search ranks on exactly that number, so every one of them would have
+  // outranked the products a shopper can actually buy.
+  const zeroed = await query(
+    `UPDATE product p SET store_count = 0, branch_store_count = 0
+      WHERE (p.store_count <> 0 OR p.branch_store_count <> 0)
+        AND NOT EXISTS (
+          SELECT 1 FROM listing l
+            JOIN store_price sp ON sp.listing_id = l.id
+           WHERE l.product_id = p.id)`,
+  );
+  return { updated: (res.rowCount ?? 0) + (zeroed.rowCount ?? 0) };
 }
