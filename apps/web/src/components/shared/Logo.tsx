@@ -11,8 +11,8 @@ import { he } from "@/content/he";
  *
  * The mark is a shopping basket whose body is a barcode: basket + price-scan
  * in one shape, stickered in grape with an ink border and a hard shadow.
- * Geometry is mirrored in public/favicon.svg and in brand/og.html. Keep them
- * in step.
+ * Geometry is mirrored in public/favicon.svg. Keep them in step.
+ * brand/og.html is a legacy card, not the live social thumbnail.
  */
 export function Logo() {
   return (

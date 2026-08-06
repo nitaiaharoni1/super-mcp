@@ -21,6 +21,7 @@ firebase.json
 data/raw/
 *.log
 *.tsbuildinfo
+coverage/
 
 # Local git worktrees and SDD scratch
 .worktrees/
@@ -30,3 +31,7 @@ data/raw/
 
 # Rendered from server.template.json by scripts/publish-registry.sh; carries the real host.
 /server.json
+
+# Generated at deploy time from apps/web/public (Hosting serves these before Cloud Run rewrites).
+apps/web/firebase-hosting/*
+!apps/web/firebase-hosting/.gitkeep

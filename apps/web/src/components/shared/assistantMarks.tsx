@@ -4,8 +4,8 @@
  * Lived inside AssistantRow until the install buttons needed the same paths.
  *
  * Marks come from Simple Icons (https://simpleicons.org), whose SVGs are CC0.
- * The trademarks themselves belong to Anthropic, OpenAI, Google, Anysphere,
- * Microsoft and Element Labs; they appear here only to say what this connects to,
+ * The trademarks themselves belong to Anthropic, OpenAI, Google, Anysphere and
+ * Microsoft; they appear here only to say what this connects to,
  * which is what the surrounding label claims and nothing more. Each mark uses that
  * brand's own colour so a shopper recognises the platform at a glance. Fill is set
  * inline (not currentColor) so a parent `text-ink` cannot turn Cursor's orange black.
@@ -53,14 +53,6 @@ export const ASSISTANT_MARKS = {
     color: "#0065A9",
     // eslint-disable-next-line max-len
     d: "M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z",
-  },
-  lmstudio: {
-    name: "LM Studio",
-    // Simple Icons carries #000000 for this one. Black is a hole in the card, so the
-    // rounded square wears the grape band, the palette's stand-in for a dark brand.
-    color: "#5B21B6",
-    // eslint-disable-next-line max-len
-    d: "M14.025 0c3.492 0 5.237 0 6.571.68a6.24 6.24 0 0 1 2.725 2.724C24 4.738 24 6.484 24 9.975v4.05c0 3.492 0 5.237-.68 6.571a6.24 6.24 0 0 1-2.724 2.725c-1.334.679-3.08.679-6.571.679h-4.05c-3.492 0-5.237 0-6.571-.68A6.24 6.24 0 0 1 .68 20.597C0 19.262 0 17.516 0 14.025v-4.05c0-3.492 0-5.237.68-6.571A6.23 6.23 0 0 1 3.404.68C4.738 0 6.484 0 9.975 0zM7.688 16.313a1.313 1.313 0 0 0 0 2.625h11.625a1.313 1.313 0 0 0 0-2.625zm-3-3.75a1.313 1.313 0 0 0 0 2.624h11.625a1.313 1.313 0 0 0 0-2.624zm3-3.75a1.313 1.313 0 0 0 0 2.624h11.625a1.313 1.313 0 0 0 0-2.624zm-3-3.75a1.313 1.313 0 0 0 0 2.625h11.625a1.313 1.313 0 0 0 0-2.625z",
   },
 } as const satisfies Record<string, AssistantMark>;
 

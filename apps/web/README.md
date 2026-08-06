@@ -42,6 +42,16 @@ This app uses the TypeScript 6 npm alias for Next.js 15 compatibility:
 
 That is an intentional deviation from the rest of the monorepo. Do not bump to TypeScript 7 here without verifying Next 15 support.
 
+## Testing
+
+```bash
+pnpm --filter @super-mcp/web test
+```
+
+Vitest, running in the `node` environment (no jsdom). Tests live in `tests/`, mirroring `src/`:
+`tests/lib/` covers the MCP install-link builders and `tests/content/` asserts that the Hebrew
+copy still matches the online-delivery product surface.
+
 ## Production deploy (Cloud Run behind Firebase Hosting)
 
 Operator deploy (region `europe-west1`) builds `apps/web/Dockerfile` from the repo root

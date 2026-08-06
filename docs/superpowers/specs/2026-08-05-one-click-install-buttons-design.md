@@ -22,15 +22,29 @@ action that installs or copies, plus one small link to that assistant's own docs
 | Target | Mechanism | Clicks |
 |--------|-----------|--------|
 | Cursor | `cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64 JSON>` | 1 |
-| VS Code | `vscode:mcp/install?<urlencoded JSON>` | 1 |
+| VS Code | `https://insiders.vscode.dev/redirect/mcp/install?name=…&config=<urlencoded JSON>` | 1 |
 | Claude Code | copy `claude mcp add --transport http super-mcp <url>` | copy + paste |
 | Claude (desktop / web) | copy URL, open Settings → Connectors | copy + 2 fields |
 | ChatGPT | copy URL, open developer-mode connector settings | copy + 2 fields |
 | Gemini CLI | copy `gemini mcp add --transport http super-mcp <url>` | copy + paste |
 
 Deeplink formats are the documented ones: Cursor takes base64 of the bare server object,
-VS Code takes URL-encoded JSON of `{name, type: "http", url}` (VS Code's shape names the
-server inline rather than nesting it under `servers`).
+VS Code takes `name` as a query parameter and URL-encoded JSON of `{type: "http", url}` as
+`config`.
+
+VS Code is reached over its https redirect rather than the equivalent `vscode:mcp/install`
+scheme. A custom scheme a browser does not recognise is dropped with no error, and the
+scheme also shows in the status bar as something a shopper should not click. The host is
+literally `insiders.vscode.dev` and still opens stable VS Code; `&quality=insiders` is what
+selects Insiders, and we never send it.
+
+Two cards were dropped on 2026-08-06, leaving the six in the table:
+
+- LM Studio (`lmstudio://add_mcp`, base64 config nested under the server name), too niche
+  for this audience. The API still recognises the client string in analytics.
+- The "any other tool" catch-all, which copied an English sentence for an agent to act on.
+  It was the only markless card, so `InstallTarget.mark` is now required and the card
+  drops its Sparkle fallback. The paragraph under the grid still says other tools work.
 
 ## Auth: one switch, keyless by default
 

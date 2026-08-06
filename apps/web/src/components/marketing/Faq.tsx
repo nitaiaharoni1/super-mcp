@@ -16,13 +16,13 @@ export function Faq() {
               {he.faq.items.map((item) => (
                 <details
                   key={item.q}
-                  className="group rounded-[var(--radius-card)] border-[2.5px] border-ink bg-paper-raised shadow-sticker-sm"
+                  className="group rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised shadow-sticker-sm"
                 >
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-bold marker:content-none [&::-webkit-details-marker]:hidden">
                     {item.q}
                     <span
                       aria-hidden
-                      className="figure grid size-8 shrink-0 place-items-center rounded-[6px] border-2 border-ink bg-lime text-ink transition-transform duration-200 ease-out group-open:rotate-45"
+                      className="figure grid size-8 shrink-0 place-items-center rounded-[var(--radius-card)] border-2 border-ink bg-lime text-ink transition-transform duration-200 ease-out group-open:rotate-45"
                     >
                       +
                     </span>

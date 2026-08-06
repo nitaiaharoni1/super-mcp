@@ -35,7 +35,7 @@ export function Integrity() {
                 aria-hidden
                 className="absolute -top-4 -end-3 size-9 rotate-12 text-tangerine"
               />
-              <figcaption className="inline-block rounded-[var(--radius-pill)] border-2 border-ink bg-lime px-3.5 py-1 text-xs font-bold text-ink">
+              <figcaption className="inline-block rounded-[var(--radius-card)] border-2 border-ink bg-lime px-3.5 py-1 text-xs font-bold text-ink">
                 {integrity.question.label}
               </figcaption>
               <blockquote className="display mt-4 text-[length:var(--step-2)] leading-[1.3] text-ink">
@@ -55,7 +55,7 @@ export function Integrity() {
                 >
                   <span
                     aria-hidden
-                    className={`figure ltr grid size-10 place-items-center rounded-[6px] border-[2.5px] border-ink text-sm font-bold text-ink ${POINT_STYLES[index % POINT_STYLES.length].chip}`}
+                    className={`figure ltr grid size-10 place-items-center rounded-[var(--radius-card)] border-2 border-ink text-sm font-bold text-ink ${POINT_STYLES[index % POINT_STYLES.length].chip}`}
                   >
                     {index + 1}
                   </span>

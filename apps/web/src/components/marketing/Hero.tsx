@@ -36,9 +36,14 @@ export function Hero() {
         className="pointer-events-none absolute top-40 start-[44%] -z-10 hidden size-4 text-ink/30 lg:block"
       />
 
-      <Container className="grid max-w-[1280px] items-center gap-14 pt-[clamp(2.5rem,1.75rem+3.5vw,5rem)] pb-[var(--space-section-tight)] lg:grid-cols-[1.3fr_0.7fr] lg:gap-24 xl:grid-cols-[1.15fr_0.85fr] xl:gap-32">
-        <Reveal on="load" beat={1} className="max-w-[46rem]">
-          <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-pill)] border-2 border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
+      <Container className="grid max-w-[1280px] items-center gap-14 pt-[clamp(2.5rem,1.75rem+3.5vw,5rem)] pb-[var(--space-section-tight)] lg:grid-cols-[1.3fr_0.7fr] lg:gap-16 xl:grid-cols-[1.15fr_0.85fr] xl:gap-16">
+        {/*
+          z-20: the chat card in the visual column carries its own z-10 and sits
+          later in the DOM, so without this the headline sticker gets buried
+          under it when the columns overlap.
+        */}
+        <Reveal on="load" beat={1} className="relative z-20 max-w-[46rem]">
+          <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-card)] border-[3px] border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
             {hero.eyebrow}
           </p>
 
@@ -74,26 +79,28 @@ export function Hero() {
 
           {/* Above the hero/marquee divide: platforms, not a second CTA block. */}
           <div className="mt-9">
-            <AssistantRow label={hero.assistantsLabel} compact />
-            <p className="mt-3 font-semibold text-ink-muted text-[0.6875rem]">
+            <AssistantRow label={hero.assistantsLabel} compact href="#connect" />
+            <p className="mt-3 font-semibold text-ink-muted text-xs">
               {coverage.chainsLabel}
             </p>
             <ul
               aria-label={coverage.chainsLabel}
-              className="mt-2.5 grid max-w-[28rem] grid-cols-5 gap-1.5"
+              className="mt-2.5 grid max-w-[30rem] grid-cols-5 gap-2"
             >
               {coverage.chains.map((chain) => (
-                <li
-                  key={chain.slug}
-                  className="flex h-7 items-center justify-center rounded-[4px] border border-ink/40 bg-paper-raised px-1"
-                >
-                  <Image
-                    src={`/chains/${chain.slug}.png`}
-                    alt={chain.name}
-                    width={64}
-                    height={24}
-                    className="h-auto max-h-4 w-auto max-w-full object-contain"
-                  />
+                <li key={chain.slug}>
+                  <a
+                    href="#coverage"
+                    className="flex h-9 items-center justify-center rounded-[var(--radius-card)] border-2 border-ink bg-paper-raised px-1.5 transition-colors hover:bg-lime-soft"
+                  >
+                    <Image
+                      src={`/chains/${chain.slug}.png`}
+                      alt={chain.name}
+                      width={96}
+                      height={32}
+                      className="h-auto max-h-5 w-auto max-w-full object-contain"
+                    />
+                  </a>
                 </li>
               ))}
             </ul>
@@ -134,7 +141,7 @@ function HeroVisual() {
         className="pointer-events-none absolute -top-10 end-6 z-20 hidden w-24 text-ink lg:block"
       />
 
-      <div className="relative z-10 -mt-28 translate-x-10 sm:-mt-36 sm:translate-x-16 lg:-mt-44 lg:translate-x-28">
+      <div className="relative z-10 -mt-28 translate-x-10 sm:-mt-36 sm:translate-x-16 lg:-mt-44 lg:translate-x-24 xl:translate-x-36">
         <ChatExchange />
       </div>
     </div>
@@ -192,9 +199,9 @@ function ChatExchange() {
           </p>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t-2 border-ink/10 pt-3 text-xs">
-          <span className="text-ink-muted">{chat.planCoverage}</span>
-          <span className="inline-flex items-baseline gap-1.5 rounded-[var(--radius-pill)] border-2 border-over bg-over-soft px-2.5 py-1 font-medium text-over">
+        <div className="mt-4 flex flex-nowrap items-center gap-x-3 border-t-2 border-ink/10 pt-3 text-xs">
+          <span className="shrink-0 text-ink-muted">{chat.planCoverage}</span>
+          <span className="inline-flex shrink-0 flex-nowrap items-baseline gap-1.5 whitespace-nowrap rounded-[var(--radius-card)] border-2 border-over bg-over-soft px-2.5 py-1 font-medium text-over">
             {chat.planMissingLabel}
             <span className="font-bold">{chat.planMissing}</span>
           </span>

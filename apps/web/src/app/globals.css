@@ -19,6 +19,11 @@
  * Shape lock: everything is radius 8px (`--radius-card`) or a full pill.
  * Shadows offset down-LEFT because the page is RTL: the shadow mirrors the
  * reading direction instead of fighting it.
+ *
+ * Border roles (two only; no 2.5px, no ink/40 frames, no shadowless thick borders):
+ *   Loud sticker  border-[3px] + hard shadow   CTAs, cards, eyebrows, price tags
+ *   Quiet chip    border-2, no shadow          AI pills, chain logos, number badges
+ * Whisper rules (ink/10, ink/15) stay for nested sunk panels and separators only.
  */
 
 @theme {
@@ -76,9 +81,8 @@
   --shadow-sticker-lg: -8px 8px 0 0 var(--color-ink);
   --shadow-pressed: -2px 2px 0 0 var(--color-ink);
 
-  /* Shape lock: 8px cards and pills, nothing in between. */
+  /* Shape lock: one 8px radius on every card, tag and button. */
   --radius-card: 8px;
-  --radius-pill: 999px;
 
   --font-sans: var(--font-heebo), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-secular), var(--font-heebo), ui-sans-serif, system-ui, sans-serif;

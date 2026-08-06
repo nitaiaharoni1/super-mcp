@@ -29,7 +29,7 @@ export function Connect() {
     <section id={connect.id} className="scroll-mt-20 py-[var(--space-section)]">
       <Container>
         <Reveal className="max-w-[44rem]">
-          <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-pill)] border-2 border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
+          <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-card)] border-[3px] border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
             {connect.eyebrow}
           </p>
           <h2 className="display mt-6 text-[length:var(--step-4)]">{connect.title}</h2>
@@ -48,7 +48,7 @@ export function Connect() {
                 >
                   <span
                     aria-hidden
-                    className="figure ltr grid size-10 rotate-[-3deg] place-items-center rounded-[6px] border-[2.5px] border-ink bg-lime text-sm font-bold text-ink"
+                    className="figure ltr grid size-10 rotate-[-3deg] place-items-center rounded-[var(--radius-card)] border-2 border-ink bg-lime text-sm font-bold text-ink"
                   >
                     {index + 1}
                   </span>

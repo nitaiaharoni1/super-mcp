@@ -38,7 +38,7 @@ export function Coverage() {
         <Container>
           <div className="grid gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
             <Reveal>
-              <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-pill)] border-2 border-ink bg-grape-soft px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
+              <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-card)] border-[3px] border-ink bg-grape-soft px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
                 {coverage.eyebrow}
               </p>
               <h2 className="display mt-6 max-w-[18ch] text-[length:var(--step-4)]">
@@ -54,7 +54,7 @@ export function Coverage() {
                 {coverage.stats.map((stat, index) => (
                   <div
                     key={stat.label}
-                    className={`rounded-[var(--radius-card)] border-[2.5px] border-ink bg-paper-raised p-4 shadow-sticker-sm ${TAG_TILTS[index % TAG_TILTS.length]}`}
+                    className={`rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised p-4 shadow-sticker-sm ${TAG_TILTS[index % TAG_TILTS.length]}`}
                   >
                     {/* `.ltr` stays on an inline span: on the block it would flip
                         text-align to the left and unhook the figure from the
@@ -80,7 +80,7 @@ export function Coverage() {
               {coverage.chains.map((chain) => (
                 <li
                   key={chain.slug}
-                  className="flex h-14 items-center justify-center rounded-[6px] border-2 border-ink bg-paper-raised px-2 py-1.5 shadow-sticker-sm sm:h-20 sm:px-4 sm:py-2"
+                  className="flex h-14 items-center justify-center rounded-[var(--radius-card)] border-2 border-ink bg-paper-raised px-2 py-1.5 sm:h-20 sm:px-4 sm:py-2"
                 >
                   <Image
                     src={`/chains/${chain.slug}.png`}

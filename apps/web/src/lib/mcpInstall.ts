@@ -9,29 +9,18 @@ import { API_KEY_PLACEHOLDER, MCP_SERVER_NAME, buildMcpServerConfig } from "@/li
  *
  * Formats are the documented ones:
  *   Cursor  cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64 JSON>
- *   VS Code vscode:mcp/install?<urlencoded JSON>   (server named inline, not nested)
+ *   VS Code https://insiders.vscode.dev/redirect/mcp/install?name=…&config=<urlencoded JSON>
  */
 
-/**
- * How the reader gets the server in front of their assistant.
- *
- * `prompt` is the catch-all: agentic clients edit their own MCP config when asked,
- * so one pasted sentence covers every tool we have no deeplink for, including ones
- * that do not exist yet. It is last in the list because it only works inside an
- * agent, not in a chat window like Claude on the web.
- */
-export type InstallKind = "deeplink" | "command" | "url" | "prompt";
+/** How the reader gets the server in front of their assistant. */
+export type InstallKind = "deeplink" | "command" | "url";
 
 export interface InstallTarget {
   id: string;
-  /** Card heading. A brand name where `mark` is set, otherwise Hebrew. */
+  /** Card heading. Always a brand name, so the UI can set dir="ltr" on it. */
   name: string;
-  /**
-   * Key into ASSISTANT_MARKS. Several targets share one brand (Claude, Claude Code).
-   * Absent on the catch-all card, which is also how the UI knows the heading is
-   * Hebrew and must not be forced to dir="ltr".
-   */
-  mark?: "claude" | "chatgpt" | "gemini" | "cursor" | "vscode" | "lmstudio";
+  /** Key into ASSISTANT_MARKS. Several targets share one brand (Claude, Claude Code). */
+  mark: "claude" | "chatgpt" | "gemini" | "cursor" | "vscode";
   kind: InstallKind;
   /** Deeplink to open. Only on kind === "deeplink". */
   href?: string;
@@ -77,42 +66,25 @@ function cursorHref(url: string, requiresKey: boolean): string {
 }
 
 /**
- * LM Studio nests the server under its own name, where Cursor takes the bare
- * object. Same base64, different shape: getting this wrong installs nothing and
- * reports no error.
+ * The https redirect rather than the `vscode:mcp/install?<json>` scheme.
+ *
+ * Both reach the same handler, but a custom scheme is silently dropped by
+ * browsers that do not know it, and a link whose hover text reads `vscode:` looks
+ * like something a shopper should not click. The redirect is an ordinary https
+ * link Microsoft owns, and it is what GitHub's own MCP server ships.
+ *
+ * The host is literally `insiders.vscode.dev` and it still opens stable VS Code;
+ * `&quality=insiders` is what targets the Insiders build. Do not "fix" the name.
+ *
+ * Shape differs from the scheme form too: here the server is named by the `name`
+ * query parameter, so `config` carries only the transport and the url.
  */
-function lmStudioHref(url: string, requiresKey: boolean): string {
-  const config = toBase64(
-    JSON.stringify({ [MCP_SERVER_NAME]: buildMcpServerConfig(url, requiresKey) }),
-  );
-  return (
-    "lmstudio://add_mcp" +
-    `?name=${encodeURIComponent(MCP_SERVER_NAME)}&config=${encodeURIComponent(config)}`
-  );
-}
-
-/**
- * One sentence an agent can act on. English because it is addressed to the model,
- * not to the reader, and asking it to list the tools afterwards makes the agent
- * prove the connection instead of claiming it.
- */
-function agentPrompt(url: string, requiresKey: boolean): string {
-  const auth = requiresKey
-    ? ` Use the header "Authorization: Bearer ${API_KEY_PLACEHOLDER}".`
-    : "";
-  return (
-    `Add the remote MCP server "${MCP_SERVER_NAME}" at ${url} to my configuration, ` +
-    `using Streamable HTTP transport.${auth} Then list its tools so I can see it connected.`
-  );
-}
-
 function vscodeHref(url: string, requiresKey: boolean): string {
-  const config = {
-    name: MCP_SERVER_NAME,
-    type: "http" as const,
-    ...buildMcpServerConfig(url, requiresKey),
-  };
-  return `vscode:mcp/install?${encodeURIComponent(JSON.stringify(config))}`;
+  const config = { type: "http" as const, ...buildMcpServerConfig(url, requiresKey) };
+  return (
+    "https://insiders.vscode.dev/redirect/mcp/install" +
+    `?name=${encodeURIComponent(MCP_SERVER_NAME)}&config=${encodeURIComponent(JSON.stringify(config))}`
+  );
 }
 
 export function buildInstallTargets(
@@ -171,21 +143,6 @@ export function buildInstallTargets(
       kind: "command",
       snippet: `gemini mcp add --transport http ${MCP_SERVER_NAME} ${url}${header}`,
       docsHref: "https://google-gemini.github.io/gemini-cli/docs/tools/mcp-server.html",
-    },
-    {
-      id: "lmstudio",
-      name: "LM Studio",
-      mark: "lmstudio",
-      kind: "deeplink",
-      href: lmStudioHref(url, requiresKey),
-      docsHref: "https://lmstudio.ai/docs/app/plugins/mcp",
-    },
-    {
-      id: "prompt",
-      name: "כל כלי אחר",
-      kind: "prompt",
-      snippet: agentPrompt(url, requiresKey),
-      docsHref: "https://modelcontextprotocol.io/docs/develop/connect-remote-servers",
     },
   ];
 }

@@ -11,6 +11,13 @@ import { SiteHeader } from "@/components/marketing/SiteHeader";
 import { StickerStrip } from "@/components/marketing/StickerStrip";
 
 /*
+ * Default App Router caching set s-maxage to a year, so a Hosting CDN hit kept
+ * serving yesterday's title/description after a deploy. One hour is enough for
+ * a mostly-static marketing page and lets meta copy land without a purge.
+ */
+export const revalidate = 3600;
+
+/*
  * Order is the argument:
  *   Hero      what goes in and what comes back, with real figures
  *   Marquee   the chant between the pitch and the proof (the one ticker)

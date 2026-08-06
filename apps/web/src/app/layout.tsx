@@ -41,14 +41,16 @@ const archivo = Archivo_Black({
 });
 
 /**
- * The site had no social card at all, so every link shared into WhatsApp, Slack
- * or X rendered as a bare grey box. `public/og.png` is generated from
- * `brand/og.html` with the Playwright command in `brand/README.md`, in the real
- * brand fonts, and carries the measurement caveat because a card travels
- * without the page around it.
+ * Social card for WhatsApp, Slack, and X. `public/og.png` is the designed
+ * thumbnail resized from `brand/og-source.jpg` (see `brand/README.md`).
  */
 const SITE_URL = getSiteUrl();
 
+/**
+ * Share cards get the short subtitle (same line as on the thumbnail). Search and
+ * `<meta name="description">` keep the longer description. Title matches the
+ * hero / thumbnail headline so the preview, the image, and the page agree.
+ */
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: he.meta.title,
@@ -65,21 +67,22 @@ export const metadata: Metadata = {
     locale: "he_IL",
     siteName: he.header.brand,
     title: he.meta.title,
-    description: he.meta.description,
+    description: he.meta.subtitle,
     url: SITE_URL,
     images: [
       {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "SuperMCP: הסל הכי משתלם, עם AI!",
+        alt: `${he.meta.title}. ${he.meta.subtitle}`,
+        type: "image/png",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
     title: he.meta.title,
-    description: he.meta.description,
+    description: he.meta.subtitle,
     images: ["/og.png"],
   },
 };

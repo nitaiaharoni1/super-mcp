@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ASSISTANT_MARKS, AssistantMarkIcon } from "@/components/shared/assistantMarks";
-import { Sparkle } from "@/components/shared/doodles";
 import { TrackedAnchor } from "@/components/shared/TrackedAnchor";
 import { Button } from "@/components/ui/button";
 import { he } from "@/content/he";
@@ -77,22 +76,15 @@ function InstallCard({
 }) {
   const { install } = he.connect;
   const copy = install.targets[target.id as keyof typeof install.targets];
-  const mark = target.mark ? ASSISTANT_MARKS[target.mark] : null;
+  const mark = ASSISTANT_MARKS[target.mark];
 
   return (
     <div
       className={`flex h-full flex-col rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised p-5 shadow-sticker ${tilt}`}
     >
       <div className="flex items-center gap-2.5">
-        {mark ? (
-          <AssistantMarkIcon mark={mark} className="size-6" />
-        ) : (
-          <Sparkle className="size-5 text-grape-band" />
-        )}
-        <span
-          dir={mark ? "ltr" : undefined}
-          className="text-[length:var(--step-1)] font-bold text-ink"
-        >
+        <AssistantMarkIcon mark={mark} className="size-6" />
+        <span dir="ltr" className="text-[length:var(--step-1)] font-bold text-ink">
           {target.name}
         </span>
       </div>
@@ -141,13 +133,11 @@ function InstallCard({
         </a>
       </div>
 
-      {/* Shown for what the reader pastes elsewhere, not for a URL they already know. */}
-      {target.snippet && target.kind !== "url" ? (
+      {/* Shown for the terminal line, not for a URL the reader already knows. */}
+      {target.kind === "command" && target.snippet ? (
         <p
           dir="ltr"
-          className={`mt-3 whitespace-pre-wrap break-words rounded-[6px] border-2 border-ink/15 bg-paper-sunk px-3 py-2 text-left leading-5 text-ink-muted ${
-            target.kind === "command" ? "figure text-[0.6875rem]" : "text-xs leading-[1.6]"
-          }`}
+          className="figure mt-3 whitespace-pre-wrap break-words rounded-[var(--radius-card)] border-2 border-ink/15 bg-paper-sunk px-3 py-2 text-left text-[0.6875rem] leading-5 text-ink-muted"
         >
           {target.snippet}
         </p>

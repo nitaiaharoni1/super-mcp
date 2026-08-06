@@ -33,7 +33,11 @@ const measurement = {
 
 export const he = {
   meta: {
-    title: "SuperMCP | קניות סופר עם משלוח דרך AI",
+    /** Browser tab + og:title. Matches the thumbnail headline. */
+    title: "SuperMCP | הסל הכי משתלם, עם AI!",
+    /** Short line under the title in WhatsApp/Slack/X. Matches the thumbnail subtext. */
+    subtitle: "השוואת מחירי סופר עם בינה מלאכותית",
+    /** Longer SEO / link-preview body when a crawler wants more than the subtitle. */
     description:
       "כותבים רשימת קניות בעברית ל־Claude או ל־ChatGPT ומגלים מאיזו רשת הכי משתלם להזמין לכתובת שלכם, כולל דמי משלוח, מחיר לכל פריט ומה חסר.",
   },
@@ -238,11 +242,6 @@ export const he = {
           hint: "בהגדרות של ChatGPT נכנסים ל־Apps, מפעילים Developer mode ומוסיפים connector עם הכתובת.",
         },
         "gemini-cli": { action: "העתקת הפקודה", hint: "מדביקים בטרמינל ומריצים." },
-        lmstudio: { action: "התקנה בלחיצה", hint: "נפתח אצלכם ב־LM Studio ומוסיף את השרת." },
-        prompt: {
-          action: "העתקת המשפט",
-          hint: "מדביקים את המשפט הזה לכלי ה־AI עצמו, והוא מוסיף את השרת בשבילכם. עובד בכלים שיודעים לערוך את ההגדרות שלהם, כמו Claude Code, Cursor ו־Gemini CLI.",
-        },
       },
     },
 

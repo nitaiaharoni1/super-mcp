@@ -6,7 +6,8 @@ generated and committed, so the site build never depends on regenerating them.
 | Source | Generated output |
 | --- | --- |
 | `../public/favicon.svg` | `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` |
-| `og.html` | `og.png` (1200x630 social card) |
+| `og-source.jpg` | `../public/og.png` (1200x630 social card) |
+| `og.html` | Legacy HTML card (kept for reference; not the live source) |
 | `mark-source.png` | Original raster of the mark, for reference |
 
 ## The mark
@@ -41,34 +42,30 @@ rsvg-convert -w 180 -h 180 public/favicon.svg -o public/apple-touch-icon.png
 
 ## Regenerating `og.png`
 
-`og.html` is a standalone 1200x630 page that pulls Secular One, Heebo and Geist
-Mono from Google Fonts. Screenshot it at exactly 1200x630 with any headless
-browser, e.g.
+The live social card is the designed thumbnail in `og-source.jpg`. From
+`apps/web`:
 
 ```bash
-# from a directory where playwright-core is installed
-node -e '
-  const { chromium } = require("playwright-core");
-  (async () => {
-    const b = await chromium.launch({ executablePath: process.env.CHROME_PATH });
-    const p = await b.newPage({ viewport: { width: 1200, height: 630 } });
-    await p.goto("file://" + process.cwd() + "/og.html", { waitUntil: "networkidle" });
-    await p.evaluate(() => document.fonts.ready);
-    await p.waitForTimeout(600);
-    await p.screenshot({ path: "og.png" });
-    await b.close();
-  })();
-'
+python3 - <<'PY'
+from PIL import Image
+img = Image.open("brand/og-source.jpg").convert("RGB")
+target = (1200, 630)
+scale = max(target[0] / img.width, target[1] / img.height)
+new = (round(img.width * scale), round(img.height * scale))
+img = img.resize(new, Image.Resampling.LANCZOS)
+left = (img.width - target[0]) // 2
+top = (img.height - target[1]) // 2
+img = img.crop((left, top, left + target[0], top + target[1]))
+img.save("public/og.png", "PNG", optimize=True)
+PY
 ```
 
-Check the result is set in Secular One and Geist Mono before committing: if the
-fonts fail to load the card silently falls back to system faces.
+`og.html` is an older HTML card (ledger numbers + fonts). Leave it alone unless
+you intentionally want to bring that style back.
 
-## When the numbers change
-
-`og.html` hard-codes the measured comparison and its date. Those figures also
-appear in `../src/content/he.ts`. If the measurement is refreshed, update both
-and keep the caveat line on the card: it gets shared without the page around it.
+Production tip: Firebase Hosting serves files in `firebase-hosting/` before the
+Cloud Run rewrite. Copy `public/og.png` there before `firebase deploy --only
+hosting` so crawlers get the new card without waiting on a web image rebuild.
 
 ## Third-party assistant marks
 

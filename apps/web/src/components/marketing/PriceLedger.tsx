@@ -27,7 +27,7 @@ export function PriceLedger() {
       <Container>
         <div className="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start lg:gap-16">
           <Reveal>
-            <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-pill)] border-2 border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
+            <p className="inline-block rotate-[-1.5deg] rounded-[var(--radius-card)] border-[3px] border-ink bg-lime px-4 py-1.5 text-sm font-bold text-ink shadow-sticker-sm">
               {ledger.eyebrow}
             </p>
             <h2 className="display mt-6 max-w-[20ch] text-[length:var(--step-4)]">

@@ -11,8 +11,9 @@ function decodeCursorConfig(href: string): unknown {
 }
 
 function decodeVsCodeConfig(href: string): unknown {
-  const payload = href.slice("vscode:mcp/install?".length);
-  return JSON.parse(decodeURIComponent(payload));
+  const config = new URL(href).searchParams.get("config");
+  expect(config).toBeTruthy();
+  return JSON.parse(config as string);
 }
 
 describe("mcpRequiresApiKey", () => {
@@ -42,7 +43,7 @@ describe("install targets, keyless", () => {
   const targets = buildInstallTargets(url, false);
   const byId = new Map(targets.map((t) => [t.id, t]));
 
-  it("covers every advertised assistant exactly once, catch-all last", () => {
+  it("covers every advertised assistant exactly once, and nothing else", () => {
     expect(targets.map((t) => t.id)).toEqual([
       "cursor",
       "vscode",
@@ -50,26 +51,11 @@ describe("install targets, keyless", () => {
       "claude",
       "chatgpt",
       "gemini-cli",
-      "lmstudio",
-      "prompt",
     ]);
   });
 
-  it("nests the LM Studio config under the server name, unlike Cursor's bare object", () => {
-    const href = byId.get("lmstudio")?.href as string;
-    expect(href.startsWith("lmstudio://add_mcp?")).toBe(true);
-    const config = new URL(href).searchParams.get("config") as string;
-    expect(JSON.parse(Buffer.from(config, "base64").toString("utf8"))).toEqual({
-      "super-mcp": { url },
-    });
-  });
-
-  it("gives the catch-all card a sentence naming the server, the url and the transport", () => {
-    const snippet = byId.get("prompt")?.snippet as string;
-    expect(snippet).toContain("super-mcp");
-    expect(snippet).toContain(url);
-    expect(snippet).toMatch(/Streamable HTTP/);
-    expect(byId.get("prompt")?.mark).toBeUndefined();
+  it("gives every card a brand mark: the grid has no markless card to fall back for", () => {
+    for (const target of targets) expect(target.mark).toBeTruthy();
   });
 
   it("builds a Cursor deeplink whose base64 config decodes to the bare server", () => {
@@ -79,10 +65,18 @@ describe("install targets, keyless", () => {
     expect(decodeCursorConfig(href)).toEqual({ url });
   });
 
-  it("builds a VS Code deeplink whose urlencoded config names the server inline", () => {
+  /*
+   * The https redirect, not the `vscode:` scheme: a browser that does not know the
+   * scheme drops the click without saying so. Naming the server moves out of the
+   * config and into its own query parameter, and stable VS Code is the default,
+   * which is why nothing here carries `quality=insiders`.
+   */
+  it("builds a VS Code install link on the https redirect, server named by query", () => {
     const href = byId.get("vscode")?.href as string;
-    expect(href.startsWith("vscode:mcp/install?")).toBe(true);
-    expect(decodeVsCodeConfig(href)).toEqual({ name: "super-mcp", type: "http", url });
+    expect(href.startsWith("https://insiders.vscode.dev/redirect/mcp/install?")).toBe(true);
+    expect(new URL(href).searchParams.get("name")).toBe("super-mcp");
+    expect(new URL(href).searchParams.get("quality")).toBeNull();
+    expect(decodeVsCodeConfig(href)).toEqual({ type: "http", url });
   });
 
   it("builds CLI commands that name the server and the configured url", () => {
@@ -124,7 +118,6 @@ describe("install targets, key required", () => {
       headers: expectedHeader,
     });
     expect(decodeVsCodeConfig(byId.get("vscode")?.href as string)).toEqual({
-      name: "super-mcp",
       type: "http",
       url,
       headers: expectedHeader,
@@ -137,12 +130,6 @@ describe("install targets, key required", () => {
         `--header "Authorization: Bearer ${API_KEY_PLACEHOLDER}"`,
       );
     }
-  });
-
-  it("tells the agent about the header too, or its config would 401 silently", () => {
-    expect(byId.get("prompt")?.snippet).toContain(
-      `Authorization: Bearer ${API_KEY_PLACEHOLDER}`,
-    );
   });
 
   it("carries the placeholder and never anything shaped like a real key", () => {
