@@ -38,6 +38,9 @@ export async function registerProductRoutes(app: FastifyInstance): Promise<void>
         radiusKm: loc.radiusKm,
         storeIds: query.store_id ? [query.store_id] : undefined,
         inStockOnly: query.in_stock_only,
+        // Same catalogue, same rule, so /v1 and /mcp cannot disagree about what
+        // the product sells.
+        pricedOnly: true,
       });
     }),
   );

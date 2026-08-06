@@ -284,6 +284,7 @@ async function searchLexicalOnce(
       includeListing,
       trigramThreshold: config.trigramThreshold,
       branchStockedOnly: params.branchStockedOnly === true,
+      pricedOnly: params.pricedOnly === true,
     })}
     ${buildDedupedFromRankedCte()}
     ${buildSearchResultsSelect(

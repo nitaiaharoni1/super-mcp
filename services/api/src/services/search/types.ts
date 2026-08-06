@@ -30,6 +30,22 @@ export interface SearchProductsParams {
    * it into the candidate pool costs real time for a result that is discarded.
    */
   branchStockedOnly?: boolean;
+  /**
+   * Restrict to products at least one storefront currently prices. Default false.
+   *
+   * The delivery counterpart of `branchStockedOnly`, and the browse tools' answer
+   * to a catalogue that outlives its prices. Narrowing the ingest to online
+   * storefronts left 91,718 products with no price anywhere, and search only
+   * ORDERS by store_count, so a better-named unbuyable product still outranks a
+   * buyable one: measured 2026-08-06, 13 of 80 results across eight staple
+   * queries were products no storefront carries, 7 of 10 for "חלב 3%".
+   *
+   * Off for line resolution, which earns its answers further down the pipeline
+   * (availability, class equivalence, coverage) and was measured picking priced
+   * products for all 12 lines of a staples basket. Filtering its candidate pool
+   * would trade a working ranking for an untested one.
+   */
+  pricedOnly?: boolean;
 }
 
 export type SearchMatchedVia = "product" | "listing" | "gtin" | "vector" | "alias";

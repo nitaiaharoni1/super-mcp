@@ -47,6 +47,10 @@ export function registerSearchProductsTool(
         radiusKm: loc.radiusKm,
         storeIds: store_id ? [store_id] : undefined,
         inStockOnly: in_stock_only,
+        // Browsing a delivery catalogue: a product no storefront prices cannot
+        // be ordered, and offering one costs the shopper a turn to find out.
+        // Line resolution deliberately does NOT set this; see SearchProductsParams.
+        pricedOnly: true,
       });
       return { products };
     },

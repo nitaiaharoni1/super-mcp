@@ -92,3 +92,38 @@ describe("buildLexicalRankedCte", () => {
     expect(sql).toMatch(/LIMIT \$5/);
   });
 });
+
+/**
+ * Browsing a catalogue that outlived its prices.
+ *
+ * Narrowing the ingest to online storefronts left 91,718 products with no price
+ * anywhere. Search only ORDERS by store_count, so a better-named unbuyable
+ * product still outranks a buyable one: measured against production 2026-08-06,
+ * 13 of 80 results across eight staple queries were products no storefront
+ * carries, and 7 of 10 for "חלב 3%".
+ */
+describe("pricedOnly", () => {
+  it("drops products no storefront prices", () => {
+    const sql = buildLexicalRankedCte({ pricedOnly: true });
+    expect(sql).toContain("AND p.store_count > 0");
+  });
+
+  it("is off by default, because line resolution depends on the wider pool", () => {
+    // The resolver earns its answer downstream (availability, class equivalence,
+    // coverage) and was measured picking priced products for all 12 lines of a
+    // staples basket. Narrowing its candidates trades a working ranking for an
+    // untested one.
+    expect(buildLexicalRankedCte()).not.toContain("AND p.store_count > 0");
+  });
+
+  it("is independent of the physical surface's filter", () => {
+    // Two different questions: "can I walk in and buy it" and "will anyone
+    // deliver it". branch_store_count is 0 for every product now, so folding
+    // them together would return nothing at all.
+    const online = buildLexicalRankedCte({ pricedOnly: true });
+    expect(online).not.toContain("branch_store_count");
+    const physical = buildLexicalRankedCte({ branchStockedOnly: true });
+    expect(physical).toContain("AND p.branch_store_count > 0");
+    expect(physical).not.toContain("AND p.store_count > 0");
+  });
+});

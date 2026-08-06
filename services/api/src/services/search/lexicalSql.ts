@@ -23,6 +23,13 @@ export type LexicalRankedCteOptions = {
    * a 6-line Tel Aviv basket went from ~1.3s to ~11s on exactly that path.
    */
   branchStockedOnly?: boolean;
+  /**
+   * Drop products no storefront prices.
+   *
+   * `store_count` is refreshed at the end of every ingest, in the same run that
+   * writes the prices, so it cannot lag them by more than one cycle.
+   */
+  pricedOnly?: boolean;
   /** Threshold for alias trigram similarity when includeFuzzy is on. */
   trigramThreshold?: number;
 };
@@ -139,6 +146,7 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
   const includeListing = options.includeListing !== false;
   const trigramThreshold = options.trigramThreshold ?? 0.4;
   const branchStockedOnly = options.branchStockedOnly === true;
+  const pricedOnly = options.pricedOnly === true;
 
   const evidenceCtes: string[] = [];
   if (includeListing) {
@@ -233,6 +241,7 @@ export function buildLexicalRankedCte(options: LexicalRankedCteOptions = {}): st
         AND ($3::text IS NULL OR p.brand ILIKE '%' || $3 || '%' ESCAPE '\\')
         AND ($4::text IS NULL OR p.gtin = $4)
         ${branchStockedOnly ? "AND p.branch_store_count > 0" : ""}
+        ${pricedOnly ? "AND p.store_count > 0" : ""}
       -- Score first, then how widely the product is actually stocked.
       -- A leading whole-word match scores a flat 0.95, so a one-word staple
       -- query ties hundreds of rows; breaking that tie on p.name made the pool
