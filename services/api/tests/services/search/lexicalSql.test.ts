@@ -101,29 +101,32 @@ describe("buildLexicalRankedCte", () => {
  * product still outranks a buyable one: measured against production 2026-08-06,
  * 13 of 80 results across eight staple queries were products no storefront
  * carries, and 7 of 10 for "חלב 3%".
+ *
+ * The filter belongs on the shared result WHERE, not in the lexical candidate
+ * CTE. Lexical is one recall path of several, and filtering only there still
+ * returned 4 of 78: every survivor arrived by vector or alias.
  */
 describe("pricedOnly", () => {
-  it("drops products no storefront prices", () => {
-    const sql = buildLexicalRankedCte({ pricedOnly: true });
-    expect(sql).toContain("AND p.store_count > 0");
+  it("filters on the shared WHERE, so every recall path is covered", () => {
+    const sql = buildSearchResultsSelect("LOCAL", "GLOBAL", false, "AND GLOBAL");
+    expect(sql).toContain("WHERE true AND GLOBAL");
   });
 
-  it("is off by default, because line resolution depends on the wider pool", () => {
-    // The resolver earns its answer downstream (availability, class equivalence,
-    // coverage) and was measured picking priced products for all 12 lines of a
-    // staples basket. Narrowing its candidates trades a working ranking for an
-    // untested one.
+  it("is not a candidate-CTE predicate", () => {
+    // Narrowing candidates before fusion would change which products compete for
+    // slots, which is a ranking change and not the filter that was asked for.
     expect(buildLexicalRankedCte()).not.toContain("AND p.store_count > 0");
+    expect(buildLexicalRankedCte({ branchStockedOnly: true })).not.toContain(
+      "AND p.store_count > 0",
+    );
   });
 
-  it("is independent of the physical surface's filter", () => {
+  it("leaves the physical surface's own filter alone", () => {
     // Two different questions: "can I walk in and buy it" and "will anyone
     // deliver it". branch_store_count is 0 for every product now, so folding
     // them together would return nothing at all.
-    const online = buildLexicalRankedCte({ pricedOnly: true });
-    expect(online).not.toContain("branch_store_count");
-    const physical = buildLexicalRankedCte({ branchStockedOnly: true });
-    expect(physical).toContain("AND p.branch_store_count > 0");
-    expect(physical).not.toContain("AND p.store_count > 0");
+    expect(buildLexicalRankedCte({ branchStockedOnly: true })).toContain(
+      "AND p.branch_store_count > 0",
+    );
   });
 });

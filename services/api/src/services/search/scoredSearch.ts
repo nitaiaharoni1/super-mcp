@@ -178,7 +178,16 @@ function buildSearchScopeParams(
     storeIdsParam,
   });
   const globalExists = buildPriceExistsSql("r.id", { scoped: false });
-  const stockFilter = params.inStockOnly && scoped ? `AND ${localExists}` : "";
+  // Two independent narrowings, composed on the one WHERE every recall path
+  // reaches. Putting pricedOnly in the lexical CTE alone left vector and alias
+  // hits untouched: it cut unbuyable results from 13/80 to 4/78, and the four
+  // survivors all came in through a path that never saw the predicate.
+  const stockFilter = [
+    params.inStockOnly && scoped ? `AND ${localExists}` : "",
+    params.pricedOnly ? `AND ${globalExists}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return {
     sqlParams,
@@ -284,7 +293,6 @@ async function searchLexicalOnce(
       includeListing,
       trigramThreshold: config.trigramThreshold,
       branchStockedOnly: params.branchStockedOnly === true,
-      pricedOnly: params.pricedOnly === true,
     })}
     ${buildDedupedFromRankedCte()}
     ${buildSearchResultsSelect(

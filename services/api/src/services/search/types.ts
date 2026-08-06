@@ -40,6 +40,10 @@ export interface SearchProductsParams {
    * buyable one: measured 2026-08-06, 13 of 80 results across eight staple
    * queries were products no storefront carries, 7 of 10 for "חלב 3%".
    *
+   * Applied as a result filter on the shared WHERE, not inside the lexical
+   * candidate CTE. Lexical is one recall path of several; filtering only there
+   * left vector and alias hits untouched and still returned 4 of 78.
+   *
    * Off for line resolution, which earns its answers further down the pipeline
    * (availability, class equivalence, coverage) and was measured picking priced
    * products for all 12 lines of a staples basket. Filtering its candidate pool
