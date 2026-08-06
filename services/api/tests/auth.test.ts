@@ -144,6 +144,8 @@ describe("keyless (anonymous) access", () => {
       name: "anonymous",
       role: "standard",
       rateLimitPerMinute: 30,
+      // Keyless callers share one api key id, so analytics identifies them by this instead.
+      analyticsId: expect.stringMatching(/^anon:[0-9a-f]{16}$/),
     });
     expect(query).not.toHaveBeenCalled();
   });
@@ -239,7 +241,10 @@ describe("keyless (anonymous) access", () => {
       statusCode: 429,
       details: { scope: "anonymous_ip" },
     });
-  });
+    // 20k authentications against a deliberately huge global ceiling, so the shared window keeps
+    // growing and every call re-filters it. ~3s alone, and it overran the 5s default whenever the
+    // suite ran in parallel. Production never sees this: the real ceiling bounds that window.
+  }, 30_000);
 
   it("falls back to the documented defaults when the limit variables are junk", async () => {
     process.env.SUPER_MCP_ALLOW_ANONYMOUS = "1";

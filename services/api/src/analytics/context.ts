@@ -1,9 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ApiKeyRole } from "../auth.js";
+import type { AnalyticsClientName } from "./metadata.js";
 
 export type AnalyticsRequestContext = {
   apiKeyId: string;
   role: ApiKeyRole;
+  /** Pseudonymous distinct id for keyless callers; unset for key holders. */
+  analyticsId?: string;
+  clientName?: AnalyticsClientName;
 };
 
 const storage = new AsyncLocalStorage<AnalyticsRequestContext>();

@@ -6,7 +6,15 @@ import {
   runWithAnalyticsContext,
   type AnalyticsRequestContext,
 } from "../analytics/context.js";
-import { authenticate, recordUsage } from "../auth.js";
+import { captureAuthRejection } from "../analytics/capture.js";
+import { deriveClientName } from "../analytics/metadata.js";
+import {
+  anonymousAnalyticsId,
+  authenticate,
+  extractApiKey,
+  recordUsage,
+  type AuthContext,
+} from "../auth.js";
 import { beginPrivilegedAudit, finalizePrivilegedAudit } from "../services/privilegedAudit.js";
 import { resolveBuildRevision } from "./protocolIdentity.js";
 import { buildOnlineInstructions, enabledSurfaces, type McpSurface } from "./surfaces.js";
@@ -35,6 +43,21 @@ function createMcpServer(
   return server;
 }
 
+/**
+ * The client's self-reported name, present only on the `initialize` POST. This surface is
+ * stateless, so tool calls arrive on later POSTs that carry no handshake and fall back to the
+ * user-agent. Analytics only: never used for auth or behaviour.
+ */
+function mcpClientName(body: unknown): string | undefined {
+  if (body == null || typeof body !== "object") return undefined;
+  const params = (body as { params?: unknown }).params;
+  if (params == null || typeof params !== "object") return undefined;
+  const info = (params as { clientInfo?: unknown }).clientInfo;
+  if (info == null || typeof info !== "object") return undefined;
+  const name = (info as { name?: unknown }).name;
+  return typeof name === "string" && name.trim() ? name : undefined;
+}
+
 const METHOD_NOT_ALLOWED = {
   jsonrpc: "2.0" as const,
   error: { code: -32000, message: "Method not allowed. This is a stateless MCP endpoint; use POST." },
@@ -57,9 +80,26 @@ export async function registerMcpRoutes(app: FastifyInstance): Promise<void> {
 
 function registerSurfaceRoutes(app: FastifyInstance, surface: McpSurface): void {
   app.post(surface.path, async (request, reply) => {
-    // Throws AppError on missing/invalid/rate-limited key; caught by the global error handler.
-    const auth = await authenticate(request);
     const startedAt = Date.now();
+    const clientName = deriveClientName(request.headers["user-agent"], mcpClientName(request.body));
+    // Throws AppError on missing/invalid/rate-limited key; caught by the global error handler.
+    // The reply is hijacked below, so onResponse never fires here: a rejection captured anywhere
+    // else would be captured nowhere, and a config that 401s would look like silence.
+    let auth: AuthContext;
+    try {
+      auth = await authenticate(request);
+    } catch (err) {
+      captureAuthRejection({
+        surface: "mcp",
+        operation: surface.path,
+        startedAt,
+        error: err,
+        analyticsId: anonymousAnalyticsId(request),
+        clientName,
+        credentialPresented: extractApiKey(request) !== null,
+      });
+      throw err;
+    }
     const auditId =
       auth.role === "master"
         ? await beginPrivilegedAudit({
@@ -78,6 +118,8 @@ function registerSurfaceRoutes(app: FastifyInstance, surface: McpSurface): void 
     const analyticsCtx: AnalyticsRequestContext = {
       apiKeyId: auth.apiKeyId,
       role: auth.role,
+      analyticsId: auth.analyticsId,
+      clientName,
     };
     const server = createMcpServer(surface, analyticsCtx);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

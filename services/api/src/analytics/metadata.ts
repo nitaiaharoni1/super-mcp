@@ -160,6 +160,59 @@ export function extractResultMeta(result: unknown): ResultAnalyticsMeta {
   return meta;
 }
 
+/**
+ * Which assistant is calling, as a low-cardinality bucket whose values are the same ids the
+ * install cards report in `mcp_install_clicked.target`. That is what lets "Cursor installs" and
+ * "calls from Cursor" line up as cohorts without putting any per-person id in the published URL.
+ *
+ * A guess from strings the client controls, so it is a cohort label and never an access decision.
+ * Order matters: Claude Code must be tested before the bare Claude match. VS Code clients use
+ * names such as `vscode` or `Visual Studio Code`, both handled below.
+ */
+export type AnalyticsClientName =
+  | "cursor"
+  | "vscode"
+  | "claude-code"
+  | "claude"
+  | "chatgpt"
+  | "gemini-cli"
+  | "lmstudio"
+  | "other"
+  | "unknown";
+
+const CLIENT_PATTERNS: ReadonlyArray<[RegExp, AnalyticsClientName]> = [
+  [/cursor/, "cursor"],
+  [/claude[\s_-]?code/, "claude-code"],
+  [/(vs[\s_-]?code|visual\s?studio\s?code|github[\s_-]?copilot)/, "vscode"],
+  [/(claude|anthropic)/, "claude"],
+  [/(chatgpt|openai)/, "chatgpt"],
+  [/gemini/, "gemini-cli"],
+  [/lm[\s_-]?studio/, "lmstudio"],
+];
+
+function matchClient(value: string | undefined): AnalyticsClientName | undefined {
+  const haystack = value?.trim().toLowerCase();
+  if (!haystack) return undefined;
+  for (const [pattern, name] of CLIENT_PATTERNS) {
+    if (pattern.test(haystack)) return name;
+  }
+  return undefined;
+}
+
+export function deriveClientName(
+  userAgent: string | undefined,
+  mcpClientName?: string,
+): AnalyticsClientName {
+  // The handshake name is the client naming itself, so it is tried alone and first. Merging both
+  // into one haystack would let the HTTP stack's user-agent outvote it whenever the agent happens
+  // to match an earlier pattern, which is how a Gemini CLI run behind a Cursor-branded agent
+  // would have been filed as Cursor.
+  const named = matchClient(mcpClientName) ?? matchClient(userAgent);
+  if (named) return named;
+  // Something identified itself, we just do not recognise it. That is not the same as silence.
+  return mcpClientName?.trim() || userAgent?.trim() ? "other" : "unknown";
+}
+
 export function shouldTrackRestPath(path: string): boolean {
   const clean = path.split("?")[0] ?? path;
   if (!clean.startsWith("/v1/")) return false;

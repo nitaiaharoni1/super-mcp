@@ -68,4 +68,7 @@ describe("a coverage verdict needs an address to be about", () => {
       expect(plan.coverage.matchedScope, plan.serviceSlug).toBe("national");
     }
   });
-});
+  // Every case here goes to the live database, and the optimize_delivery one runs a real product
+  // search (~2s on its own). That fits the 5s default alone but not when the whole suite runs in
+  // parallel, which made this file fail intermittently for timing rather than for behaviour.
+}, 30_000);

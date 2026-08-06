@@ -27,8 +27,12 @@ export function getPostHogClient(): PostHog | null {
   return client;
 }
 
-export function posthogDistinctId(apiKeyId: string): string {
-  return `api_key:${apiKeyId}`;
+/**
+ * Key holders are identified by key id. Keyless callers pass an `analyticsId` because they all
+ * share one api key id, and without it every anonymous shopper is the same PostHog person.
+ */
+export function posthogDistinctId(apiKeyId: string, analyticsId?: string): string {
+  return analyticsId?.trim() || `api_key:${apiKeyId}`;
 }
 
 export function captureSafe(

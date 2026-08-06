@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import { AppError } from "@super-mcp/shared";
 import { query } from "@super-mcp/db";
@@ -8,6 +8,12 @@ export interface AuthContext {
   name: string;
   role: ApiKeyRole;
   rateLimitPerMinute: number;
+  /**
+   * Analytics-only distinct id, set for keyless callers. Key holders leave it unset and are
+   * identified by apiKeyId; every keyless caller would otherwise share ANONYMOUS_API_KEY_ID
+   * and collapse into a single PostHog person.
+   */
+  analyticsId?: string;
 }
 
 export type ApiKeyRole = "standard" | "master";
@@ -116,6 +122,27 @@ function clientIp(request: FastifyRequest): string {
   return ip || "unknown";
 }
 
+/** True for the seeded keyless identity, so analytics can separate it from real key holders. */
+export function isAnonymousApiKeyId(apiKeyId: string): boolean {
+  return apiKeyId === ANONYMOUS_API_KEY_ID;
+}
+
+/**
+ * Pseudonymous, stable-per-caller analytics id for keyless traffic: keyed HMAC over address +
+ * user-agent, truncated. Keyed rather than a bare hash so the digest cannot be walked back to an
+ * address by hashing the IPv4 space, and domain-separated so it shares nothing with the
+ * continuation tokens signed by the same secret. Neither the address nor the agent string ever
+ * leaves the process. Including the agent is intentional: an agent upgrade can start a new
+ * PostHog identity, which is preferable to merging different people behind one shared address.
+ */
+export function anonymousAnalyticsId(request: FastifyRequest): string {
+  const ua = typeof request.headers["user-agent"] === "string" ? request.headers["user-agent"] : "";
+  const digest = createHmac("sha256", process.env.BASKET_CONTINUATION_SECRET ?? "")
+    .update(`anon-analytics:v1\n${clientIp(request)}\n${ua}`)
+    .digest("hex");
+  return `anon:${digest.slice(0, 16)}`;
+}
+
 /**
  * Sliding 60s window per key, held in memory (single-instance only).
  * Follow-up: replace with a shared/DB limiter before horizontally scaling.
@@ -216,6 +243,7 @@ function authenticateAnonymous(request: FastifyRequest): AuthContext {
     name: ANONYMOUS_NAME,
     role: "standard",
     rateLimitPerMinute: perIp,
+    analyticsId: anonymousAnalyticsId(request),
   };
 }
 

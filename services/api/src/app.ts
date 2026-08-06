@@ -1,9 +1,17 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
-import { captureRestOperation } from "./analytics/capture.js";
-import { shouldTrackRestPath } from "./analytics/metadata.js";
+import { AppError } from "@super-mcp/shared";
+import { captureAuthRejection, captureRestOperation } from "./analytics/capture.js";
+import { deriveClientName, shouldTrackRestPath } from "./analytics/metadata.js";
 import { shutdownPostHog } from "./analytics/posthog.js";
-import { authenticate, authorize, recordUsage, type Capability } from "./auth.js";
+import {
+  anonymousAnalyticsId,
+  authenticate,
+  authorize,
+  extractApiKey,
+  recordUsage,
+  type Capability,
+} from "./auth.js";
 import { sendError, toAppError } from "./lib/errors.js";
 import { getOpenApiSpec } from "./openapi.js";
 import { beginPrivilegedAudit, finalizePrivilegedAudit } from "./services/privilegedAudit.js";
@@ -146,12 +154,46 @@ export async function buildApp(): Promise<FastifyInstance> {
           startedAt: request.startTime || Date.now(),
           apiKeyId: request.auth.apiKeyId,
           apiKeyRole: request.auth.role,
+          analyticsId: request.auth.analyticsId,
+          clientName: deriveClientName(request.headers["user-agent"]),
           errorCode: request.privilegedAuditErrorCode,
           body: request.body,
           query: request.query,
         });
       }
+      return;
     }
+
+    // No request.auth means authentication threw before the handler ran. Capturing it here is
+    // the only record of a caller whose credentials were refused or who hit the keyless ceiling.
+    //
+    // Public paths are excluded because they never authenticate at all: /v1/access-requests runs
+    // its own submission limiter, and reporting that 429 as an auth rejection would invent a
+    // failure that never happened.
+    if (isPublicPath(request.url) || request.url.startsWith("/mcp")) return;
+    if (reply.statusCode !== 401 && reply.statusCode !== 429) return;
+
+    const route = request.routeOptions.url ?? request.url.split("?")[0] ?? request.url;
+    if (!shouldTrackRestPath(route)) return;
+
+    captureAuthRejection({
+      surface: "rest",
+      operation: route,
+      startedAt: request.startTime || Date.now(),
+      error: new AppError(
+        request.privilegedAuditErrorCode ??
+          (reply.statusCode === 429 ? "rate_limited" : "unauthorized"),
+        "auth rejected",
+        reply.statusCode,
+      ),
+      analyticsId: anonymousAnalyticsId(request),
+      clientName: deriveClientName(request.headers["user-agent"]),
+      // A key holder over their own limit throws before request.auth is set, so they land here
+      // too. We cannot name them without a database lookup, but we must not file them under the
+      // keyless cohort: this flag is what separates "the install config has no key" from
+      // "a real key holder is being throttled".
+      credentialPresented: extractApiKey(request) !== null,
+    });
   });
 
   app.addHook("onClose", async () => {
