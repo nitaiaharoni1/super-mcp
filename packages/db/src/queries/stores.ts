@@ -30,7 +30,18 @@ export interface KnownStoreLocation {
  * to guessing from the name, and a delivery depot whose name reads like a
  * warehouse ("מרלוג אינטרנט") would stop being priced the moment its feed
  * hiccuped.
+ *
+ * Bounded by `updated_at`, because this is a memory of a working feed and not a
+ * permanent record. Every store in today's Stores file is upserted on every run,
+ * so a store that is still open keeps its timestamp fresh. One that closed stops
+ * being written and ages out. Without the bound a closed store is hinted, and
+ * logged as restored, on every run forever, which buries the one night the
+ * backstop actually mattered.
  */
+/** How long a vanished store stays trusted as a hint. Long enough to outlast any
+ *  realistic feed regression, short enough that a real closure drops out. */
+const KNOWN_STORE_MEMORY_DAYS = 30;
+
 export async function knownStoreLocationsForChain(
   chainId: string,
 ): Promise<KnownStoreLocation[]> {
@@ -45,8 +56,10 @@ export async function knownStoreLocationsForChain(
     store_kind: string | null;
   }>(
     `SELECT store_code, city, lat, lng, name, address, feed_store_type, store_kind
-       FROM store WHERE chain_id = $1`,
-    [chainId],
+       FROM store
+      WHERE chain_id = $1
+        AND updated_at > now() - make_interval(days => $2::int)`,
+    [chainId, KNOWN_STORE_MEMORY_DAYS],
   );
   return res.rows.map((r) => ({
     storeId: r.store_code,
