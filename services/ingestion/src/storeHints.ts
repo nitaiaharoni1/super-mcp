@@ -7,6 +7,7 @@ import {
   type StoreLocationHint,
 } from "./regions.js";
 import { selectRegionalFeedFiles } from "./selectRegionalFiles.js";
+import { normalizeStoreCode } from "./storeCode.js";
 
 /**
  * Pick this chain's price files, with the database as a safety net.
@@ -102,19 +103,22 @@ async function withKnownOrderable(
     return locations;
   }
 
-  const seen = new Set(locations.map((l) => l.storeId));
+  // Today's ids come straight from the XML; the DB's are normalized on write, so
+  // a feed printing "39" against a stored "039" is the same store. Compare on the
+  // normalized form or every healthy run reports a rescue that never happened.
+  const byCode = new Map(locations.map((l) => [normalizeStoreCode(l.storeId), l]));
   const restored: StoreLocationHint[] = [];
   const rescued: StoreLocationHint[] = [];
 
   for (const k of known) {
     if (!isOrderableStorefront(k)) continue;
-    if (!seen.has(k.storeId)) {
+    const fromFeed = byCode.get(normalizeStoreCode(k.storeId));
+    if (!fromFeed) {
       // Absent from today's Stores file entirely.
       restored.push(k);
       continue;
     }
-    const fromFeed = locations.find((l) => l.storeId === k.storeId);
-    if (fromFeed && !isOrderableStorefront(fromFeed)) rescued.push(k);
+    if (!isOrderableStorefront(fromFeed)) rescued.push(k);
   }
 
   if (restored.length === 0 && rescued.length === 0) return locations;

@@ -162,6 +162,20 @@ describe("upsertStore store_kind", () => {
     expect(kindOf()).toBe("pickup");
   });
 
+  it("keeps a confirmed storefront when today's row lost its <StoreType>", async () => {
+    // The night the feed drops <StoreType>, "מרלוג אינטרנט" re-derives as
+    // 'warehouse' from its name. Overwriting the stored 'online' would make the
+    // next run skip the store as not orderable and silently lose the chain's
+    // delivery catalogue, which is exactly what the ingestion backstop exists
+    // to prevent.
+    await upsertStore({ chainId: "c", storeCode: "039", name: "מרלוג אינטרנט" });
+    const sql = String(query.mock.calls[0]?.[0]);
+    expect(kindOf()).toBe("warehouse");
+    expect(sql).toContain(
+      "WHEN store.feed_store_type IS NOT NULL\n           AND store.store_kind IN ('online', 'pickup') THEN store.store_kind",
+    );
+  });
+
   it("never lets a 'Store NNN' price-file stub downgrade an identified storefront", async () => {
     await upsertStore({ chainId: "c", storeCode: "413", name: "Store 413" });
     const sql = String(query.mock.calls[0]?.[0]);

@@ -93,8 +93,17 @@ export async function upsertStore(input: UpsertStoreInput, client?: PoolClient):
        -- A row carrying the chain's own <StoreType> outranks even that, in BOTH
        -- directions: only the Stores XML sets it, and it is the one source
        -- entitled to say "this really is a branch" and undo an earlier guess.
+       -- Reaching past the first branch means today's row carries no <StoreType>,
+       -- so its kind is a guess from the name alone. That guess must not undo a
+       -- storefront a real <StoreType> already confirmed: "מרלוג אינטרנט" reads as
+       -- a warehouse on its name and is only known to be Rami Levy's online store
+       -- because the feed said StoreType 2. Let the guess win and the next run
+       -- reads back 'warehouse', the ingestion backstop skips it as not orderable,
+       -- and the chain's delivery catalogue disappears with nothing logged.
        store_kind = CASE
          WHEN EXCLUDED.feed_store_type IS NOT NULL THEN EXCLUDED.store_kind
+         WHEN store.feed_store_type IS NOT NULL
+           AND store.store_kind IN ('online', 'pickup') THEN store.store_kind
          WHEN EXCLUDED.store_kind <> 'branch' THEN EXCLUDED.store_kind
          WHEN EXCLUDED.name ~ '^Store[[:space:]]' THEN store.store_kind
          ELSE EXCLUDED.store_kind
