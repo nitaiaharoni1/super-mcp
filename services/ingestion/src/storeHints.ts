@@ -33,7 +33,39 @@ export async function selectFeedFilesForChain(
   locations: StoreLocationHint[],
   maxStores: number,
 ): Promise<FeedFile[]> {
-  return selectRegionalFeedFiles(files, await withKnownOrderable(chainId, locations), maxStores);
+  const hints = await withKnownOrderable(chainId, locations);
+  if (onlineStoresOnly() && !hints.some(isOrderableStorefront)) {
+    storefrontlessChains.add(chainId);
+  } else {
+    storefrontlessChains.delete(chainId);
+  }
+  return selectRegionalFeedFiles(files, hints, maxStores);
+}
+
+/**
+ * Chains this run found no orderable storefront for.
+ *
+ * Module state because it is a fact about the current process: the ingest is a
+ * one-shot CLI, discovery decides this, and the run summary needs it afterwards.
+ * Threading it back would mean widening the `SourceAdapter` contract for every
+ * adapter to carry a value only one filter produces.
+ *
+ * The run summary needs it because "this chain produced no price rows" is an
+ * alarm worth keeping and, for eight of our sixteen chains, now the correct
+ * outcome. Without this the nightly run would report `degraded` every night on a
+ * healthy ingest, and the alarm that caught Osher Ad's prices going a fortnight
+ * stale would be noise inside a week.
+ */
+const storefrontlessChains = new Set<string>();
+
+/** Chains exempt from "no price rows" because they have nowhere to order from. */
+export function chainsWithNoStorefront(): string[] {
+  return [...storefrontlessChains];
+}
+
+/** Test-only: forget what earlier runs in this process discovered. */
+export function _resetStorefrontlessChains(): void {
+  storefrontlessChains.clear();
 }
 
 async function withKnownOrderable(

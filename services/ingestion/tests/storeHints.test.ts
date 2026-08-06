@@ -15,7 +15,8 @@ vi.mock("@super-mcp/db", () => ({
   knownStoreLocationsForChain: (...a: unknown[]) => knownLocations(...a),
 }));
 
-const { selectFeedFilesForChain } = await import("../src/storeHints.js");
+const { selectFeedFilesForChain, chainsWithNoStorefront, _resetStorefrontlessChains } =
+  await import("../src/storeHints.js");
 
 const CHAIN = "7290058140886";
 
@@ -57,6 +58,7 @@ function pricedStoreIds(selected: FeedFile[]): string[] {
 
 beforeEach(() => {
   delete process.env.SUPER_MCP_ONLINE_STORES_ONLY;
+  _resetStorefrontlessChains();
   knownLocations.mockReset().mockResolvedValue([KNOWN_ONLINE]);
 });
 
@@ -152,5 +154,30 @@ describe("selectFeedFilesForChain", () => {
     process.env.SUPER_MCP_ONLINE_STORES_ONLY = "0";
     await selectFeedFilesForChain(CHAIN, files, [{ storeId: "001", city: "תל אביב" }], 50);
     expect(knownLocations).not.toHaveBeenCalled();
+  });
+
+  // "This chain produced no price rows" is an alarm worth keeping, and for eight
+  // of the sixteen chains we hold it is now the correct outcome. Reporting them
+  // would mark a healthy nightly run degraded and turn the alarm into noise.
+  it("marks a chain with nowhere to order from, so the run does not cry wolf", async () => {
+    knownLocations.mockResolvedValue([]);
+    await selectFeedFilesForChain(CHAIN, files, [{ storeId: "001", city: "תל אביב" }], 50);
+    expect(chainsWithNoStorefront()).toEqual([CHAIN]);
+  });
+
+  it("clears the mark once the chain has a storefront again", async () => {
+    knownLocations.mockResolvedValue([]);
+    await selectFeedFilesForChain(CHAIN, files, [{ storeId: "001", city: "תל אביב" }], 50);
+    expect(chainsWithNoStorefront()).toEqual([CHAIN]);
+
+    knownLocations.mockResolvedValue([KNOWN_ONLINE]);
+    await selectFeedFilesForChain(CHAIN, files, [{ storeId: "001", city: "תל אביב" }], 50);
+    expect(chainsWithNoStorefront()).toEqual([]);
+  });
+
+  it("marks nothing while branches are being ingested", async () => {
+    process.env.SUPER_MCP_ONLINE_STORES_ONLY = "0";
+    await selectFeedFilesForChain(CHAIN, files, [{ storeId: "001", city: "תל אביב" }], 50);
+    expect(chainsWithNoStorefront()).toEqual([]);
   });
 });

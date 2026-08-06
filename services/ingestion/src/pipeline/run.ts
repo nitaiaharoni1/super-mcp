@@ -11,6 +11,7 @@ import { processFeedFile, type FileProcessStats } from "./processFile.js";
 import { classifyStatus, isAlertable } from "./status.js";
 import type { PipelineResult } from "./types.js";
 import { expectedChainIdsForSource } from "../expectedChains.js";
+import { chainsWithNoStorefront } from "../storeHints.js";
 
 /**
  * An error message that names what actually went wrong.
@@ -89,7 +90,13 @@ function findEmptyChains(
   // The adapter is authoritative when it can say what it attempted; the
   // per-source fallback covers adapters that cannot.
   const expected = adapter.expectedChainIds ?? expectedChainIdsForSource(adapter.sourceId);
-  const priceExempt = new Set(adapter.priceExemptChainIds ?? []);
+  const priceExempt = new Set([
+    ...(adapter.priceExemptChainIds ?? []),
+    // Discovered, not configured: under the online filter a chain with no
+    // storefront has nothing to price, and eight of the sixteen we hold are in
+    // that position. Leaving them in would mark a healthy run `degraded` nightly.
+    ...chainsWithNoStorefront(),
+  ]);
   const chainsWithNoFiles = expected.filter((id) => !discoveredChainIds.has(id));
   // A chain that publishes stores and no prices is exempt only where that is the
   // PUBLISHED reality, never by default: the whole point of this gate is that
