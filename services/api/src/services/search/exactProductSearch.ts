@@ -12,7 +12,7 @@ import {
 import { resolveRadiusKm } from "../../lib/defaults.js";
 import { buildDedupedFromRankedCte, buildSearchResultsSelect } from "./lexicalSql.js";
 import { toSearchLocationParams } from "./locationScope.js";
-import { buildPriceExistsSql, escapeIlike } from "./sqlUtils.js";
+import { buildPriceExistsSql, buildStockFilter, escapeIlike } from "./sqlUtils.js";
 import type {
   SearchHitRow,
   SearchPriceExistsOpts,
@@ -146,7 +146,13 @@ function buildExactProbeScope(
     storeIdsParam,
   });
   const globalExists = buildPriceExistsSql("r.id", { scoped: false });
-  const stockFilter = params.inStockOnly && scoped ? `AND ${localExists}` : "";
+  const stockFilter = buildStockFilter({
+    inStockOnly: params.inStockOnly,
+    pricedOnly: params.pricedOnly,
+    scoped,
+    localExists,
+    globalExists,
+  });
 
   return {
     sqlParams,

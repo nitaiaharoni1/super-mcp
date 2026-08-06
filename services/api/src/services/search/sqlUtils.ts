@@ -40,3 +40,31 @@ export function buildPriceExistsSql(
     WHERE ${conditions.join(" AND ")}
   )`;
 }
+
+/**
+ * The result-level WHERE additions, composed once for every search path.
+ *
+ * There are two scope builders, in scoredSearch and exactProductSearch, and they
+ * were byte-identical here. Adding `pricedOnly` to one and not the other left
+ * bare-name products ("שמן זית", "טחינה") coming back unbuyable from the exact
+ * path while every other query was clean, which took a second production
+ * measurement to find. One function so a third path cannot drift the same way.
+ *
+ * `pricedOnly` uses the unscoped EXISTS on purpose: the question is whether any
+ * storefront in the country prices this, not whether one near a given address
+ * does. Location narrowing is `inStockOnly`'s job and stays separate.
+ */
+export function buildStockFilter(opts: {
+  inStockOnly?: boolean;
+  pricedOnly?: boolean;
+  scoped: boolean;
+  localExists: string;
+  globalExists: string;
+}): string {
+  return [
+    opts.inStockOnly && opts.scoped ? `AND ${opts.localExists}` : "",
+    opts.pricedOnly ? `AND ${opts.globalExists}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}

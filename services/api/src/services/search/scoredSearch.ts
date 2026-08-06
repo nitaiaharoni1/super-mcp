@@ -33,7 +33,7 @@ import { toSearchLocationParams } from "./locationScope.js";
 import { getActiveOntology } from "./ontology.js";
 import { getQueryEmbedding } from "./queryEmbedding.js";
 import { fuseRankedCandidates } from "./rankFusion.js";
-import { buildPriceExistsSql, escapeIlike } from "./sqlUtils.js";
+import { buildPriceExistsSql, buildStockFilter, escapeIlike } from "./sqlUtils.js";
 import type {
   SearchHitRow,
   SearchPriceExistsOpts,
@@ -178,16 +178,13 @@ function buildSearchScopeParams(
     storeIdsParam,
   });
   const globalExists = buildPriceExistsSql("r.id", { scoped: false });
-  // Two independent narrowings, composed on the one WHERE every recall path
-  // reaches. Putting pricedOnly in the lexical CTE alone left vector and alias
-  // hits untouched: it cut unbuyable results from 13/80 to 4/78, and the four
-  // survivors all came in through a path that never saw the predicate.
-  const stockFilter = [
-    params.inStockOnly && scoped ? `AND ${localExists}` : "",
-    params.pricedOnly ? `AND ${globalExists}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const stockFilter = buildStockFilter({
+    inStockOnly: params.inStockOnly,
+    pricedOnly: params.pricedOnly,
+    scoped,
+    localExists,
+    globalExists,
+  });
 
   return {
     sqlParams,

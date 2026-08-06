@@ -5,6 +5,7 @@ import {
   buildLexicalRankedCte,
   buildSearchResultsSelect,
 } from "../../../src/services/search/lexicalSql.js";
+import { buildStockFilter } from "../../../src/services/search/sqlUtils.js";
 
 describe("buildLexicalCandidateUnionSql", () => {
   it("builds UNION of indexed candidate branches without fuzzy by default", () => {
@@ -128,5 +129,40 @@ describe("pricedOnly", () => {
     expect(buildLexicalRankedCte({ branchStockedOnly: true })).toContain(
       "AND p.branch_store_count > 0",
     );
+  });
+});
+
+/**
+ * The composition itself, because it is what drifted.
+ *
+ * scoredSearch and exactProductSearch each build this string, and they were
+ * byte-identical. Adding pricedOnly to one and not the other left bare-name
+ * products coming back unbuyable through the exact path only, which needed a
+ * second production measurement to notice.
+ */
+describe("buildStockFilter", () => {
+  const exists = { localExists: "LOCAL", globalExists: "GLOBAL" };
+
+  it("adds nothing when neither narrowing is asked for", () => {
+    expect(buildStockFilter({ scoped: true, ...exists })).toBe("");
+  });
+
+  it("asks whether anyone in the country prices it, not anyone nearby", () => {
+    // pricedOnly is a catalogue question. Scoping it to the requested address
+    // would silently make it inStockOnly, which is a different tool parameter.
+    expect(buildStockFilter({ pricedOnly: true, scoped: false, ...exists })).toBe("AND GLOBAL");
+    expect(buildStockFilter({ pricedOnly: true, scoped: true, ...exists })).toBe("AND GLOBAL");
+  });
+
+  it("keeps inStockOnly location-scoped", () => {
+    expect(buildStockFilter({ inStockOnly: true, scoped: true, ...exists })).toBe("AND LOCAL");
+    // Unscoped there is no location to be in stock at, so it cannot apply.
+    expect(buildStockFilter({ inStockOnly: true, scoped: false, ...exists })).toBe("");
+  });
+
+  it("composes both rather than letting one win", () => {
+    expect(
+      buildStockFilter({ inStockOnly: true, pricedOnly: true, scoped: true, ...exists }),
+    ).toBe("AND LOCAL AND GLOBAL");
   });
 });
