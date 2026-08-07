@@ -22,6 +22,22 @@ export type LiveCatalogStats = {
   recentPrices: number;
   /** True when large enough for BBQ/Neve Amal golden coverage. */
   fullCatalog: boolean;
+  /**
+   * True when physical branches carry prices.
+   *
+   * They do not in any deployment this repo ships: since 2026-08-06 the ingest
+   * keeps only storefronts a shopper can order from, `/mcp` mounts the delivery
+   * surface alone, and `SUPER_MCP_SURFACES=stores` fails at boot. A catalogue
+   * shaped like production therefore has zero branch prices, and every suite
+   * driving `optimize_basket` returns a null plan against it.
+   *
+   * Those suites used to pass locally only because the developer database still
+   * held the pre-purge dump: 8.08M price rows across 1,033 branches, against
+   * production's 199k across 52 storefronts. They were green on a world that no
+   * longer exists. Skipping loudly beats failing for the wrong reason, and beats
+   * passing for one.
+   */
+  branchPrices: number;
 };
 
 let cachedStats: LiveCatalogStats | null = null;
@@ -56,11 +72,16 @@ export async function probeLiveCatalog(): Promise<LiveCatalogStats | null> {
   }
 
   try {
-    const [products, geoStores, recentPrices] = await Promise.all([
+    const [products, geoStores, recentPrices, branchPrices] = await Promise.all([
       query<{ n: number }>("select count(*)::int as n from product"),
       query<{ n: number }>("select count(*)::int as n from store where lat is not null"),
       query<{ n: number }>(
         "select count(*)::int as n from store_price where source_ts > now() - interval '30 days'",
+      ),
+      query<{ n: number }>(
+        `select count(*)::int as n from store_price sp
+           join store s on s.id = sp.store_id
+          where s.store_kind not in ('online', 'pickup')`,
       ),
     ]);
 
@@ -69,6 +90,7 @@ export async function probeLiveCatalog(): Promise<LiveCatalogStats | null> {
       geoStores: geoStores.rows[0]?.n ?? 0,
       recentPrices: recentPrices.rows[0]?.n ?? 0,
       fullCatalog: false,
+      branchPrices: branchPrices.rows[0]?.n ?? 0,
     };
     stats.fullCatalog = stats.products >= FULL_MIN_PRODUCTS;
 
@@ -99,6 +121,17 @@ export function liveCatalogSkipReason(): string {
 export function isFullCatalog(stats: LiveCatalogStats | null | undefined): boolean {
   return Boolean(stats?.fullCatalog);
 }
+
+/** True when the catalogue can price a basket at a physical branch. */
+export function hasBranchPrices(stats: LiveCatalogStats | null | undefined): boolean {
+  return (stats?.branchPrices ?? 0) > 0;
+}
+
+/** Why a physical-surface suite is skipping, said plainly enough to act on. */
+export const NO_BRANCH_PRICES_REASON =
+  "no physical branch prices in this catalogue: the ingest keeps online storefronts only " +
+  "(SUPER_MCP_ONLINE_STORES_ONLY), so optimize_basket has nothing to price. " +
+  "The delivery surface this deployment mounts is covered by tests/performance.";
 
 export async function closeLivePool(): Promise<void> {
   await closePool();

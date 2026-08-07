@@ -12,20 +12,20 @@
  * Opt out: SUPER_MCP_SKIP_LIVE=1
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import {
-  BBQ_ITEMS,
-  DEFAULT_NEVE_AMAL_STORE_ID,
-} from "../../src/scripts/canary/bbqBasketFixture.js";
+import { BBQ_ITEMS } from "../../src/scripts/canary/bbqBasketFixture.js";
 import {
   FORBIDDEN_FAST_SELECTIONS,
   TEL_AVIV_LOCATION,
   TEL_AVIV_STAPLES_ITEMS,
 } from "../../src/scripts/canary/telAvivStaplesFixture.js";
-import { assertTargetBranchCoverage } from "../../src/scripts/canary/assertTargetBranchCoverage.js";
-import type { BasketOptimizeResult } from "../../src/services/basket/types.js";
+import type {
+  DeliveryOptimizeCompleteResult,
+  DeliveryOptimizeResult,
+} from "../../src/services/delivery/types.js";
 import {
-  assertCompleteBasket,
-  pickConfirmationAnswers,
+  assertCompleteDelivery,
+  pickDeliveryAnswers,
+  planFor,
 } from "../integration/helpers/assertions.js";
 import {
   FIXTURE_CITY,
@@ -75,8 +75,24 @@ const FAST_MEDIAN_MS = Number(
 const FAST_P95_MS = Number(
   process.env.SUPER_MCP_PERF_FAST_P95_MS ?? (PERF_STRICT ? 3_000 : 22_000),
 );
+/**
+ * Response size ceiling for a basket.
+ *
+ * 22KB was the physical surface's figure, and it earned it: `optimize_basket`
+ * took `response_detail=summary`. `optimize_delivery` has no such control and
+ * returns every plan in full, measured at 86KB for six lines across seventeen
+ * storefronts and 92KB for the twelve-line staples basket.
+ *
+ * 40% of that (34KB of the 86KB) is per-line detail for storefronts the reply
+ * never pointed the agent at: `cheapestDelivered`, `bestVerifiedTerms` and
+ * `bestSingleOrder` named one, and the other sixteen shipped their full lines
+ * anyway. Dropping those alone would take the payload to 52KB.
+ *
+ * The budget is set to what the surface actually sends so the gate catches
+ * growth. It is not an endorsement of the number.
+ */
 const FAST_BYTES_P95 = Number(
-  process.env.SUPER_MCP_PERF_FAST_BYTES_P95 ?? (PERF_STRICT ? 15_000 : 22_000),
+  process.env.SUPER_MCP_PERF_FAST_BYTES_P95 ?? (PERF_STRICT ? 60_000 : 120_000),
 );
 const FAST_COVERAGE_MIN = Number(
   process.env.SUPER_MCP_PERF_FAST_COVERAGE_MIN ?? (PERF_STRICT ? 0.8 : 0.7),
@@ -146,25 +162,27 @@ describe.skipIf(!LIVE)("MCP performance (live DB)", () => {
     async ({ skip }) => {
       requireLive(skip);
 
-      // Warm caches / embeddings so cold start does not fail the gate.
-      await mcp.call("optimize_basket", {
-        items: [...FIXTURE_STAPLES_MCP_ITEMS],
-        city: FIXTURE_CITY,
-        resolution_mode: "fast",
-        response_detail: "summary",
-      });
-
-      const samples = await sampleN(iters, () =>
-        mcp.call<BasketOptimizeResult>("optimize_basket", {
+      const call = () =>
+        mcp.call<DeliveryOptimizeResult>("optimize_delivery", {
           items: [...FIXTURE_STAPLES_MCP_ITEMS],
           city: FIXTURE_CITY,
           resolution_mode: "fast",
-          response_detail: "summary",
-        }),
-      );
+        });
+
+      // Warm caches / embeddings so cold start does not fail the gate.
+      await call();
+
+      const samples = await sampleN(iters, call);
 
       for (const s of samples) {
-        assertCompleteBasket(s.value);
+        assertCompleteDelivery(s.value);
+        // A latency gate that passes on an empty answer measures nothing. This
+        // one did: after the ingest narrowed to storefronts it timed a basket
+        // where no store priced a single line, in a tenth of the time.
+        expect(
+          planFor(s.value, s.value.bestSingleOrder)?.pricedLines ?? 0,
+          "no storefront priced a line",
+        ).toBeGreaterThan(0);
       }
 
       const summary = summarize(samples);
@@ -192,42 +210,30 @@ describe.skipIf(!LIVE)("MCP performance (live DB)", () => {
     async ({ skip }) => {
       requireFull(skip);
 
-      // Warm embeddings + geocode once (canary resolves location outside the loop).
-      // Measured calls use city so the gate matches benchmark:fast-basket, not geocode variance.
-      await mcp.call("optimize_basket", {
-        items: toMcpItems(TEL_AVIV_STAPLES_ITEMS),
-        location: TEL_AVIV_LOCATION,
-        resolution_mode: "fast",
-        response_detail: "summary",
-        stores_limit: 3,
-      });
-      await mcp.call("optimize_basket", {
-        items: toMcpItems(TEL_AVIV_STAPLES_ITEMS),
-        city: "תל אביב",
-        resolution_mode: "fast",
-        response_detail: "summary",
-        stores_limit: 3,
-      });
-
-      const samples = await sampleN(iters, () =>
-        mcp.call<BasketOptimizeResult>("optimize_basket", {
+      const call = (over: Record<string, unknown> = {}) =>
+        mcp.call<DeliveryOptimizeResult>("optimize_delivery", {
           items: toMcpItems(TEL_AVIV_STAPLES_ITEMS),
           city: "תל אביב",
           resolution_mode: "fast",
-          response_detail: "summary",
-          stores_limit: 3,
-        }),
-      );
+          ...over,
+        });
+
+      // Warm embeddings + geocode once (canary resolves location outside the loop).
+      // Measured calls use city so the gate matches benchmark:fast-basket, not geocode variance.
+      await call({ city: undefined, address: TEL_AVIV_LOCATION });
+      await call();
+
+      const samples = await sampleN(iters, () => call());
 
       let coverageSum = 0;
       for (const s of samples) {
-        assertCompleteBasket(s.value);
+        assertCompleteDelivery(s.value);
         const payload = JSON.stringify(s.value);
         for (const name of FORBIDDEN_FAST_SELECTIONS) {
           expect(payload.includes(name), `forbidden in payload: ${name}`).toBe(false);
         }
         const requested = TEL_AVIV_STAPLES_ITEMS.length;
-        const priced = s.value.bestSingleStore?.pricedLines ?? 0;
+        const priced = planFor(s.value, s.value.bestSingleOrder)?.pricedLines ?? 0;
         coverageSum += requested > 0 ? priced / requested : 0;
       }
 
@@ -352,45 +358,36 @@ describe.skipIf(!LIVE)("MCP performance (live DB)", () => {
     async ({ skip }) => {
       requireFull(skip);
 
-      // Warm
-      await mcp.call("optimize_basket", {
-        items: toMcpItems(BBQ_ITEMS),
-        city: "הרצליה",
-        resolution_mode: "strict",
-        response_detail: "debug",
-        verbose: true,
-        stores_limit: 0,
-      });
-
-      const wallStarted = Date.now();
-      const initial = await measure(() =>
-        mcp.call<BasketOptimizeResult>("optimize_basket", {
+      const call = () =>
+        mcp.call<DeliveryOptimizeResult>("optimize_delivery", {
           items: toMcpItems(BBQ_ITEMS),
           city: "הרצליה",
           resolution_mode: "strict",
-          response_detail: "debug",
-          verbose: true,
-          stores_limit: 0,
-        }),
-      );
+        });
 
-      let complete: Extract<BasketOptimizeResult, { status: "complete" }>;
+      // Warm
+      await call();
+
+      const wallStarted = Date.now();
+      const initial = await measure(call);
+
+      let complete: DeliveryOptimizeCompleteResult;
       let resumeMs = 0;
 
       if (initial.value.status === "needs_confirmation") {
         expect(initial.elapsedMs).toBeLessThanOrEqual(STRICT_INITIAL_MS);
         const paused = initial.value;
         const resume = await measure(() =>
-          mcp.call<BasketOptimizeResult>("optimize_basket", {
+          mcp.call<DeliveryOptimizeResult>("optimize_delivery", {
             continuation: paused.continuation,
-            answers: pickConfirmationAnswers(paused),
+            answers: pickDeliveryAnswers(paused),
           }),
         );
         resumeMs = resume.elapsedMs;
-        assertCompleteBasket(resume.value);
+        assertCompleteDelivery(resume.value);
         complete = resume.value;
       } else {
-        assertCompleteBasket(initial.value);
+        assertCompleteDelivery(initial.value);
         complete = initial.value;
       }
 
@@ -415,7 +412,14 @@ describe.skipIf(!LIVE)("MCP performance (live DB)", () => {
       );
 
       expect(totalMs).toBeLessThanOrEqual(STRICT_TOTAL_MS);
-      assertTargetBranchCoverage(complete, DEFAULT_NEVE_AMAL_STORE_ID);
+      // The physical gate here named one Herzliya branch and asserted it priced
+      // the basket. Delivery has no branch to name: a storefront serves the whole
+      // address or none of it. The equivalent claim is that answering every
+      // strict question leaves an order somebody can actually place.
+      const best = planFor(complete, complete.bestSingleOrder);
+      expect(best, "strict resume produced no orderable plan").not.toBeNull();
+      expect(best!.pricedLines).toBeGreaterThan(0);
+      expect(best!.meetsMinimum).toBe(true);
     },
     120_000,
   );

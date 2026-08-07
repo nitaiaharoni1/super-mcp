@@ -19,8 +19,10 @@ export function registerComparePricesTool(server: McpServer): void {
         "sort='unit_price' to rank by ₪ per 100g / 100ml / unit (\"cheaper per 100g\") instead of pack price. " +
         "Do not use this for a shopping list or after optimize_basket has started. " +
         "Use optimize_basket directly; strict confirmation options are sufficient to resume. " +
-        "Every price carries freshness: source_ts and ingested_at — treat source_ts older than ~48h as " +
-        "possibly stale. Active promotions are applied to effective_price; list_price is the unpromoted " +
+        "Every price carries freshness: ingested_at is when the feed last showed us the item (the " +
+        "staleness signal), source_ts is when the chain last CHANGED that price, so an old source_ts is " +
+        "normal for a stable price and not stale data. " +
+        "Active promotions are applied to effective_price; list_price is the unpromoted " +
         "shelf price. Each row includes a `link` to open that product on the chain's online store " +
         "(search-by-barcode, or by name for chains that don't index barcodes); null when the chain has no " +
         "online store.",

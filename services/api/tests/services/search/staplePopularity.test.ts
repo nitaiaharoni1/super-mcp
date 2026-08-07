@@ -73,18 +73,33 @@ describe("generic staple queries retrieve the staple (live DB)", () => {
       const hits = await searchProductsScored({ q, limit: 20 });
       expect(hits.length).toBeGreaterThan(0);
 
-      const counts = await query<{ id: string; store_count: number }>(
-        `SELECT id, store_count FROM product WHERE id = ANY($1::uuid[])`,
+      const pool = await query<{ n: number }>(
+        `SELECT COALESCE(max(store_count), 0)::int AS n
+           FROM product WHERE id = ANY($1::uuid[])`,
         [hits.map((h) => h.id)],
       );
-      const best = Math.max(
-        0,
-        ...counts.rows.map((r) => Number(r.store_count)),
+      // What the pool COULD have contained: the query scores a name-prefix match
+      // at 0.95 flat, so every one of these was equally eligible.
+      const catalogue = await query<{ n: number }>(
+        `SELECT COALESCE(max(store_count), 0)::int AS n
+           FROM product WHERE name LIKE $1`,
+        [`${q}%`],
       );
 
-      // Before the fix these pools topped out in the single digits or low teens
-      // while 400+ store products sat un-retrieved.
-      expect(best).toBeGreaterThan(100);
+      const poolBest = Number(pool.rows[0]?.n ?? 0);
+      const catalogueBest = Number(catalogue.rows[0]?.n ?? 0);
+      expect(catalogueBest, `no product in the catalogue starts with ${q}`).toBeGreaterThan(0);
+
+      // Measured as a share of what was reachable, not an absolute count. The
+      // original assertion wanted >100 stores, which was ~11% of the 898
+      // branches this ran against and is unreachable now the ingest keeps ~53
+      // storefronts: it would fail on a perfect pool. The defect it guards is a
+      // RECALL gap, and a ratio states it directly. Before the fix these pools
+      // topped out at 8 of a reachable 99 (0.08); all five now measure 1.00.
+      expect(
+        poolBest / catalogueBest,
+        `pool best ${poolBest} vs catalogue best ${catalogueBest} for ${q}`,
+      ).toBeGreaterThanOrEqual(0.5);
     });
   }
 });

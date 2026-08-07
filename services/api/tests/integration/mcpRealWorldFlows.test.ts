@@ -40,7 +40,9 @@ import {
 import {
   closeLivePool,
   isFullCatalog,
+  hasBranchPrices,
   liveCatalogSkipReason,
+  NO_BRANCH_PRICES_REASON,
   liveDbConfigured,
   probeLiveCatalog,
   type LiveCatalogStats,
@@ -100,6 +102,10 @@ describe.skipIf(!LIVE)("MCP real-world flows (live DB)", () => {
 
   function requireLive(skip: (condition: boolean, reason?: string) => void): void {
     skip(Boolean(skipReason), skipReason ?? "live catalog unavailable");
+    // Every case in this file drives the PHYSICAL basket surface, which prices
+    // shelves at branches. A production-shaped catalogue has none, so the whole
+    // suite is inapplicable rather than failing.
+    skip(!hasBranchPrices(stats), NO_BRANCH_PRICES_REASON);
   }
 
   function requireFull(skip: (condition: boolean, reason?: string) => void): void {

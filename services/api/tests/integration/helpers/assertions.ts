@@ -1,6 +1,44 @@
 import { expect } from "vitest";
 import { FORBIDDEN_FAST_SELECTIONS } from "../../../src/scripts/canary/telAvivStaplesFixture.js";
 import type { BasketOptimizeResult } from "../../../src/services/basket/types.js";
+import type {
+  DeliveryOptimizeCompleteResult,
+  DeliveryOptimizeResult,
+  DeliveryPlan,
+} from "../../../src/services/delivery/types.js";
+
+export function assertCompleteDelivery(
+  result: DeliveryOptimizeResult,
+): asserts result is DeliveryOptimizeCompleteResult {
+  expect(result.status, JSON.stringify(result).slice(0, 500)).toBe("complete");
+}
+
+/**
+ * The full plan behind a summary, which is where the priced lines live.
+ *
+ * `bestSingleOrder` and friends are summaries: totals, fees, coverage counts,
+ * no line detail. Anything grading what a storefront actually priced has to go
+ * back to `plans` for it.
+ */
+export function planFor(
+  result: DeliveryOptimizeCompleteResult,
+  summary: { serviceSlug: string } | null,
+): DeliveryPlan | null {
+  if (!summary) return null;
+  return result.plans.find((p) => p.serviceSlug === summary.serviceSlug) ?? null;
+}
+
+/** Answers for a paused delivery run, preferring an option a storefront prices. */
+export function pickDeliveryAnswers(
+  result: Extract<DeliveryOptimizeResult, { status: "needs_confirmation" }>,
+): Array<{ item_index: number; product_id: string }> {
+  return result.questions.map((q) => {
+    const stocked = q.options.find((o) => o.nearbyPricedStores > 0);
+    const pick = stocked ?? q.options[0];
+    if (!pick) throw new Error(`question ${q.id} has no options`);
+    return { item_index: q.itemIndex, product_id: pick.productId };
+  });
+}
 
 export function assertCompleteBasket(result: BasketOptimizeResult): asserts result is Extract<
   BasketOptimizeResult,
