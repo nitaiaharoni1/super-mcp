@@ -54,6 +54,78 @@ export async function loadBasketPricingData(
 }
 
 /**
+ * How long the per-store feed date is reused before the aggregate runs again.
+ *
+ * The answer moves once a night, when an ingest lands. The query behind it is a
+ * `max(source_ts) GROUP BY store_id`, which no index can serve — `source_ts` is
+ * indexed, but not alongside `store_id` — so the planner reads every price row.
+ * Measured at 99ms against production. Small next to a basket call, and pure
+ * waste to repeat per request for a number that changes daily.
+ */
+const FEED_DATE_TTL_MS = 5 * 60_000;
+
+let feedDateCache: { byStore: Map<string, Date>; expiresAt: number } | null = null;
+/** Collapses concurrent callers onto one scan instead of one scan each. */
+let feedDateInflight: Promise<Map<string, Date>> | null = null;
+
+/** Test-only: drop the cached feed dates and any in-flight scan. */
+export function _resetStoreFeedDatesForTests(): void {
+  feedDateCache = null;
+  feedDateInflight = null;
+}
+
+/**
+ * When each store's retailer last published price data, by store id.
+ *
+ * This is the honest answer to "how old are these prices", and a per-line
+ * `source_ts` is not. Chains stamp that field two different ways: Tiv Taam,
+ * Shufersal and Carrefour write the file's own date onto every row, while Rami
+ * Levy and Keshet write the date each item's price last CHANGED. Both republish
+ * the whole shelf nightly, and `reconcileStorePrices` deletes anything missing
+ * from the newest snapshot, so a surviving row is in the current file whatever
+ * its timestamp says.
+ *
+ * Counting old per-line timestamps therefore measured the chain's stamping
+ * convention, not its data: it branded 99% of Keshet's lines stale off a
+ * three-day-old feed, and passed Machsanei Hashuk clean while its feed had been
+ * frozen since 29/07. The newest timestamp the store has is the one that says
+ * when the retailer last spoke.
+ *
+ * A failure here returns an empty map rather than throwing. Freshness annotates
+ * a basket; it must never be the reason a shopper gets no answer.
+ */
+export async function loadStoreFeedDates(now: Date): Promise<Map<string, Date>> {
+  if (feedDateCache && feedDateCache.expiresAt > now.getTime()) return feedDateCache.byStore;
+  if (feedDateInflight) return feedDateInflight;
+
+  feedDateInflight = (async () => {
+    const res = await query<{ store_id: string; newest_source_ts: Date }>(
+      `SELECT store_id, max(source_ts) AS newest_source_ts
+         FROM store_price
+        GROUP BY store_id`,
+    );
+    const byStore = new Map(res.rows.map((r) => [r.store_id, new Date(r.newest_source_ts)]));
+    feedDateCache = { byStore, expiresAt: now.getTime() + FEED_DATE_TTL_MS };
+    return byStore;
+  })().catch((err: unknown) => {
+    console.error(
+      JSON.stringify({
+        severity: "WARNING",
+        event: "store_feed_dates_unavailable",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return new Map<string, Date>();
+  });
+
+  try {
+    return await feedDateInflight;
+  } finally {
+    feedDateInflight = null;
+  }
+}
+
+/**
  * Batch local availability for confirmation options: priced store count, chain
  * diversity, and minimum nearby price. Missing ids are absent from the map.
  */

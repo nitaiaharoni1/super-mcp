@@ -13,7 +13,11 @@ import {
   encodeBasketContinuation,
 } from "../basket/continuation.js";
 import { applyBasketAnswers } from "../basket/continuation.js";
-import { loadBasketPricingData, loadCandidateAvailability } from "../basket/loadPricingData.js";
+import {
+  loadBasketPricingData,
+  loadCandidateAvailability,
+  loadStoreFeedDates,
+} from "../basket/loadPricingData.js";
 import { buildItemStatuses, collectProductIdsForPricing } from "../basket/optimize.js";
 import { priceStoreBasket } from "../basket/priceStoreBasket.js";
 import {
@@ -36,6 +40,7 @@ import type { StoreSummary } from "../stores/index.js";
 import {
   buildDeliveryPlan,
   coverageReport,
+  priceFeedAgeDays,
   STALE_PRICE_DAYS,
   bestSingleOrderPlan,
   modelledShare,
@@ -416,6 +421,7 @@ async function runDeliveryOptimization(
   const comparableCosts = buildComparableCosts([...pricedByStore.values()]);
   const resolvableLines = pricingItems.filter((item) => item.productId != null).length;
 
+  const feedDates = await loadStoreFeedDates(now);
   const plans: DeliveryPlan[] = [];
   for (const { service, coverage } of serving) {
     if (!service.storeId) continue;
@@ -441,6 +447,7 @@ async function runDeliveryOptimization(
         slotType,
         memberships,
         preDiscountSubtotal: preDiscountTotal(priced),
+        priceFeedAsOf: feedDates.get(service.storeId) ?? null,
         now,
       }),
     );
@@ -503,11 +510,13 @@ async function runDeliveryOptimization(
           `${cheapestDelivered.requestedLines} requested lines. Treat the ranking as indicative.`,
       );
     }
-    if (cheapestDelivered.stalePricedLines > 0) {
+    if (cheapestDelivered.priceFeedStale && cheapestDelivered.priceFeedAsOf) {
+      const asOf = cheapestDelivered.priceFeedAsOf;
+      const days = priceFeedAgeDays(new Date(asOf), now);
       notes.push(
-        `${cheapestDelivered.stalePricedLines} of ${cheapestDelivered.pricedLines} priced lines ` +
-          `at ${cheapestDelivered.brand} come from a price the retailer last published over ` +
-          `${STALE_PRICE_DAYS} days ago. Per-line freshness.sourceTs says how old each one is.`,
+        `${cheapestDelivered.brand} has published no new price data for ${days} days ` +
+          `(newest ${asOf.slice(0, 10)}), over the ${STALE_PRICE_DAYS}-day limit. Every price ` +
+          `quoted for it is that old, whatever the shelf now says.`,
       );
     }
     // A storefront held back only by its minimum is a live option, not a dead

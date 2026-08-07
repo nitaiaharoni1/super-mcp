@@ -155,12 +155,20 @@ const deliveryPlanSchema = {
     imputedLines: { type: "integer" },
     clubOnlyLines: { type: "integer" },
     couponOnlyLines: { type: "integer" },
-    stalePricedLines: {
-      type: "integer",
+    priceFeedAsOf: {
+      type: "string",
+      nullable: true,
+      format: "date-time",
       description:
-        "Priced lines whose price the retailer last republished over 30 days ago. Rami Levy's " +
-        "storefront runs 44.6% stale by this measure and every other storefront 0%, so it is worth " +
-        "saying out loud rather than quoting a thirteen-month-old price as today's.",
+        "When this storefront's retailer last published price data. A store-level fact: chains " +
+        "stamp per-line timestamps two incompatible ways, so only the newest one says when the " +
+        "retailer last spoke.",
+    },
+    priceFeedStale: {
+      type: "boolean",
+      description:
+        "True when that publication is over 30 days old. A chain that stops filing keeps its last " +
+        "prices on the shelf here, and a basket quoting them otherwise looks like today's.",
     },
     lines: { type: "array", items: { $ref: "#/components/schemas/BasketLine" } },
     missingItems: { type: "array", items: { type: "object" } },

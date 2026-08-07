@@ -95,6 +95,7 @@ function plan(over: Partial<Parameters<typeof buildDeliveryPlan>[0]> = {}): Deli
     slotType: "standard",
     memberships: [],
     preDiscountSubtotal: 220,
+    priceFeedAsOf: NOW,
     now: NOW,
     ...over,
   });
@@ -200,36 +201,46 @@ describe("reaching a cheaper tier", () => {
   });
 });
 
-describe("a price the retailer stopped republishing", () => {
-  const linesAged = (...daysAgo: Array<number | null>) =>
-    daysAgo.map((days, itemIndex) => ({
+describe("a retailer that stopped publishing", () => {
+  const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000);
+
+  /** Lines carrying their own per-item stamps, which must not drive the verdict. */
+  const linesAged = (...ages: Array<number | null>) =>
+    ages.map((days, itemIndex) => ({
       itemIndex,
       unitPrice: 10,
       qty: 1,
       lineTotal: 10,
-      freshness:
-        days == null
-          ? undefined
-          : { sourceTs: new Date(NOW.getTime() - days * 86_400_000), ingestedAt: NOW },
+      freshness: days == null ? undefined : { sourceTs: daysAgo(days), ingestedAt: NOW },
     })) as unknown as BasketStoreResult["lines"];
 
-  it("counts the lines whose price has gone quiet", () => {
-    // Rami Levy's storefront publishes 44.6% of its prices with a source stamp
-    // over 30 days old and 2,841 of them over a year, while every other
-    // storefront measures 0%. The per-line stamp was always there; nothing added
-    // it up, so a thirteen-month-old price read like yesterday's.
-    const result = plan({ priced: priced({ lines: linesAged(1, 45, 400) }) });
-    expect(result.stalePricedLines).toBe(2);
+  it("flags a feed that has gone quiet", () => {
+    const result = plan({ priceFeedAsOf: daysAgo(45) });
+    expect(result.priceFeedStale).toBe(true);
+    expect(result.priceFeedAsOf).toBe(daysAgo(45).toISOString());
   });
 
-  it("says nothing when every price is current", () => {
-    expect(plan({ priced: priced({ lines: linesAged(0, 3, 29) }) }).stalePricedLines).toBe(0);
+  it("says nothing when the retailer published recently", () => {
+    expect(plan({ priceFeedAsOf: daysAgo(29) }).priceFeedStale).toBe(false);
   });
 
-  it("does not read a missing stamp as stale", () => {
+  it("judges the feed, not each line's own stamp", () => {
+    // Rami Levy and Keshet stamp every row with the date that item's price last
+    // CHANGED, so a current shelf carries year-old line stamps. Counting those
+    // called 99% of Keshet's lines stale off a three-day-old feed.
+    const result = plan({
+      priced: priced({ lines: linesAged(1, 45, 400) }),
+      priceFeedAsOf: daysAgo(2),
+    });
+    expect(result.priceFeedStale).toBe(false);
+  });
+
+  it("does not read a missing feed date as stale", () => {
     // Absence of evidence is not a warning. Inventing one would train callers to
     // ignore the field on exactly the storefronts where it matters.
-    expect(plan({ priced: priced({ lines: linesAged(null, null) }) }).stalePricedLines).toBe(0);
+    const result = plan({ priceFeedAsOf: null });
+    expect(result.priceFeedStale).toBe(false);
+    expect(result.priceFeedAsOf).toBeNull();
   });
 });
 

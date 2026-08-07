@@ -6,7 +6,7 @@ import {
 } from "@super-mcp/shared";
 import type { FulfillmentServiceRow } from "@super-mcp/db";
 import { comparableCostFor } from "../basket/comparableBasket.js";
-import type { BasketLine, BasketStoreResult, ComparableCost } from "../basket/types.js";
+import type { BasketStoreResult, ComparableCost } from "../basket/types.js";
 import type {
   DeliveryCoverageReport,
   DeliveryPlan,
@@ -35,27 +35,22 @@ export const ASSUMED_DELIVERY_FEE = 35.9;
 export const TERMS_TTL_DAYS = 90;
 
 /**
- * Days after which a retailer's own price timestamp counts as stale.
+ * Days after which a storefront's price feed counts as stale.
  *
- * Chains republish their regulated feed daily, so a source timestamp a month old
- * means that SKU stopped being restated, not that the price held steady. Thirty
- * days is loose enough not to flag ordinary weekend gaps and tight enough to
- * catch a shelf that has gone quiet.
+ * Chains republish their regulated feed daily, so nothing new for a month means
+ * the feed itself has gone quiet, not that prices held steady. Thirty days is
+ * loose enough not to flag ordinary weekend gaps and tight enough to catch a
+ * chain that has stopped filing.
  */
 export const STALE_PRICE_DAYS = 30;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function countStalePricedLines(lines: readonly BasketLine[], now: Date): number {
-  const cutoff = now.getTime() - STALE_PRICE_DAYS * DAY_MS;
-  return lines.reduce((count, line) => {
-    // A missing or unparseable timestamp is not evidence of staleness; leave it
-    // uncounted rather than inventing a warning the data does not support.
-    const sourceTs = line.freshness?.sourceTs;
-    if (sourceTs == null) return count;
-    const ts = new Date(sourceTs).getTime();
-    return Number.isFinite(ts) && ts < cutoff ? count + 1 : count;
-  }, 0);
+/** Whole days between a storefront's newest price data and now. */
+export function priceFeedAgeDays(asOf: Date | null, now: Date): number | null {
+  if (asOf == null) return null;
+  const ms = now.getTime() - asOf.getTime();
+  return Number.isFinite(ms) ? Math.floor(ms / DAY_MS) : null;
 }
 
 function agorot(value: number): number {
@@ -122,6 +117,8 @@ export interface BuildPlanInput {
   memberships: readonly string[];
   /** Item total before promotions — what a marketplace charges its % fee on. */
   preDiscountSubtotal: number;
+  /** Newest price data this storefront's retailer has published, if known. */
+  priceFeedAsOf: Date | null;
   now: Date;
 }
 
@@ -208,7 +205,8 @@ export function buildDeliveryPlan(input: BuildPlanInput): DeliveryPlan {
     imputedLines: comparable.imputedLines,
     clubOnlyLines: comparable.clubOnlyLines,
     couponOnlyLines: comparable.couponOnlyLines,
-    stalePricedLines: countStalePricedLines(priced.lines, input.now),
+    priceFeedAsOf: input.priceFeedAsOf?.toISOString() ?? null,
+    priceFeedStale: (priceFeedAgeDays(input.priceFeedAsOf, input.now) ?? 0) > STALE_PRICE_DAYS,
     lines: priced.lines,
     missingItems: priced.missingItems,
   };

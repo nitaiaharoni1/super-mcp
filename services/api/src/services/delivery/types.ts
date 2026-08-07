@@ -140,16 +140,24 @@ export interface DeliveryPlan {
   clubOnlyLines: number;
   couponOnlyLines: number;
   /**
-   * Priced lines whose price the retailer last published over
-   * STALE_PRICE_DAYS ago.
+   * When this storefront's retailer last published price data, ISO, or null
+   * when it cannot be established.
    *
-   * Not cosmetic: Rami Levy's online storefront publishes 44.6% of its prices
-   * with a source timestamp older than 30 days and 2,841 of them older than a
-   * year, while every other storefront measures 0%. Per-line `freshness` has
-   * always carried the timestamp, but nothing added it up, so a basket quoting a
-   * thirteen-month-old price looked exactly like one quoting yesterday's.
+   * A store-level fact on purpose. Per-line `freshness.sourceTs` carries each
+   * chain's own stamp, and chains stamp it two incompatible ways: some write the
+   * file's date onto every row, others write the date that item's price last
+   * changed. Judging staleness line by line measured the convention rather than
+   * the data, calling 99% of Keshet's lines stale off a three-day-old feed while
+   * passing a storefront whose feed had been frozen for nine days.
    */
-  stalePricedLines: number;
+  priceFeedAsOf: string | null;
+  /**
+   * True when that publication is older than STALE_PRICE_DAYS.
+   *
+   * Not cosmetic: a chain that stops filing keeps its last prices on the shelf
+   * here, and a basket quoting them looks exactly like one quoting yesterday's.
+   */
+  priceFeedStale: boolean;
   lines: BasketLine[];
   linesTruncated?: boolean;
   missingItems: BasketMissingItem[];
@@ -296,7 +304,8 @@ export const DELIVERY_PLAN_FIELDS: Record<keyof DeliveryPlan, true> = {
   imputedLines: true,
   clubOnlyLines: true,
   couponOnlyLines: true,
-  stalePricedLines: true,
+  priceFeedAsOf: true,
+  priceFeedStale: true,
   lines: true,
   linesTruncated: true,
   missingItems: true,
