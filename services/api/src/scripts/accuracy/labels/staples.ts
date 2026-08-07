@@ -446,8 +446,18 @@ export const STAPLE_LABELS: StapleLabel[] = [
     amount: 1,
     unit: "kg",
     category: "vegetable_fresh",
-    accept: { requireTokens: ["מלפפון"], forbidTokens: ["חמוץ", "כבוש", "חמוצים"], anyOfClassL2: ["vegetable_fresh"] },
-    notes: "Fresh, not pickled. Plural/singular morphology must still match.",
+    accept: {
+      // Both morphologies, because Hebrew final letters make one substring
+      // unable to cover both: מלפפון ends in a FINAL nun (U+05DF) and מלפפונים
+      // carries a MEDIAL one (U+05E0), so the singular token cannot match the
+      // plural name and no shared prefix matches the singular. Requiring the
+      // singular alone failed a product literally called "מלפפונים" three times
+      // per run, against a query that was itself plural.
+      requireAnyToken: ["מלפפון", "מלפפוני"],
+      forbidTokens: ["חמוץ", "כבוש", "חמוצים"],
+      anyOfClassL2: ["vegetable_fresh"],
+    },
+    notes: "Fresh, not pickled. Accepts singular and plural forms.",
     confidence: "high",
   },
   {

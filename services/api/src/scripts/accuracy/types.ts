@@ -50,19 +50,23 @@ export interface AcceptCriteria {
   /** Resolved product's preparation must be one of these, when classified. */
   anyOfPreparation?: Preparation[];
   /**
-   * Minimum SHARE (0..1) of nearby branches that must price the resolved SKU. A
-   * name-perfect match carried by one store is a worse answer than a looser match
-   * carried by most of them, and this is the axis the availability upgrade exists
-   * for.
+   * Minimum SHARE (0..1) of serving storefronts that must price the resolved SKU.
+   * A name-perfect match carried by one store is a worse answer than a looser
+   * match carried by most of them, and this is the axis the availability upgrade
+   * exists for.
    *
-   * A share, not a count, because the denominator moves: 143 branches within 10km
-   * of Herzliya against 898 nationally. An absolute threshold calibrated on national
-   * counts false-failed correct answers in the first run of this harness.
+   * A share, not a count, because the denominator moves. It moved a long way: it
+   * was 143 physical branches within 10km of Herzliya, and since the ingest
+   * narrowed to storefronts it is the 7 or 8 that deliver to the benchmark
+   * address. An absolute threshold calibrated on national counts false-failed
+   * correct answers in the first run of this harness.
    *
-   * Calibration, measured on that 143-branch scope: the best-stocked product in a
-   * staple bucket reaches 71% (eggs) to 97% (pasta) of branches. So 0.25 is a
-   * comfortable "widely stocked" bar, while the real failures sat at 0.7% (a 1-store
-   * bread) and 12% (a niche toilet paper).
+   * **These thresholds are calibrated for the old denominator and are now
+   * coarse.** Against 143 branches, 0.25 separated a widely stocked SKU (71% for
+   * eggs, 97% for pasta) from a real failure (0.7%, a one-store bread). Against
+   * 8 storefronts the same 0.25 is "at least 2 of 8", and one storefront either
+   * way flips the verdict. Treat an availability failure as a hint, not a
+   * finding, until the thresholds are re-derived on storefront counts.
    */
   minNearbyStoreShare?: number;
 }

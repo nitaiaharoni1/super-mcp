@@ -102,7 +102,7 @@ export function evaluateAccept(
     const share = facts.nearbyStores / nearbyStoreTotal;
     if (share < accept.minNearbyStoreShare) {
       failures.push(
-        `stocked in ${facts.nearbyStores}/${nearbyStoreTotal} nearby branches ` +
+        `stocked at ${facts.nearbyStores}/${nearbyStoreTotal} serving storefronts ` +
           `(${(share * 100).toFixed(0)}%), need ${(accept.minNearbyStoreShare * 100).toFixed(0)}%`,
       );
     }

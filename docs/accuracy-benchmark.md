@@ -40,57 +40,91 @@ being cold buffer cache.
 The last two are not gated because they describe the catalog and the promotion
 landscape as much as the code. Failing a build on them would punish a data refresh.
 
-### `coverage` rewards a store that lies about where it is
+### `coverage` scores one store, so adding stores moves it
 
-`coverage` scores the store the ranking picked, and the ranking prefers near
-stores — so anything that makes a far store look near will raise it. Measured:
-Rami Levy Ramat HaHayal had a polluted address (`דבורה הנביאה 127&#x0D;`), failed
-to geocode, and fell back to the Tel Aviv centroid, 0.6 km from the benchmark
-origin. It is really about 7 km away. Geocoding it correctly moved `coverage`
-from 95.0% to 92.0%, and putting the centroid back restored 95.0% exactly.
+`coverage` grades the storefront the ranking picked, which makes it a measure of
+the *choice* as much as of the catalogue. Adding options can lower it: pulling
+the 25 Wolt venues into the local catalogue moved coverage from 96.0% to 93.0%
+in one run, because a cheaper storefront with a thinner shelf started winning
+baskets that a broader one used to take. Nothing resolved worse;
+`resolutionAccuracy` held at 88.0% across exactly that change.
 
-Nothing about the code got worse. A big-catalog store stopped being recommended
-to shoppers who would have had to drive 7 km to reach it. So before treating a
-`coverage` drop as a regression, check whether store coordinates changed:
-a **fall** here can mean the numbers stopped flattering themselves.
-`resolutionAccuracy` is unaffected by store position and is the cleaner signal
-for resolution changes.
+The physical surface had the same property through a different mechanism, and it
+is worth keeping as the cautionary case. There the ranking preferred *near*
+stores, so a store that mislocated itself scored better: Rami Levy Ramat HaHayal
+had a polluted address (`דבורה הנביאה 127&#x0D;`), failed to geocode, fell back
+to the Tel Aviv centroid 0.6 km from the benchmark origin when it is really 7 km
+away, and geocoding it correctly *dropped* coverage from 95.0% to 92.0%.
 
-## Baseline, measured on the full Israeli catalog
+So before treating a `coverage` fall as a regression, ask what changed about the
+store set. A **fall** here can mean the numbers stopped flattering themselves.
+`resolutionAccuracy` does not depend on which store won and is the cleaner
+signal for resolution changes.
 
-Herzliya and nearby locations, 10 baskets, 100 scored lines.
+## Baseline, measured on the delivery surface
 
-> Measured against the PHYSICAL basket surface, before the 2026-08-06 change that
-> narrowed the ingest to online storefronts. The runner now drives
-> `optimize_delivery`, so these figures are a record, not a baseline to compare
-> against: `coverage` is now "priced at the recommended storefront" out of far
-> fewer stores, and the total it scores includes delivery and service fees.
-> Re-baseline before gating on a tolerance.
-
-```
-resolutionAccuracy   76.0%
-coverage             92.0%
-conditionalExposure   2.2%
-imputedShare          6.5%
-```
-
-The useful decomposition:
+Measured 2026-08-07 against `optimize_delivery`, the surface that is mounted.
+Herzliya and nearby locations, 10 baskets, 100 scored lines, 57 storefronts in
+the catalogue of which 7 to 8 deliver to the benchmark address.
 
 ```
-resolutionAccuracy as scored                        76.0%
-same, ignoring the availability test                97.0%
+resolutionAccuracy   91.0%
+coverage             93.0%
+conditionalExposure   1.1%
+imputedShare          3.2%
 ```
 
-**21 of the 24 failures are a correctly-identified product that is thinly
-stocked**, not a wrong product. Only 3 lines resolved to the wrong kind of thing
-(forbidden token) and 2 to the wrong preparation. So product identity is largely
-right and the weak axis is availability: resolution picks a SKU few nearby branches
-carry. That matches the known shortlist-boundary limit, where a plain `טונה` query
-lands on an 18-of-143-branch SKU while a 136-branch one exists outside the
-retrieved candidate pool.
+Two consecutive runs on an unchanged catalogue returned identical figures to four
+decimal places, so a tight `--tolerance` is safe. The catalogue moving is what
+moves the numbers, not the harness.
 
-Weakest categories: `canned_fish` 0/3, `flour_baking` 0/1, `cleaning` 0/1,
-`paper_goods` 1/4, `eggs` 2/6, `poultry` 1/3, `pasta` 1/3, `bread` 2/5.
+### Do not read the jump from 76% as an improvement
+
+The previous record (76.0% / 92.0%) was measured on the physical branch surface.
+Most of the gap is the availability test getting weaker, not resolution getting
+better. `minNearbyStoreShare` is a share of the stores in scope, and that
+denominator fell from 143 nearby branches to 7 or 8 serving storefronts. The same
+0.25 threshold that meant "carried by 36 of 143 branches" now means "carried by 2
+of 8". Availability produced 21 of 24 failures then and 2 of 9 now, on a test that
+can no longer resolve anything finer than one storefront either way.
+
+Treat `resolutionAccuracy` as a consistency measure against this baseline, and
+re-derive the thresholds on storefront counts before treating the availability
+axis as evidence of anything.
+
+### The 9 remaining failures, and why 7 of them are one bug
+
+| lines | label | query | what it picked |
+|---|---|---|---|
+| 4 | `yogurt-plain` | `יוגורט` | יוגורט דנונה קורנפלקס מצופה שוקולד |
+| 2 | `coke-1_5` | `קוקה קולה 1.5 ליטר` | קוקה קולה **זירו** 1.5 ליטר |
+| 1 | `oil-cooking` | `שמן` | שמן **זית** כתית מעולה |
+| 1 | `tomatoes` | `עגבניות` | correct product, at 1 of 7 storefronts |
+| 1 | `eggs-l` | `ביצים L` | correct product, at 1 of 8 storefronts |
+
+Seven of the nine are the same failure: a bare generic query resolves to a
+flavoured or specialised variant instead of the ordinary household one. That is
+the gap `preparation` (migration 025) exists to close, and it is now the dominant
+error mode rather than a footnote. `yogurt` scores 0/4 and `soda` 1/3 for this
+reason alone.
+
+Weakest categories: `yogurt` 0/4, `soda` 1/3, `oil_vinegar` 2/3, `eggs` 5/6,
+`vegetable_fresh` 11/12. Everything else in the set scores 100%.
+
+### A label that could never pass
+
+`cucumbers` required the token `מלפפון` and the resolver returned a product named
+`מלפפונים`. Hebrew final letters make that unmatchable: the singular ends in a
+final nun (U+05DF) and the plural carries a medial one (U+05E0), so neither string
+is a substring of the other and no shared prefix covers both. It failed three
+lines per run against a query that was itself plural. Now `requireAnyToken`,
+accepting either form, which is worth 3 points of the 91%.
+
+Thirteen other labels use a `requireTokens` entry ending in a final letter
+(`לחם`, `שמן`, `עוף`, `מים`, `יין`, `לימון`, ...). None of them is currently
+failing, and every one of those tokens matches at least 30 catalogue names, so
+they are live rather than broken. It is still the first thing to check when a
+label fails against a product whose name obviously contains the word.
 
 The `controls` basket, which uses only explicit requests (`קוטג׳ תנובה 5%`,
 `אורז בסמטי`, `קוקה קולה זירו`, `ביצים תבנית 12`), scored **11/11**. The system
