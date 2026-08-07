@@ -624,6 +624,61 @@ export const POLITZER_SETTLEMENTS: readonly string[] = [
 ];
 
 /** טיב טעם: 23 settlements, read 2026-08-02 from https://www.tivtaam.co.il/v2/retailers/1062/branches/924/areas?appId=4&deliveryTypeId=1&languageId=1. */
+/**
+ * Keshet Taamim's northern robotic delivery centre (ממ"ר קרית חיים, store 116).
+ *
+ * Read from the chain's own areas API on 2026-08-07:
+ * /v2/retailers/1219/branches/2585/areas?deliveryTypeId=1
+ */
+export const KESHET_NORTH_AREAS: readonly string[] = [
+  "חדרה קיסריה וסביבה",
+  "קריות וישובים",
+  "טבעון ויישובים",
+  "עפולה ויישובים",
+  "נשר",
+  "טירת כרמל וכפר גלים",
+  "חיפה וקריית חיים",
+  "עכו",
+  "נהריה וישובים",
+  "כרמיאל",
+  "יקנעם וישובים",
+  "נתניה",
+  "ישובי השרון",
+  "כפר מסריק/שמרת",
+];
+
+/**
+ * Keshet Taamim's central robotic delivery centre (ממ"ר פתח תקווה, store 120).
+ *
+ * Read from the chain's own areas API on 2026-08-07:
+ * /v2/retailers/1219/branches/2725/areas?deliveryTypeId=1
+ */
+export const KESHET_CENTRE_AREAS: readonly string[] = [
+  "רחובות והסביבה",
+  "ראש העין",
+  "רמת גן",
+  "גבעתיים",
+  "קרית אונו",
+  "גני תקווה וסביון",
+  "פתח תקווה",
+  "חולון",
+  "בת ים",
+  "בית דגן, והסביבה",
+  "ראשון לציון",
+  "נס ציונה",
+  "באר יעקב",
+  "תל אביב מלא",
+  "הרצליה והסביבה",
+  "אשקלון וישובים (ציר 4)",
+  "יבנה (ציר 42)",
+  "גן יבנה",
+  "גדרה(ציר 40)",
+  "אשדוד",
+  "כפר סבא והסביבה",
+  "באר שבע",
+  "עומר",
+];
+
 export const TIV_TAAM_RAMAT_HAHAYAL: readonly string[] = [
   "רמת השרון",
   "רמת גן",
@@ -949,6 +1004,27 @@ const ZONE_EXPANSIONS: Record<string, readonly string[]> = {
   "ק.עקרון": ["קריית עקרון"],
   "ק.אתא ביאליק": ["קריית אתא", "קריית ביאליק"],
   "ק.מוצקין ים חיים": ["קריית מוצקין", "קריית ים", "חיפה"],
+  // Keshet Taamim's two robotic delivery centres publish sales areas, not
+  // settlements. Read from their own areas API on 2026-08-07. Each label keeps
+  // only the towns it actually names: "וסביבה"/"וישובים" is an unbounded claim,
+  // and under-serving a shopper is recoverable where over-promising is not.
+  "חדרה קיסריה וסביבה": ["חדרה", "קיסריה"],
+  "קריות וישובים": ["קריית ביאליק", "קריית מוצקין", "קריית ים", "קריית אתא"],
+  "טבעון ויישובים": ["קריית טבעון"],
+  "עפולה ויישובים": ["עפולה"],
+  "טירת כרמל וכפר גלים": ["טירת כרמל"],
+  "חיפה וקריית חיים": ["חיפה"],
+  "נהריה וישובים": ["נהריה"],
+  "יקנעם וישובים": ["יקנעם עילית"],
+  "רחובות והסביבה": ["רחובות"],
+  "גני תקווה וסביון": ["גני תקווה", "סביון"],
+  "בית דגן, והסביבה": ["בית דגן"],
+  "תל אביב מלא": ["תל אביב"],
+  "הרצליה והסביבה": ["הרצליה"],
+  "אשקלון וישובים (ציר 4)": ["אשקלון"],
+  "יבנה (ציר 42)": ["יבנה"],
+  "גדרה(ציר 40)": ["גדרה"],
+  "כפר סבא והסביבה": ["כפר סבא"],
   "חיפה והקריות": [
     "חיפה",
     "קריית אתא",
@@ -964,7 +1040,13 @@ const ZONE_EXPANSIONS: Record<string, readonly string[]> = {
  * the same rule the header states: a rule that can never match is worse than an
  * absent one. Listed rather than silently skipped so the count is auditable.
  */
-const UNMATCHABLE_REGIONS: readonly string[] = ["דרום הר חברון"];
+const UNMATCHABLE_REGIONS: readonly string[] = [
+  "דרום הר חברון",
+  // Keshet names a whole sales run with no head settlement. Every other label
+  // it publishes carries one, so dropping this costs a region we cannot place
+  // rather than a town we could have served.
+  "ישובי השרון",
+];
 
 const ZONE_BY_KEY = new Map<string, readonly string[]>(
   Object.entries(ZONE_EXPANSIONS).map(([label, cities]) => [normalizeCityKey(label), cities]),

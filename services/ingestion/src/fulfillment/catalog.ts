@@ -45,6 +45,8 @@ import type { TermsConfidence } from "@super-mcp/shared";
 import { normalizeCityKey } from "@super-mcp/shared";
 import {
   CARREFOUR_SETTLEMENTS,
+  KESHET_CENTRE_AREAS,
+  KESHET_NORTH_AREAS,
   MACHSANEI_SETTLEMENTS,
   POLITZER_SETTLEMENTS,
   QUIK_SETTLEMENTS,
@@ -444,6 +446,63 @@ export const FULFILLMENT_CATALOG: CatalogService[] = [
       "seven regional picking depots and no service map, so which one covers a shopper is inferred " +
       "from where the depot is. These depots price at 99% identical to the chain's own shelf prices, " +
       "so unlike the other storefronts here the shelf price is a good guide to what the goods cost.",
+  })),
+
+  // --------------------------------------------------------------- Keshet
+  // Two robotic delivery centres ("מרכז משלוחים רובוטי", which is what the feed's
+  // ממ"ר abbreviates). They hold 20,355 priced rows between them and had no
+  // service, so nothing on the delivery surface could reach either.
+  //
+  // Fee and minimum are chain-wide and come from Keshet's own binding terms, not
+  // from the storefront banner. The banner offers ₪15 delivery above ₪750, which
+  // is a promotion the terms do not mention and reserve the right to withdraw, so
+  // it is modelled as a reported band rather than a verified one.
+  ...([
+    {
+      slug: "keshet-online-north",
+      storeCode: "116",
+      brand: "קשת טעמים אונליין (ממ\"ר צפון)",
+      areas: KESHET_NORTH_AREAS,
+      centre: "ממ\"ר קרית חיים",
+      branchId: 2585,
+    },
+    {
+      slug: "keshet-online-centre",
+      storeCode: "120",
+      brand: "קשת טעמים אונליין (ממ\"ר מרכז)",
+      areas: KESHET_CENTRE_AREAS,
+      centre: "ממ\"ר פתח תקווה",
+      branchId: 2725,
+    },
+  ] as const).map((c) => ({
+    slug: c.slug,
+    chainId: KESHET,
+    storeCode: c.storeCode,
+    brand: c.brand,
+    serviceType: "delivery" as const,
+    storefrontUrl: "https://www.keshet-teamim.co.il",
+    // "מינימום הזמנת משלוח ו/או איסוף עצמי באתר הוא 350 ₪ לא כולל דמי משלוח."
+    minimumOrder: 350,
+    minimumOrderKnown: true,
+    tariffs: [
+      // "כל הזמנת משלוח באתר תחויב בתשלום דמי משלוח בסכום של 29.90 ₪."
+      { fee: 29.9 },
+    ],
+    coverage: servedSettlements(c.areas, "verified"),
+    termsConfidence: "verified" as const,
+    verifiedAt: "2026-08-07",
+    sourceUrl: "https://www.keshet-teamim.co.il/terms-and-conditions",
+    notes:
+      `Keshet's ${c.centre} centre, branch ${c.branchId} on the chain's own storefront. ` +
+      "₪29.90 delivery and a ₪350 minimum are quoted verbatim from the chain's תקנון, which " +
+      "states both as flat and chain-wide. Self-collection costs ₪15 for picking and packing " +
+      "and is not modelled as a service here. " +
+      "Coverage is the delivery-area list the storefront's own API returns for this branch, " +
+      "reduced to the settlements each label NAMES: labels ending וסביבה or וישובים claim an " +
+      "unbounded ring around a town, and one label (ישובי השרון) names no town at all and is " +
+      "dropped. So this under-claims by design. The storefront also advertises ₪15 delivery " +
+      "above ₪750, which the תקנון does not mention; it is left out rather than quoted as a " +
+      "rate the chain has not committed to.",
   })),
 
   // ------------------------------------------------------------ Keshet / Wolt
