@@ -125,14 +125,14 @@ function HeroVisual() {
 
   return (
     <div className="relative">
-      <div className="relative aspect-[4/3] -translate-x-16 overflow-hidden rounded-[var(--radius-card)] border-[3px] border-ink shadow-sticker-lg rotate-[-0.8deg] sm:-translate-x-24 lg:-translate-x-36">
+      <div className="relative aspect-[4/3] -translate-x-8 overflow-hidden rounded-[var(--radius-card)] border-[3px] border-ink shadow-sticker-lg rotate-[-0.8deg] sm:-translate-x-12 lg:-translate-x-20">
         <Image
           src="/hero-grocery.webp"
           alt={hero.imageAlt}
           fill
           priority
           sizes="(max-width: 1024px) 92vw, 40vw"
-          className="object-cover object-[50%_42%]"
+          className="object-cover object-[58%_42%]"
         />
       </div>
 
