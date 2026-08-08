@@ -52,7 +52,7 @@ export function resolveResponseDetail(
   return "summary";
 }
 
-function toSummaryItems(items: BasketItemStatus[]): BasketSummaryItem[] {
+export function toSummaryItems(items: BasketItemStatus[]): BasketSummaryItem[] {
   // Keep what answers "what happened to each thing I asked for": the chosen
   // product, quantity, and resolution status. Drop the rest as diagnostic or
   // redundant — `substitution` is a nested explain object repeating both product
@@ -122,7 +122,7 @@ function stripItemCandidates(items: BasketItemStatus[]): BasketItemStatus[] {
  * that one explains WHY a line was dropped and is not derivable from the rest.
  * Full messages remain at `standard` and `debug`.
  */
-function toSummaryAssumptions(assumptions: BasketAssumption[]): BasketAssumption[] {
+export function toSummaryAssumptions(assumptions: BasketAssumption[]): BasketAssumption[] {
   // Omit the key rather than send an empty string: `""` still costs bytes per
   // assumption and says nothing. `selectedProductId` goes too — it repeats the id
   // already on the item status and the priced line.

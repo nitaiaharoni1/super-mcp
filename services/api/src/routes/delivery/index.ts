@@ -60,6 +60,7 @@ export async function registerDeliveryRoutes(app: FastifyInstance): Promise<void
           includeClub: initial.include_club,
           includeCoupon: initial.include_coupon,
           resolutionMode: initial.resolution_mode,
+          responseDetail: initial.response_detail,
           locationOrigin: loc.locationOrigin,
           geocodeMs: loc.geocodeMs,
         };

@@ -28,6 +28,8 @@ import {
 } from "../basket/questionAvailability.js";
 import { resolveItems } from "../basket/resolve.js";
 import { applyFastResolutionPolicy } from "../basket/resolutionPolicy.js";
+import { resolveResponseDetail } from "../basket/compactResult.js";
+import { projectDeliveryResult } from "./compactResult.js";
 import { getActiveOntology } from "../search/ontology.js";
 import type {
   BasketAssumption,
@@ -199,16 +201,23 @@ export async function optimizeDelivery(
   request: DeliveryOptimizeRequest,
   options: DeliveryOptimizeOptions,
 ): Promise<DeliveryOptimizeResult> {
-  if (isResume(request)) {
-    const payload = decodeBasketContinuation<DeliveryOptimizeInput>(
-      request.continuation,
-      options.continuationSecret,
-      options.now,
-    );
-    const input = applyBasketAnswers(payload, request.answers);
-    return runDeliveryOptimization(input, options);
-  }
-  return runDeliveryOptimization(request, options);
+  const input = isResume(request)
+    ? applyBasketAnswers(
+        decodeBasketContinuation<DeliveryOptimizeInput>(
+          request.continuation,
+          options.continuationSecret,
+          options.now,
+        ),
+        request.answers,
+      )
+    : request;
+  const result = await runDeliveryOptimization(input, options);
+  // Projected here rather than inside `runDeliveryOptimization` so the resume
+  // path gets it too: the detail level travels in the continuation payload, so
+  // a caller that asked for summary once keeps it after answering questions
+  // without having to re-send anything but {continuation, answers}.
+  if (result.status !== "complete") return result;
+  return projectDeliveryResult(result, resolveResponseDetail(input.responseDetail, undefined));
 }
 
 async function runDeliveryOptimization(

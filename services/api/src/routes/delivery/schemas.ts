@@ -24,6 +24,7 @@ export const deliveryInitialBodySchema = z
     include_club: z.boolean().optional().default(true),
     include_coupon: z.boolean().optional().default(true),
     resolution_mode: z.enum(["fast", "strict"]).optional(),
+    response_detail: z.enum(["summary", "standard", "debug"]).optional(),
   })
   .strict()
   .refine(

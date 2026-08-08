@@ -14,6 +14,7 @@ import type {
   BasketQuestion,
   BasketResolutionMode,
   BasketResponseDetail,
+  BasketSummaryItem,
   BasketTotalScope,
 } from "../basket/types.js";
 
@@ -237,7 +238,13 @@ export interface DeliveryOptimizeCompleteResult {
   bestSingleOrder: DeliveryPlanSummary | null;
   plans: DeliveryPlan[];
   unavailableStores: UnavailableStorefront[];
-  items: BasketItemStatus[];
+  /**
+   * `BasketSummaryItem` at the default `summary` detail, which drops the scoring
+   * internals (`confidence`, `candidates`, the nested `substitution` explain
+   * object) that the priced line and `assumptions` already state in actionable
+   * form. `standard` and `debug` return the full status.
+   */
+  items: Array<BasketItemStatus | BasketSummaryItem>;
   assumptions: BasketAssumption[];
   storefrontsCompared: number;
   notes: string[];

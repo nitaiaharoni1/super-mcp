@@ -71,7 +71,10 @@ export function registerDeliveryTools(server: McpServer): void {
         "Both, and bestVerifiedTerms, carry totals only: find the storefront in plans by serviceSlug " +
         "for its priced lines. " +
         "When nextFeeBreak.worthTopUp is true, spending a little more makes the order cheaper overall — say so. " +
-        "Storefronts that do not serve the address come back in unavailableStores with a reason.",
+        "Storefronts that do not serve the address come back in unavailableStores with a reason. " +
+        "By default only the recommended storefronts carry a `lines` breakdown; every other plan reports " +
+        "its totals and pricedLines with `lines: []`. That is not a gap — re-call with " +
+        "response_detail=standard only if you must compare the same item's price across chains.",
       inputSchema: {
         items: z.array(mcpBasketItemSchema).min(1).max(50).optional()
           .describe("The shopping list. Required unless resuming with a continuation."),
@@ -111,6 +114,15 @@ export function registerDeliveryTools(server: McpServer): void {
           .describe(
             "fast (default) makes best-effort product choices and reports them in assumptions. " +
               "strict asks before choosing.",
+          ),
+        response_detail: z
+          .enum(["summary", "standard", "debug"])
+          .optional()
+          .describe(
+            "summary (default) returns every storefront's totals and coverage but the line-by-line " +
+              "breakdown only for the storefronts the recommendations name. standard adds the lines " +
+              "for every storefront — ask for it only when comparing the same item across chains. " +
+              "debug adds resolution internals.",
           ),
         continuation: z
           .string()
@@ -161,6 +173,7 @@ export function registerDeliveryTools(server: McpServer): void {
           includeClub: args.include_club,
           includeCoupon: args.include_coupon,
           resolutionMode: args.resolution_mode,
+          responseDetail: args.response_detail,
           locationOrigin: loc.locationOrigin,
         },
         { continuationSecret: secret },

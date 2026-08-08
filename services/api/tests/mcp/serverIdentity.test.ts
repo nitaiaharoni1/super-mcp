@@ -125,6 +125,23 @@ describe("tools/list declares the surface read-only", () => {
     }
   });
 
+  /*
+   * `canaryMcpContract` asserts this too, but only against a server that is
+   * already deployed. The failure being guarded is a payload an agent cannot
+   * read — 123KB for a twelve-line basket, before the control existed — which is
+   * worth catching in CI rather than after it ships.
+   */
+  it("advertises response_detail on optimize_delivery", async () => {
+    const tools = (await callMcp(TOOLS_LIST)).tools as {
+      name: string;
+      inputSchema?: { properties?: Record<string, unknown> };
+    }[];
+
+    const optimize = tools.find((tool) => tool.name === "optimize_delivery");
+    expect(optimize, "optimize_delivery is not registered").toBeDefined();
+    expect(optimize?.inputSchema?.properties).toHaveProperty("response_detail");
+  });
+
   it("claims neither destructive nor idempotent, which read-only leaves undefined", async () => {
     const tools = (await callMcp(TOOLS_LIST)).tools as {
       name: string;

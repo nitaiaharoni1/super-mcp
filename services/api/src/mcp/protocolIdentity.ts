@@ -149,7 +149,11 @@ export function validateMcpDeliveryContract(input: ContractCheckInput): Contract
   const optimize = input.tools.find((tool) => tool.name === "optimize_delivery");
   const props = optimize?.inputSchema?.properties ?? {};
   if (optimize) {
-    for (const field of ["continuation", "answers", "resolution_mode", "address"]) {
+    // `response_detail` is load-bearing on this surface, not a nicety: without it
+    // the tool returned every storefront's full line breakdown, 123KB for a
+    // twelve-line Tel Aviv basket, which clients cannot inline and spill to disk
+    // to grep back apart one field at a time.
+    for (const field of ["continuation", "answers", "resolution_mode", "response_detail", "address"]) {
       if (!(field in props)) {
         errors.push(`optimize_delivery schema lacks ${field}`);
       }

@@ -221,6 +221,15 @@ const optimizeDeliveryBody = {
     include_club: { type: "boolean", default: true },
     include_coupon: { type: "boolean", default: true },
     resolution_mode: { type: "string", enum: ["fast", "strict"] },
+    response_detail: {
+      type: "string",
+      enum: ["summary", "standard", "debug"],
+      default: "summary",
+      description:
+        "How much per-line detail to return. summary gives every storefront's totals, fees and " +
+        "coverage but the lines[] breakdown only for the storefronts the recommendations name; " +
+        "standard returns lines for every storefront; debug adds resolution internals.",
+    },
     continuation: { type: "string" },
     answers: {
       type: "array",

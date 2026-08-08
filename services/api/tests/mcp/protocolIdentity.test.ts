@@ -58,6 +58,7 @@ describe("validateMcpDeliveryContract", () => {
           continuation: {},
           answers: {},
           resolution_mode: {},
+          response_detail: {},
         },
       },
     },

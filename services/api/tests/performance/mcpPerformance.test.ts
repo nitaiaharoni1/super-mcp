@@ -78,21 +78,19 @@ const FAST_P95_MS = Number(
 /**
  * Response size ceiling for a basket.
  *
- * 22KB was the physical surface's figure, and it earned it: `optimize_basket`
- * took `response_detail=summary`. `optimize_delivery` has no such control and
- * returns every plan in full, measured at 86KB for six lines across seventeen
- * storefronts and 92KB for the twelve-line staples basket.
+ * `optimize_delivery` now takes `response_detail` like the physical surface, and
+ * defaults to `summary`: every storefront still reports its totals, fees and
+ * coverage, but only the ones the recommendations name carry a line breakdown.
+ * The twelve-line Tel Aviv basket that prompted the change measured 122,889
+ * bytes before and 46,959 after, ~38k tokens down to ~15k.
  *
- * 40% of that (34KB of the 86KB) is per-line detail for storefronts the reply
- * never pointed the agent at: `cheapestDelivered`, `bestVerifiedTerms` and
- * `bestSingleOrder` named one, and the other sixteen shipped their full lines
- * anyway. Dropping those alone would take the payload to 52KB.
- *
- * The budget is set to what the surface actually sends so the gate catches
- * growth. It is not an endorsement of the number.
+ * The budget is what the surface actually sends plus room for a bigger list, so
+ * the gate catches drift rather than blessing a number. It is deliberately well
+ * under the old 120KB: a payload no client can inline is not a slow tool, it is
+ * an unreadable one, and that failure has to be a test failure.
  */
 const FAST_BYTES_P95 = Number(
-  process.env.SUPER_MCP_PERF_FAST_BYTES_P95 ?? (PERF_STRICT ? 60_000 : 120_000),
+  process.env.SUPER_MCP_PERF_FAST_BYTES_P95 ?? (PERF_STRICT ? 45_000 : 65_000),
 );
 const FAST_COVERAGE_MIN = Number(
   process.env.SUPER_MCP_PERF_FAST_COVERAGE_MIN ?? (PERF_STRICT ? 0.8 : 0.7),
