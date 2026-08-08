@@ -86,52 +86,61 @@ async function fetchRemoteTools(url: string, apiKey: string): Promise<{
   instructions: string;
 }> {
   // Minimal JSON-RPC tools/list against Streamable HTTP MCP.
-  const init = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
+  //
+  // Two things this has to get right that a plain fetch does not.
+  //
+  // The transport answers Streamable HTTP requests as SSE, so the body is
+  // `event: message\ndata: {…}` and not JSON. `await res.json()` on it throws
+  // `Unexpected token 'e', "event: mes"...`, which is what the canary did
+  // against the live server every time it was pointed at one. A deploy check
+  // that cannot read the deployed server checks nothing, and it silently took
+  // every contract assertion in validateMcpDeliveryContract down with it.
+  //
+  // And `initialize` mints a session that every later request must carry back in
+  // `mcp-session-id`, so `tools/list` sent without it is rejected as a request
+  // outside a session even once the body parses.
+  const session = { id: null as string | null };
+
+  async function rpc(payload: Record<string, unknown>, expectReply = true): Promise<unknown> {
+    const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "super-mcp-canary", version: "0.1.0" },
-      },
-    }),
-  });
-  if (!init.ok) {
-    throw new Error(`MCP initialize failed: HTTP ${init.status}`);
+    };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    if (session.id) headers["mcp-session-id"] = session.id;
+    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(payload) });
+    if (!res.ok) {
+      throw new Error(`MCP ${String(payload.method)} failed: HTTP ${res.status}`);
+    }
+    session.id ??= res.headers.get("mcp-session-id");
+    const body = await res.text();
+    if (!expectReply) return null;
+    // Accept either transport shape rather than assuming SSE: the server may
+    // answer a plain JSON body, and a canary that only understood one framing is
+    // exactly the bug being fixed here.
+    const dataLine = body.split("\n").find((l) => l.startsWith("data:"));
+    return JSON.parse(dataLine ? dataLine.slice("data:".length) : body);
   }
-  const initBody = (await init.json()) as {
-    result?: { instructions?: string; serverInfo?: { version?: string } };
-  };
+
+  const initBody = (await rpc({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "super-mcp-canary", version: "0.1.0" },
+    },
+  })) as { result?: { instructions?: string; serverInfo?: { version?: string } } };
+
   const instructions =
     initBody.result?.instructions ??
     `protocol=missing; build=${initBody.result?.serverInfo?.version ?? "unknown"}`;
 
-  const listed = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 2,
-      method: "tools/list",
-      params: {},
-    }),
-  });
-  if (!listed.ok) {
-    throw new Error(`MCP tools/list failed: HTTP ${listed.status}`);
-  }
-  const listBody = (await listed.json()) as {
+  // The SDK rejects requests made before the client confirms initialization.
+  await rpc({ jsonrpc: "2.0", method: "notifications/initialized" }, false);
+
+  const listBody = (await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} })) as {
     result?: {
       tools?: Array<{
         name: string;
