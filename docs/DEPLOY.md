@@ -309,6 +309,23 @@ not complete there; the request path is unaffected (it never awaits it), but
 addresses will keep resolving at city precision until the cache is warmed some
 other way.
 
+The embedding model hit the same trap and cost a user-visible 16s before it was
+found, so the rule is worth stating plainly: **on Cloud Run, anything that must be
+resident has to be awaited before `listen()`, not fired after it.** Measured on
+this service, a warm started after `listen()` took 63s of wall clock for work that
+costs 1-2s of CPU, and only finished when an unrelated request handed the instance
+CPU back — that request paid the bill. Warming during startup instead costs ~12s,
+inside a 240s startup probe, and every request the container serves is warm.
+
+The second half of that bug is subtler and applies to any warm-up: **never warm
+through a cache-first accessor.** `getQueryEmbedding` returns early on a cache hit,
+so once the warmup string had been embedded once and stored, every later warmup
+read it back and loaded nothing, succeeding while doing nothing, silently and
+permanently. `warmEmbeddingModel` deliberately calls `embedText` past the cache.
+The same reasoning applies to `super-mcp-keepwarm`: its `search_products` ping
+exercises the request path but not the model, so it is not evidence the model is
+loaded.
+
 ## One MCP surface
 
 `/mcp` is SuperMCP for online supermarket delivery (`optimize_delivery`). `/mcp/online` is a
