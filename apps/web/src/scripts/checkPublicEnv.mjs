@@ -17,6 +17,8 @@
  * of the tree, so this file says which variables are mandatory and never what they are.
  */
 
+import { pathToFileURL } from "node:url";
+
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
 
 /** Absolute https URL that is not a development host. */
@@ -94,6 +96,14 @@ function main(env) {
   return 1;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/*
+ * pathToFileURL, not a `file://` template. Hand-building the URL mismatches as soon as the
+ * checkout path contains a space or any character that needs escaping, and a mismatch here
+ * fails open: the guard becomes an import with no side effect, exits 0, and the Dockerfile
+ * happily builds the broken image it was added to prevent. The subprocess test in
+ * tests/scripts covers this wiring, because the pure functions passing proves nothing about
+ * whether the entrypoint ever runs.
+ */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.exit(main(process.env));
 }

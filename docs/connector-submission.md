@@ -113,25 +113,35 @@ change this with it.
 > the list to real products, and work out what the basket costs at each chain including
 > delivery. The answer goes back to you, and that is the end of it.
 >
-> **What we do not keep.** The shopping list is not stored. The address is not stored.
-> When we remember an address lookup so as not to repeat it, only a one-way encrypted
-> fingerprint of it is stored, which cannot be turned back into the address. When a
-> clarifying question is needed mid-request, the basket state goes back to you signed
-> rather than sitting with us.
+> **What we do not keep.** Your list, as a list, is not stored and is not linked to you.
+> The address is not stored. When we remember an address lookup so as not to repeat it,
+> only a one-way encrypted fingerprint of it is stored, which cannot be turned back into
+> the address. When a clarifying question is needed mid-request, the basket state goes back
+> to you signed rather than sitting with us.
 >
 > **What we do keep.** One technical usage row per request: which key, which route, the
 > response code, and how long it took. It contains no item, address, or content. It exists
 > to spot faults and load.
 >
+> **The search dictionary.** When someone searches a phrase not seen here before, the
+> phrase itself is stored once in a shared dictionary alongside its numeric
+> representation, so the next search for the same phrase is instant. That dictionary holds
+> no address, no record of who searched, and no link between one phrase and another, so
+> nobody's list can be reassembled from it.
+>
 > **Who else sees anything.** The OpenStreetMap Nominatim mapping service receives the
 > address itself, in order to turn it into a point, because without that there is no way
-> to know who delivers to you. The PostHog analytics service, in Europe, receives numbers
-> only: how many items, how long it took, whether an address was present. Never the items
-> and never the address. No data is sold and no advertising profile is built.
+> to know who delivers to you. The PostHog analytics service, in Europe, receives technical
+> measurements only: which tool ran, which kind of AI assistant it came from, how many
+> items, how long it took, whether an address was present, and whether it succeeded. Never
+> the items themselves and never the address. To count returning visitors without knowing
+> who you are, that carries an opaque identifier derived one way from connection details,
+> which is not a name, an email, or an address. No data is sold and no advertising profile
+> is built.
 >
 > **If you left an email.** The access request form stores the email address and what you
-> wrote about your use, and sends us a notification. It is kept until you ask us to delete
-> it.
+> wrote about your use, and sends us a notification through the Resend mail service, which
+> sees the address in transit. It is kept until you ask us to delete it.
 >
 > **Deletion and questions.** Write to us and we delete. Same address for any question
 > about this page: nitaiaharoni1@gmail.com
@@ -149,6 +159,16 @@ Each claim is checkable in code, which is the reason the policy is worth trustin
 | Usage rows carry no content | `INSERT INTO usage_event` in `services/api/src/auth.ts` writes four columns |
 | The basket is not held server-side | `services/api/src/services/basket/continuation.ts` signs it back to the caller |
 | Logs carry no list or address | `logToolFailure` in `services/api/src/mcp/tools/register.ts` deliberately omits arguments |
+| Search phrases **are** kept, unlinked | `semantic_query_embedding` (migration `008`) holds `normalized_query`, its vector, a hit count and a timestamp, with no caller identity and no row-to-row link |
+| Analytics carry a pseudonymous id | `anonymousAnalyticsId` in `services/api/src/auth.ts` is an HMAC over client address + user agent, truncated to 16 hex; key holders are identified by key id instead |
+| The access email transits Resend | `notifyOperator` in `services/api/src/routes/access/index.ts` POSTs it to `api.resend.com`, fire-and-forget, and is a no-op when the env vars are unset |
+| No user text reaches an LLM at request time | Product classification runs offline in `services/ingestion` and `packages/db/src/scripts/classifyProducts.ts`; the API has no Vertex, OpenAI, or Anthropic call path |
+
+That last row is the reason the policy says the list is not kept **as a list**, rather than
+the cleaner-sounding claim that nothing is kept. The first draft of this page said the
+shopping list is not stored full stop, which was false: `scoredSearch.ts` embeds a line and
+`putCachedQueryEmbedding` writes the phrase. Dropping the column would not have rescued the
+stronger claim either, because the stored vector is derived from the phrase.
 
 ## Still open before submitting
 

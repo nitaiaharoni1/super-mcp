@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const query = vi.fn();
 
@@ -49,6 +49,12 @@ async function initializeServerInfo(): Promise<Record<string, unknown>> {
   const result = await callMcp(INITIALIZE);
   return (result.serverInfo as Record<string, unknown>) ?? {};
 }
+
+/* One test points the origin at a staging host. Left set, it leaks into every test
+   that runs after it in this file. */
+afterEach(() => {
+  delete process.env.SUPER_MCP_PUBLIC_SITE_URL;
+});
 
 describe("initialize advertises the SuperMCP brand", () => {
   beforeEach(() => {
