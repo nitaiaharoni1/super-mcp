@@ -71,8 +71,11 @@ hosted privacy policy at `/privacy`, support contact, branding assets, keyless a
 reviewer needs no test account, and `readOnlyHint` on every tool with a test that keeps it
 honest.
 
-Open: no retention window prunes `usage_event` or `access_requests` yet. Not a blocker,
-but the better answer if a reviewer asks how long anything is kept.
+Retention, if a reviewer asks how long anything is kept: `usage_event` and the cached
+search phrases in `semantic_query_embedding` are both swept at 90 days by the nightly
+ingest job, and `/privacy` states that window. `access_requests` is deliberately never
+swept, because those rows are people who asked for access and the page says they are kept
+until deletion is requested.
 
 Escalations go to `mcp-review@anthropic.com`.
 
