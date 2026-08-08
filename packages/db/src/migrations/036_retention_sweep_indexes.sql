@@ -2,16 +2,19 @@
 --
 -- purgeOldUsageEvents and purgeIdleQueryEmbeddings both run
 -- "WHERE <ts> < now() - interval ORDER BY <ts> LIMIT n". Before this migration neither
--- could stop early. EXPLAIN, on a database with the indexes absent:
+-- could stop early. Measured against production, both with the indexes absent (the
+-- usage_event plan re-confirmed afterwards by dropping this index inside a transaction
+-- and rolling back):
 --
---   usage_event               full Index Scan on usage_event_key_idx, then Sort
---   semantic_query_embedding  Seq Scan, then Sort
+--   usage_event               Seq Scan, then Sort   (cost 196.06)
+--   semantic_query_embedding  Seq Scan, then Sort   (cost 45.55)
 --
--- The two differ because usage_event at least has (api_key_id, created_at DESC), so the
--- planner can read that index instead of the heap, but api_key_id is the leading column
--- and the sweep does not filter on it, so it still reads every entry. Different scan
--- node, same defect: a Sort above it that cannot emit its first row until the whole
--- table has been read. semantic_query_embedding had nothing on embedded_at at all.
+-- usage_event does have (api_key_id, created_at DESC), but api_key_id is the leading
+-- column and the sweep does not filter on it, so that index cannot serve this predicate
+-- as a range scan. Reading it in full to avoid the heap is an option the planner has and
+-- does not take at this table size; either way a Sort sits on top, and a Sort cannot emit
+-- its first row until every qualifying row has been read. That is what defeats the LIMIT.
+-- semantic_query_embedding had nothing on embedded_at at all.
 --
 -- That matters more than a slow query, because of how deleteInBatches recovers. On a
 -- statement timeout it retries with batchSize/4, which only helps if cost scales with the
