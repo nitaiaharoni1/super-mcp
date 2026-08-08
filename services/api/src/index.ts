@@ -17,9 +17,15 @@ async function main(): Promise<void> {
     .map((surface) => surface.path)
     .join(", ");
   app.log.info(`super-mcp API + MCP listening on http://${HOST}:${PORT} (MCP at ${mcpPaths})`);
-  void import("./services/search/queryEmbedding.js").then((m) =>
-    m.getQueryEmbedding("warmup").catch(() => undefined),
-  );
+  void import("./services/search/queryEmbedding.js").then(async (m) => {
+    const startedAt = Date.now();
+    try {
+      await m.warmEmbeddingModel();
+      app.log.info({ ms: Date.now() - startedAt }, "embedding model warm");
+    } catch (err) {
+      app.log.warn({ err, ms: Date.now() - startedAt }, "embedding model warmup failed");
+    }
+  });
 
   let shuttingDown = false;
   const shutdown = async (signal: string) => {

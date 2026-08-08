@@ -20,7 +20,11 @@ vi.mock("@super-mcp/shared", async () => {
 });
 
 import { embedInputHash, normalizeEmbedInput } from "@super-mcp/shared";
-import { getQueryEmbedding, QueryEmbeddingError } from "../../../src/services/search/queryEmbedding.js";
+import {
+  getQueryEmbedding,
+  QueryEmbeddingError,
+  warmEmbeddingModel,
+} from "../../../src/services/search/queryEmbedding.js";
 
 describe("getQueryEmbedding", () => {
   beforeEach(() => {
@@ -50,5 +54,34 @@ describe("getQueryEmbedding", () => {
     getCachedQueryEmbedding.mockResolvedValue(null);
     embedText.mockRejectedValue(new Error("boom"));
     await expect(getQueryEmbedding("חלב")).rejects.toBeInstanceOf(QueryEmbeddingError);
+  });
+});
+
+describe("warmEmbeddingModel", () => {
+  beforeEach(() => {
+    getCachedQueryEmbedding.mockReset();
+    putCachedQueryEmbedding.mockReset();
+    embedText.mockReset();
+  });
+
+  // A populated cache is the steady state in production: the warmup vector was
+  // stored the first time this ever ran. Warming through getQueryEmbedding would
+  // hit that entry, return early, and leave the model unloaded — handing the full
+  // model-load cost to the first user who asks something the cache has not seen.
+  it("loads the model even when the query cache would hit", async () => {
+    const vector = Array.from({ length: 384 }, () => 0);
+    getCachedQueryEmbedding.mockResolvedValue(vector);
+    embedText.mockResolvedValue(vector);
+
+    await warmEmbeddingModel();
+
+    expect(embedText).toHaveBeenCalledTimes(1);
+    expect(getCachedQueryEmbedding).not.toHaveBeenCalled();
+  });
+
+  it("does not write the warmup vector back to the shared query cache", async () => {
+    embedText.mockResolvedValue(Array.from({ length: 384 }, () => 0));
+    await warmEmbeddingModel();
+    expect(putCachedQueryEmbedding).not.toHaveBeenCalled();
   });
 });

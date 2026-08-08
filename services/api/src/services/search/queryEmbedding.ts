@@ -28,6 +28,22 @@ export class QueryEmbeddingError extends Error {
 }
 
 /**
+ * Force the embedding model into this process at boot.
+ *
+ * Deliberately bypasses the query cache. `getQueryEmbedding` returns early on a
+ * cache hit, and the warmup string is cached after its very first successful run,
+ * so warming through it embeds nothing from then on and leaves the model unloaded.
+ * The cost then lands on the first shopper to ask something the cache has not seen
+ * — measured at ~16s in production, hours after the container started.
+ *
+ * Resolves once the model can embed; rejects if it cannot, so the caller can log it
+ * rather than discover it as a slow request much later.
+ */
+export async function warmEmbeddingModel(): Promise<void> {
+  await embedText(normalizeEmbedInput("warmup"), resolveEmbedModel(), resolveEmbedBackend());
+}
+
+/**
  * Cache-first query embedding. Normalizes with the same pipeline as product embeds.
  * Throws QueryEmbeddingError on failure so callers can fall back to lexical-only.
  */
