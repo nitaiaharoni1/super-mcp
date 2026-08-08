@@ -29,16 +29,59 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `SUPER_MCP_SURFACES` | server (optional). Unset or `online` serves `/mcp` (+ `/mcp/online` alias). `stores` is rejected. |
 | `NOMINATIM_USER_AGENT` | **server (required)**. OSM returns 403 to the placeholder default, so address geocoding silently degrades to city centroids. See below. |
 | `SUPER_MCP_NO_CAP` | **ingest job (required, `1`)**. Without it the ingest silently covers ~1% of stores. See below. |
-| `NEXT_PUBLIC_MCP_URL` | web hosting only |
-| `NEXT_PUBLIC_MCP_REQUIRES_KEY` | web hosting only (optional, `1`). Install buttons default to keyless; set `1` unless the API runs with `SUPER_MCP_ALLOW_ANONYMOUS=1`. |
-| `NEXT_PUBLIC_POSTHOG_KEY` | web hosting only (Baliprop + Reflex project token) |
-| `NEXT_PUBLIC_POSTHOG_HOST` | web hosting only (`https://eu.i.posthog.com`) |
+| `NEXT_PUBLIC_MCP_URL` | **web image build arg, not runtime env**. See below. |
+| `NEXT_PUBLIC_SITE_URL` | web image build arg. Public origin, used as `metadataBase` so `og:image` resolves absolutely. |
+| `NEXT_PUBLIC_MCP_REQUIRES_KEY` | web image build arg (optional, `1`). Install buttons default to keyless; set `1` unless the API runs with `SUPER_MCP_ALLOW_ANONYMOUS=1`. |
+| `NEXT_PUBLIC_POSTHOG_KEY` | web image build arg (Baliprop + Reflex project token) |
+| `NEXT_PUBLIC_POSTHOG_HOST` | web image build arg (`https://eu.i.posthog.com`) |
 | `POSTHOG_KEY` | API/MCP server (same project token) |
 | `POSTHOG_HOST` | API/MCP server (`https://eu.i.posthog.com`) |
 
 Filter PostHog insights with `product = super_mcp`. Design: [docs/superpowers/specs/2026-07-21-posthog-analytics-design.md](./superpowers/specs/2026-07-21-posthog-analytics-design.md).
 
 Self-hosters clone this repo and supply **their own** values; they receive no access to the operator’s cloud.
+
+## Every `NEXT_PUBLIC_*` is frozen into the image, not read from the environment
+
+Setting them on the marketing Cloud Run service does nothing. Next inlines each one into
+the compiled bundle as a literal at `next build`, so the values that count are the ones
+passed as `--build-arg` to [`apps/web/Dockerfile`](../apps/web/Dockerfile), and the service
+itself runs with none of them set.
+
+Getting this wrong fails in the worst direction. `getMcpUrl()` and `getSiteUrl()` fall back
+to `http://localhost:8787/mcp` and `http://localhost:3000`, so an image built without the
+args starts cleanly, renders a perfect page, and publishes install instructions pointing at
+the visitor's own machine while the access form POSTs nowhere. Nothing logs an error.
+`gcloud builds submit --tag=...` cannot pass `--build-arg` at all, which makes the correct
+command for the API image the wrong one here.
+
+Two guards, because documentation alone did not hold:
+
+- [`apps/web/src/scripts/checkPublicEnv.mjs`](../apps/web/src/scripts/checkPublicEnv.mjs)
+  runs inside the Dockerfile and fails the build when a required value is missing, is not
+  https, or still points at a development host. A laptop `pnpm build` is untouched.
+- [`cloudbuild.web.yaml`](../cloudbuild.web.yaml) is the one blessed way to build the image.
+  Its substitutions default to empty, so a forgotten value stops the build instead of
+  shipping.
+
+```bash
+gcloud builds submit --config=cloudbuild.web.yaml \
+  --substitutions=_MCP_URL=<site>/mcp,_SITE_URL=<site>,_POSTHOG_KEY=<key>,_TAG=$(git rev-parse --short HEAD) .
+gcloud run deploy <web-service> --region=<region> --image=<image>@<digest>
+```
+
+The values are public by definition: they are already inlined in the deployed bundle. If
+they are ever lost, read them back out of the live site rather than guessing.
+
+```bash
+curl -s <site>/ | grep -o '/_next/static/chunks/[^"]*' | sort -u   # then curl and grep those
+```
+
+After any web deploy, confirm the page did not quietly localhost itself:
+
+```bash
+curl -s <site>/ | grep -c '<site>/mcp'   # must be non-zero
+```
 
 ## The Firebase Hosting front door
 

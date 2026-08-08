@@ -24,7 +24,10 @@ ENV NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY
 ENV NEXT_PUBLIC_POSTHOG_HOST=$NEXT_PUBLIC_POSTHOG_HOST
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 
-RUN pnpm --filter @super-mcp/shared build \
+# The check runs here rather than in `pnpm build` because an image is the only
+# artefact that ships: a laptop build may use the localhost defaults, a deploy may not.
+RUN node apps/web/src/scripts/checkPublicEnv.mjs \
+  && pnpm --filter @super-mcp/shared build \
   && pnpm --filter @super-mcp/web build
 
 FROM node:22-slim AS runner
