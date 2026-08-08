@@ -7,15 +7,20 @@
 #   gcloud builds submit --config=cloudbuild.web.yaml \
 #     --substitutions=_MCP_URL=<site>/mcp,_SITE_URL=<site>,_POSTHOG_KEY=<key>,_TAG=$(git rev-parse --short HEAD) .
 #
-# The substitutions default to empty on purpose: docs/DEPLOY.md keeps production
+# The URL substitutions default to empty on purpose: docs/DEPLOY.md keeps production
 # hostnames out of the tree, and the build refuses rather than guesses.
+#
+# $PROJECT_ID is spelled out at each use rather than folded into a _IMAGE default,
+# because Cloud Build does not expand built-in substitutions inside the default value
+# of a user one: it reaches the image name as the literal four characters and the
+# build is rejected before the first step runs.
 substitutions:
   _MCP_URL: ""
   _SITE_URL: ""
   _POSTHOG_KEY: ""
   _POSTHOG_HOST: "https://eu.i.posthog.com"
-  _IMAGE: "europe-west1-docker.pkg.dev/$PROJECT_ID/super-mcp/web"
-  _TAG: "$SHORT_SHA"
+  _REPO: "europe-west1-docker.pkg.dev"
+  _TAG: "latest"
 
 steps:
   - name: gcr.io/cloud-builders/docker
@@ -28,11 +33,11 @@ steps:
       - --build-arg=NEXT_PUBLIC_POSTHOG_KEY=${_POSTHOG_KEY}
       - --build-arg=NEXT_PUBLIC_POSTHOG_HOST=${_POSTHOG_HOST}
       - -t
-      - ${_IMAGE}:${_TAG}
+      - ${_REPO}/$PROJECT_ID/super-mcp/web:${_TAG}
       - .
 
 images:
-  - ${_IMAGE}:${_TAG}
+  - ${_REPO}/$PROJECT_ID/super-mcp/web:${_TAG}
 
 options:
   machineType: E2_HIGHCPU_8
