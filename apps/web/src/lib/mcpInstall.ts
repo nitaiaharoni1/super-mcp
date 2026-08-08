@@ -127,14 +127,21 @@ export function buildInstallTargets(
       settingsHref: "https://claude.ai/settings/connectors",
       docsHref: "https://support.claude.com/en/articles/11175166",
     },
+    /*
+     * Deep-links to the developer-mode toggle, not to the pane the server is added
+     * in. That toggle is the actual blocker: until it is on, the plugins pane has no
+     * add button, so sending the reader there first shows them a dead end. ChatGPT
+     * itself produces this `?section=` form, and a stale section name degrades to the
+     * Security pane, which is still the right screen.
+     */
     {
       id: "chatgpt",
       name: "ChatGPT",
       mark: "chatgpt",
       kind: "url",
       snippet: url,
-      settingsHref: "https://chatgpt.com/#settings/Connectors",
-      docsHref: "https://help.openai.com/en/articles/12584461",
+      settingsHref: "https://chatgpt.com/#settings/Security?section=developer-mode",
+      docsHref: "https://developers.openai.com/api/docs/guides/developer-mode",
     },
     {
       id: "gemini-cli",

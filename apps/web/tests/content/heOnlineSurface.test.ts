@@ -27,6 +27,23 @@ describe("marketing copy matches the online-only product surface", () => {
     );
   });
 
+  /*
+   * ChatGPT is the one assistant where following the card's face is not enough: the
+   * add button does not exist until Developer mode is on, in a different settings
+   * pane. Copy that drops the toggle sends the reader hunting for a button that is
+   * not there, which is exactly what the previous wording did.
+   */
+  it("walks ChatGPT through the developer toggle before the pane it is added in", () => {
+    const { chatgpt } = he.connect.install.targets;
+    expect(chatgpt.steps[0]).toContain("Developer mode");
+    expect(chatgpt.steps.join(" ")).toContain("Plugins");
+    expect(chatgpt.steps.join(" ")).toContain("No authentication");
+    // Renamed out of the ChatGPT settings in 2026; a card still saying it is stale.
+    expect(chatgpt.steps.join(" ")).not.toContain("Apps");
+    expect(chatgpt.note).toMatch(/Plus|Pro/);
+    expect(he.connect.install.stepsLabel).toBeTruthy();
+  });
+
   it("does not frame the ledger around travel to a physical branch", () => {
     expect(he.ledger.deltaCaption).not.toMatch(/ק״מ|קמ|הליכה/);
     expect(he.ledger.columns.nearMeta).not.toMatch(/ק״מ|קמ/);

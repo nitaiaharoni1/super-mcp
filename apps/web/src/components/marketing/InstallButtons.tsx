@@ -77,16 +77,31 @@ function InstallCard({
   const { install } = he.connect;
   const copy = install.targets[target.id as keyof typeof install.targets];
   const mark = ASSISTANT_MARKS[target.mark];
+  // Only the cards whose assistant needs more than one instruction carry these.
+  const steps = "steps" in copy ? copy.steps : undefined;
+  const note = "note" in copy ? copy.note : undefined;
 
   return (
     <div
       className={`flex h-full flex-col rounded-[var(--radius-card)] border-[3px] border-ink bg-paper-raised p-5 shadow-sticker ${tilt}`}
     >
-      <div className="flex items-center gap-2.5">
-        <AssistantMarkIcon mark={mark} className="size-6" />
-        <span dir="ltr" className="text-[length:var(--step-1)] font-bold text-ink">
-          {target.name}
-        </span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <AssistantMarkIcon mark={mark} className="size-6" />
+          <span dir="ltr" className="text-[length:var(--step-1)] font-bold text-ink">
+            {target.name}
+          </span>
+        </div>
+        <a
+          href={target.docsHref}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={install.docsLabel}
+          title={install.docsLabel}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border-2 border-ink/20 text-sm font-bold leading-none text-ink-muted hover:border-ink hover:bg-lime-soft hover:text-ink"
+        >
+          ?
+        </a>
       </div>
 
       <p className="mt-2.5 flex-1 text-sm leading-6 text-ink-muted">{copy.hint}</p>
@@ -122,15 +137,6 @@ function InstallCard({
             {install.settingsLabel}
           </TrackedAnchor>
         ) : null}
-
-        <a
-          href={target.docsHref}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-ink-faint underline decoration-2 underline-offset-4 hover:text-ink"
-        >
-          {install.docsLabel}
-        </a>
       </div>
 
       {/* Shown for the terminal line, not for a URL the reader already knows. */}
@@ -141,6 +147,31 @@ function InstallCard({
         >
           {target.snippet}
         </p>
+      ) : null}
+
+      {/*
+        Collapsed so one long assistant does not stretch every card in its grid row.
+        The card still says on its face that there is a toggle to find, so nothing a
+        reader needs in order to decide is hidden behind the click.
+      */}
+      {steps ? (
+        <details className="group mt-4 border-t-2 border-ink/10 pt-3">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-bold text-ink marker:content-none [&::-webkit-details-marker]:hidden">
+            {install.stepsLabel}
+            <span
+              aria-hidden
+              className="figure grid size-6 shrink-0 place-items-center rounded-[var(--radius-card)] border-2 border-ink bg-lime text-ink transition-transform duration-200 ease-out group-open:rotate-45"
+            >
+              +
+            </span>
+          </summary>
+          <ol className="mt-3 grid list-decimal gap-2 ps-5 text-xs leading-5 text-ink-muted">
+            {steps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          {note ? <p className="mt-3 text-xs leading-5 text-ink-faint">{note}</p> : null}
+        </details>
       ) : null}
     </div>
   );
@@ -215,9 +246,22 @@ function CopySnippetButton({
         ? install.copyFailedLabel
         : label;
 
+  // Stack every label in one cell so the button stays the width of the widest
+  // string; otherwise "הועתק" collapses the card action row.
   return (
     <Button type="button" variant="secondary" size="sm" onClick={handleCopy} aria-live="polite">
-      {text}
+      <span className="inline-grid place-items-center">
+        <span className="invisible col-start-1 row-start-1" aria-hidden>
+          {label}
+        </span>
+        <span className="invisible col-start-1 row-start-1" aria-hidden>
+          {install.copiedLabel}
+        </span>
+        <span className="invisible col-start-1 row-start-1" aria-hidden>
+          {install.copyFailedLabel}
+        </span>
+        <span className="col-start-1 row-start-1">{text}</span>
+      </span>
     </Button>
   );
 }

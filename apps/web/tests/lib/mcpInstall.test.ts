@@ -97,6 +97,18 @@ describe("install targets, keyless", () => {
     }
   });
 
+  /*
+   * The plugins pane grows its add button only once Developer mode is on, so the
+   * link has to land on the toggle. It previously pointed at #settings/Connectors,
+   * a section ChatGPT has since renamed, which opened settings on nothing.
+   */
+  it("sends ChatGPT to the developer-mode toggle, not to the pane that needs it", () => {
+    const href = byId.get("chatgpt")?.settingsHref as string;
+    expect(href).toContain("chatgpt.com");
+    expect(href).toContain("developer-mode");
+    expect(href).not.toContain("Connectors");
+  });
+
   it("mentions no credential anywhere: a keyless install that carried one would 401", () => {
     const everything = [
       JSON.stringify(targets),

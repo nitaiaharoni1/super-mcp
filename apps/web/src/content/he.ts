@@ -229,6 +229,7 @@ export const he = {
       otherTools: "עובד גם עם כלי AI אחרים שמאפשרים חיבור לשירותים חיצוניים. אם שלכם לא ברשימה, כתבו לנו.",
       docsLabel: "מדריך",
       settingsLabel: "פתיחת ההגדרות",
+      stepsLabel: "צעד אחר צעד",
       copiedLabel: "הועתק",
       copyFailedLabel: "ההעתקה נכשלה",
       targets: {
@@ -239,9 +240,24 @@ export const he = {
           action: "העתקת הכתובת",
           hint: "בהגדרות של Claude נכנסים ל־Connectors, לוחצים Add custom connector ומדביקים את הכתובת.",
         },
+        /*
+         * The only card that needs more than a sentence. ChatGPT hides custom MCP
+         * servers behind a toggle in a different settings pane from the one you add
+         * them in, so a reader who is told only "add a connector" finds no button at
+         * all. Menu names are the ones on screen in August 2026: the pane was renamed
+         * Apps and then Plugins, and the developer toggle lives under Security and
+         * login, not with the plugins.
+         */
         chatgpt: {
           action: "העתקת הכתובת",
-          hint: "בהגדרות של ChatGPT נכנסים ל־Apps, מפעילים Developer mode ומוסיפים connector עם הכתובת.",
+          hint: "צריך קודם להפעיל Developer mode בהגדרות של ChatGPT, ורק אז אפשר להוסיף את הכתובת.",
+          steps: [
+            "בהגדרות ChatGPT נכנסים ל־Security and login ומפעילים את Developer mode.",
+            "עוברים ל־Plugins ולוחצים על הפלוס כדי ליצור אפליקציה חדשה.",
+            "מדביקים את כתובת השרת, בוחרים Streaming HTTP, ובאימות בוחרים No authentication.",
+            "בשיחה לוחצים על הפלוס, נכנסים ל־Developer mode ומסמנים את SuperMCP.",
+          ],
+          note: "עובד רק בדפדפן, לא באפליקציה בטלפון, ורק בחשבון בתשלום (Plus, Pro, Business, Enterprise או Edu). בחשבון עסקי מנהל צריך להפעיל את Developer mode. ChatGPT מסמן את המצב הזה כמסוכן כי הוא פותח גם כלים שכותבים ומוחקים; ששת הכלים שלנו הם קריאה בלבד.",
         },
         "gemini-cli": { action: "העתקת הפקודה", hint: "מדביקים בטרמינל ומריצים." },
       },
