@@ -44,10 +44,12 @@ export const he = {
 
   header: {
     brand: "SuperMCP",
+    /* Rooted at "/" so the header still works from /privacy. On the home page the
+       browser treats "/#ledger" as a same-document fragment, so nothing reloads. */
     nav: [
-      { href: "#ledger", label: "ההשוואה" },
-      { href: "#coverage", label: "המחירים" },
-      { href: "#connect", label: "איך מחברים" },
+      { href: "/#ledger", label: "ההשוואה" },
+      { href: "/#coverage", label: "המחירים" },
+      { href: "/#connect", label: "איך מחברים" },
     ],
     cta: "התחילו בחינם",
   },
@@ -338,12 +340,72 @@ export const he = {
     ],
   },
 
+  /*
+   * Hosted privacy policy, required by the Anthropic connector submission and by
+   * anyone who wants to know what happens to their address.
+   *
+   * Every sentence here is checkable against the code, and that is the point:
+   *   - geocodeCache.ts HMACs the address and stores only the digest
+   *   - analytics/metadata.ts is metadata-only by construction ("Never include
+   *     free-text queries, product names, GTINs, cities, or coordinates")
+   *   - usage_event holds api_key_id, route, status_code, latency_ms and nothing else
+   *   - continuation.ts signs the basket back to the caller instead of storing it
+   * If any of those change, this page is wrong and has to change with them.
+   *
+   * updatedOn is the date the text was last true, not the last time the file moved.
+   */
+  privacy: {
+    slug: "/privacy",
+    title: "פרטיות",
+    updatedLabel: "עודכן",
+    updatedOn: "8.8.2026",
+    intro:
+      "SuperMCP עונה על שאלה אחת: מאיזו רשת הכי משתלם להזמין את הרשימה שלכם לכתובת שלכם. כדי לענות עליה צריך את הרשימה ואת הכתובת. הדף הזה מסביר בדיוק מה קורה איתן.",
+    sections: [
+      {
+        heading: "מה אתם שולחים לנו",
+        body: "רשימת הקניות והכתובת או העיר למשלוח. זה מגיע אלינו מתוך כלי ה־AI שאתם מדברים איתו, בכל פעם שאתם מבקשים השוואה.",
+      },
+      {
+        heading: "מה אנחנו עושים עם זה",
+        body: "מתרגמים את הכתובת לנקודה על המפה, מתאימים כל שורה ברשימה למוצרים אמיתיים, ומחשבים כמה יעלה הסל בכל רשת כולל משלוח. התשובה חוזרת אליכם ובזה נגמר השימוש.",
+      },
+      {
+        heading: "מה לא נשמר אצלנו",
+        body: "רשימת הקניות לא נשמרת. הכתובת לא נשמרת. כשאנחנו זוכרים תוצאה של כתובת כדי לא לחשב אותה שוב, נשמר רק טביעת אצבע מוצפנת חד־כיוונית שלה, שאי אפשר להפוך בחזרה לכתובת. כשצריך שאלת הבהרה באמצע, מצב הסל חוזר אליכם חתום ולא יושב אצלנו.",
+      },
+      {
+        heading: "מה כן נשמר",
+        body: "שורת שימוש טכנית לכל בקשה: איזה מפתח, איזו נתיב, קוד תשובה וכמה זמן זה לקח. אין בה שום פריט, כתובת או תוכן. היא קיימת כדי לזהות תקלות ועומסים.",
+      },
+      {
+        heading: "מי עוד רואה משהו",
+        body: "שירות המפות OpenStreetMap Nominatim מקבל את הכתובת עצמה כדי להפוך אותה לנקודה, כי בלי זה אי אפשר לדעת מי מחלק אליכם. שירות הניתוח PostHog באירופה מקבל מספרים בלבד: כמה פריטים היו, כמה זמן לקח, האם הייתה כתובת. אף פעם לא את הפריטים ולא את הכתובת. אין מכירה של מידע ואין פרופיל פרסומי.",
+      },
+      {
+        heading: "אם השארתם אימייל",
+        body: "טופס בקשת הגישה שומר את כתובת האימייל ואת מה שכתבתם על השימוש, ושולח לנו התראה. זה נשמר עד שתבקשו למחוק.",
+      },
+      {
+        heading: "מחיקה ושאלות",
+        body: "כותבים לנו ומוחקים. אותה כתובת גם לכל שאלה על הדף הזה.",
+        contactEmail: "nitaiaharoni1@gmail.com",
+      },
+      {
+        heading: "מחירים",
+        body: "המחירים מגיעים ממחירוני השקיפות שהרשתות מחויבות לפרסם. הם לא מידע עליכם, והם מוצגים תמיד עם התאריך שבו נראו לאחרונה.",
+      },
+    ],
+    backLabel: "חזרה לדף הבית",
+  },
+
   footer: {
     note: "SuperMCP · השוואת מחירי סופר עם AI",
     disclosure: "לכל מחיר מצוין מתי נראה לאחרונה במחירון הרשת. פריט ללא מחיר מסומן כחסר.",
     links: [
       { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/DATA.md", label: "מאיפה המחירים" },
-      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/SECURITY.md", label: "אבטחה ופרטיות" },
+      { href: "/privacy", label: "פרטיות" },
+      { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/SECURITY.md", label: "אבטחה" },
       { href: "https://github.com/nitaiaharoni1/super-mcp/blob/main/README.md", label: "למפתחים" },
     ],
   },

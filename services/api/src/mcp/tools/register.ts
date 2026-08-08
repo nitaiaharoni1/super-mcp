@@ -52,6 +52,30 @@ type ToolMeta<T extends z.ZodRawShape> = {
 };
 
 /**
+ * Behaviour hints every tool on this surface shares.
+ *
+ * `readOnlyHint` is a statement of fact, not a preference: SuperMCP answers questions
+ * about a price catalogue it ingests elsewhere. No tool here places an order, holds a
+ * basket, or writes anything a caller could observe later. Clients and connector
+ * reviewers weigh destructive capability, and a server that cannot destroy anything
+ * should say so rather than leave them to assume.
+ *
+ * `openWorldHint` is the honest counterpart: the catalogue is millions of rows that
+ * change daily, and an address goes out to a geocoder, so the same call tomorrow can
+ * legitimately answer differently. That is an open world, not a fixed lookup table.
+ *
+ * `destructiveHint` and `idempotentHint` are deliberately absent. The spec defines both
+ * as meaningful only when `readOnlyHint` is false, so setting them here would be noise
+ * that implies a write path exists.
+ *
+ * ANY tool that writes must stop sharing this constant, or it will ship a lie.
+ */
+const READ_ONLY_ANNOTATIONS = {
+  readOnlyHint: true,
+  openWorldHint: true,
+} as const;
+
+/**
  * Registers an MCP tool with shared try/catch and JSON text serialization.
  * Handlers should return a plain payload or throw AppError for client-safe failures.
  */
@@ -98,7 +122,12 @@ export function registerTool<T extends z.ZodRawShape>(
 
   server.registerTool(
     name,
-    { title: meta.title, description: meta.description, inputSchema: strictSchema },
+    {
+      title: meta.title,
+      description: meta.description,
+      inputSchema: strictSchema,
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
     toolHandler as Parameters<McpServer["registerTool"]>[2],
   );
 }

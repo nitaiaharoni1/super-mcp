@@ -48,18 +48,18 @@ dialog and becomes a toggle inside Claude. Submit at
 [claude.com/docs/connectors/building/submission](https://claude.com/docs/connectors/building/submission);
 the portal is always open and status is tracked in a submissions dashboard.
 
-Already satisfied: Streamable HTTP transport, publicly reachable over HTTPS.
+**Everything the form asks for is assembled in
+[docs/connector-submission.md](./connector-submission.md)**: identity fields, the English
+translation of the privacy policy, and reviewer test instructions verified against
+production. Fill the form from that file.
 
-Still needed before submitting:
+Satisfied as of 2026-08-08: Streamable HTTP transport, publicly reachable over HTTPS,
+hosted privacy policy at `/privacy`, support contact, branding assets, keyless access so a
+reviewer needs no test account, and `readOnlyHint` on every tool with a test that keeps it
+honest.
 
-- privacy policy URL (the repo has [SECURITY.md](../SECURITY.md), but a hosted policy
-  page on the marketing site is what the form asks for)
-- support contact address
-- test-account instructions good enough for a reviewer to reach a priced basket end to
-  end, including a key if one is required
-- branding assets (icon, description, category)
-- tool annotations: every tool is read-only, which is worth stating explicitly since
-  reviewers weigh destructive capability
+Open: no retention window prunes `usage_event` or `access_requests` yet. Not a blocker,
+but the better answer if a reviewer asks how long anything is kept.
 
 Escalations go to `mcp-review@anthropic.com`.
 
