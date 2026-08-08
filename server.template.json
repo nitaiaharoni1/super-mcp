@@ -5,6 +5,18 @@
   "description": "Israeli supermarket delivery pricing. Give it a shopping list and an address and it returns which online storefront is cheapest delivered, priced from the regulated public price feeds, with missing items marked rather than dropped.",
   "version": "0.1.0",
   "websiteUrl": "${SUPER_MCP_PUBLIC_SITE_URL}",
+  "icons": [
+    {
+      "src": "${SUPER_MCP_PUBLIC_SITE_URL}/icon-192.png",
+      "mimeType": "image/png",
+      "sizes": ["192x192"]
+    },
+    {
+      "src": "${SUPER_MCP_PUBLIC_SITE_URL}/icon-512.png",
+      "mimeType": "image/png",
+      "sizes": ["512x512"]
+    }
+  ],
   "repository": {
     "url": "https://github.com/nitaiaharoni1/super-mcp",
     "source": "github"

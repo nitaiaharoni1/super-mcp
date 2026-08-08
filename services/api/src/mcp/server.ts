@@ -29,12 +29,44 @@ export function buildMcpServerInstructions(
 /** Snapshot at module load for tests; recreate via buildMcpServerInstructions in createMcpServer. */
 export const MCP_SERVER_INSTRUCTIONS = buildMcpServerInstructions();
 
+const DEFAULT_PUBLIC_SITE_URL = "https://supermcp.web.app";
+
+/** Marketing origin that also hosts the brand icons, trailing slash stripped. */
+function publicSiteUrl(env: NodeJS.ProcessEnv): string {
+  const raw = env.SUPER_MCP_PUBLIC_SITE_URL?.trim() || DEFAULT_PUBLIC_SITE_URL;
+  return raw.replace(/\/+$/, "");
+}
+
+/**
+ * Brand icons advertised in the initialize response (MCP spec 2025-11-25, SEP-973).
+ *
+ * Inert today: Cursor accepts the field and renders nothing, Claude's custom connectors
+ * still draw a generic globe, and ChatGPT ignores it. It costs one field to send, and the
+ * logo appears the day any of them ships support. MCP Inspector already renders it.
+ *
+ * PNG only, absolute HTTPS, under the schema's 255-char src limit. The SVG mark is left out
+ * on purpose: clients are told to distrust SVG icons because they can carry script.
+ */
+function brandIcons(env: NodeJS.ProcessEnv) {
+  const site = publicSiteUrl(env);
+  return [
+    { src: `${site}/icon-192.png`, mimeType: "image/png", sizes: ["192x192"] },
+    { src: `${site}/icon-512.png`, mimeType: "image/png", sizes: ["512x512"] },
+  ];
+}
+
 function createMcpServer(
   surface: McpSurface,
   analyticsCtx: AnalyticsRequestContext,
 ): McpServer {
   const server = new McpServer(
-    { name: surface.serverName, version: resolveBuildRevision() },
+    {
+      name: surface.serverName,
+      title: "SuperMCP",
+      version: resolveBuildRevision(),
+      websiteUrl: publicSiteUrl(process.env),
+      icons: brandIcons(process.env),
+    },
     { instructions: surface.buildInstructions(process.env) },
   );
   // Bind before registerTools so every tool closure can resolve auth for capture.
