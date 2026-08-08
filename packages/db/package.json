@@ -34,7 +34,7 @@
     "@anthropic-ai/sdk": "^0.112.1",
     "@huggingface/transformers": "^4.2.0",
     "@super-mcp/shared": "workspace:*",
-    "dotenv": "^16.5.0",
+    "dotenv": "^17.4.2",
     "pg": "^8.16.0"
   },
   "devDependencies": {
