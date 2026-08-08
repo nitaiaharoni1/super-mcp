@@ -51,6 +51,12 @@ SUPER_MCP_PUBLIC_SITE_URL="$SUPER_MCP_PUBLIC_SITE_URL" \
 
 echo "Rendered $rendered"
 
+# Before the login, not after: the device flow is a browser round-trip, and finding out
+# afterwards that the schema rejects the file wastes it. The registry caps `description`
+# at 100 characters, which the first version of the template silently exceeded.
+echo "Validating $rendered against the registry schema..."
+mcp-publisher validate
+
 # GitHub device-flow auth. The io.github.nitaiaharoni1/ namespace in the template is
 # what this login authorises; a different account cannot publish under it.
 mcp-publisher login github
