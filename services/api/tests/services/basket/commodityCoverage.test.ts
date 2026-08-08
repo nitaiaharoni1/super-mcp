@@ -945,3 +945,80 @@ describe("filterClassPeers rejects what resolution rejects", () => {
     expect(kept.map((r) => r.product_id)).toEqual(["same"]);
   });
 });
+
+describe("enrichCommodityCoverage peer-fetch failure", () => {
+  beforeEach(() => {
+    query.mockReset();
+  });
+
+  it("degrades the failing line only, leaving the rest of the basket enriched", async () => {
+    // A peer fetch is a coverage BROADENING pass, not the resolution itself: the
+    // delivery surface priced baskets for months before it called this at all.
+    // One line's query hitting the 30s statement_timeout must therefore cost that
+    // line its peers, not cost the shopper the whole basket. Reproduces the
+    // 2026-08-05 prod failure, where a 72s optimize_delivery returned nothing.
+    const timeout = Object.assign(new Error("canceling statement due to statement timeout"), {
+      code: "57014",
+    });
+    query.mockImplementation((_sql: string, params: unknown[]) => {
+      const classL1 = (params as string[])[1];
+      if (classL1 === "produce") return Promise.reject(timeout);
+      return Promise.resolve({
+        rows: [
+          {
+            product_id: "pita-b",
+            name: "פיתות רשת ב",
+            size_qty: 1000,
+            size_unit: "g",
+            piece_count: 10,
+            chain_id: "chain-b",
+          },
+        ],
+      });
+    });
+
+    const cucumber = primary({ productId: "cucumber", name: "מלפפונים" });
+    const failing = resolvedLine({
+      index: 0,
+      productId: "cucumber",
+      name: "מלפפונים",
+      candidates: [cucumber],
+    });
+    const pita = primary({
+      productId: "pita-10",
+      name: "פיתות עננים 10",
+      productClass: "bakery",
+      classL1: "bakery",
+      classL2: "pita_flatbread",
+      classL3: "pita",
+      sizeUnit: "g",
+      sizeQty: 1000,
+      pieceCount: 10,
+    });
+    const healthy = resolvedLine({
+      index: 1,
+      productId: "pita-10",
+      name: pita.name,
+      resolvedBy: "product_id",
+      resolutionStatus: "resolved",
+      candidates: [pita],
+    });
+
+    await expect(
+      enrichCommodityCoverage(
+        [
+          { productId: "cucumber", query: "מלפפונים", packQty: 1, intentModeOverride: "commodity" },
+          { productId: "pita-10", query: "פיתות", packQty: 1, intentModeOverride: "commodity" },
+        ],
+        [failing, healthy],
+        ["store-1"],
+      ),
+    ).resolves.toBeUndefined();
+
+    // The healthy line still broadened.
+    expect(healthy.equivalents?.map((c) => c.productId)).toContain("pita-b");
+    // The failing line kept its resolved primary and its intent, just no peers.
+    expect(failing.productId).toBe("cucumber");
+    expect(failing.intentMode).toBe("commodity");
+  });
+});

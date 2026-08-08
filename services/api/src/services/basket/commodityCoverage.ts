@@ -480,7 +480,26 @@ export async function enrichCommodityCoverage(
     const scope = resolveCoverageClassScope(queryText, primary);
     if (!scope) return;
 
-    const rows = await fetchCarriedClassPeers(primary, storeIds, scope);
+    // Broadening a line is an IMPROVEMENT on an already-resolved basket, so it
+    // fails soft. The peer query is the heaviest statement in the request and the
+    // first to hit the 30s statement_timeout on a cold buffer cache; before this
+    // catch, one such line rejected mapPool's Promise.all and aborted the whole
+    // call, so a 12-line basket returned nothing after 72s (prod, 2026-08-05).
+    // Losing this line's peers costs it coverage against chains that stock the
+    // commodity under their own item code — the exact state the delivery surface
+    // shipped in — which is strictly better than losing the basket.
+    const rows = await fetchCarriedClassPeers(primary, storeIds, scope).catch((err: unknown) => {
+      console.error(
+        JSON.stringify({
+          severity: "WARNING",
+          event: "coverage_peers_unavailable",
+          index: item.index,
+          classL1: scope.classL1,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return [] as CarriedProductRow[];
+    });
 
     if (intent.mode === "brand_family") {
       const { auto, alternatives } = classifyBrandFamilyPeers(queryText, primary, rows, {
