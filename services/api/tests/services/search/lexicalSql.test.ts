@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAliasHitCte,
   buildDedupedFromRankedCte,
   buildLexicalCandidateUnionSql,
   buildLexicalRankedCte,
@@ -164,5 +165,35 @@ describe("buildStockFilter", () => {
     expect(
       buildStockFilter({ inStockOnly: true, pricedOnly: true, scoped: true, ...exists }),
     ).toBe("AND LOCAL AND GLOBAL");
+  });
+});
+
+/**
+ * The alias CTE sequentially scanned `product_alias` on every fuzzy lexical
+ * pass, because `similarity(a, b) > x` is a function call no index can answer.
+ * On production that was 70.9ms and a Seq Scan per call, ~100 calls per basket.
+ * Adding the indexable `%` operator as a PREFILTER took the same query to 2.5ms
+ * on a Bitmap Index Scan over `product_alias_trgm`, returning identical rows.
+ */
+describe("alias CTE trigram prefilter", () => {
+  it("prefilters with the indexable % operator and keeps the exact threshold", () => {
+    const sql = buildAliasHitCte(true, 0.4);
+    expect(sql).toContain("pa.alias % $1");
+    // The prefilter must never become the predicate: `%` uses pg_trgm's own
+    // threshold, so the exact comparison has to survive alongside it.
+    expect(sql).toContain("similarity(pa.alias, $1) > 0.4");
+  });
+
+  it("keeps the unindexed form below pg_trgm's own threshold", () => {
+    // Under 0.3 the `%` prefilter is STRICTER than the predicate and would drop
+    // aliases that should match, so correctness wins over the index here.
+    const sql = buildAliasHitCte(true, 0.2);
+    expect(sql).not.toContain("pa.alias % $1");
+  });
+
+  it("adds no fuzzy clause at all when fuzzy is off", () => {
+    const sql = buildAliasHitCte(false, 0.4);
+    expect(sql).not.toContain("similarity(");
+    expect(sql).not.toContain("pa.alias % $1");
   });
 });

@@ -110,11 +110,51 @@ export function buildListingHitCte(): string {
     )`;
 }
 
-/** Optional alias evidence CTE for candidates + scoring. */
+/**
+ * `pg_trgm.similarity_threshold`'s stock value, which is what the `%` operator
+ * compares against unless a session changes it. Not read from the database on
+ * purpose: this is a compile-time decision about whether `%` is a safe filter to
+ * add, and a query that had to ask the server first would cost the round trip
+ * the operator exists to save.
+ */
+const PG_TRGM_DEFAULT_LIMIT = 0.3;
+
+/**
+ * Optional alias evidence CTE for candidates + scoring.
+ *
+ * `similarity(pa.alias, $1) > threshold` is a function call on every row, and no
+ * index can answer it, so this CTE sequentially scanned the whole
+ * `product_alias` table. Only the `%` operator is indexable by
+ * `product_alias_trgm`. Measured against production for the query "קפה":
+ *
+ *   similarity() > 0.4     Seq Scan on product_alias    70.9ms   389 buffers
+ *   `%` then similarity()  Bitmap Index Scan on trgm     2.5ms    31 buffers
+ *
+ * 28x, and it is not one query: the lexical pass fans out over alias and
+ * morphology variants and runs twice per basket line, so a 12-line basket hit
+ * this around a hundred times. That is most of the ~4 million tuples a single
+ * basket was scanning.
+ *
+ * `%` is `similarity(a, b) >= pg_trgm.similarity_threshold`, so it is a
+ * PREFILTER here, not the predicate: the exact `> trigramThreshold` test still
+ * runs on the rows it returns, which keeps the result set bit-for-bit what it
+ * was. Verified on production, same query: 456 rows before, 456 after, 0 rows
+ * in one and not the other.
+ *
+ * That equivalence only holds while `trigramThreshold` is at least the
+ * operator's own threshold. `trigramThreshold` defaults to 0.4 but is
+ * env-tunable, and below 0.3 the prefilter would be STRICTER than the predicate
+ * and would silently drop matching aliases, so the old form is kept for that
+ * case. It is slow and correct, which is the right way round.
+ */
 export function buildAliasHitCte(
   includeFuzzy: boolean,
   trigramThreshold: number,
 ): string {
+  const fuzzy =
+    trigramThreshold >= PG_TRGM_DEFAULT_LIMIT
+      ? `OR (pa.alias % $1 AND similarity(pa.alias, $1) > ${trigramThreshold})`
+      : `OR similarity(pa.alias, $1) > ${trigramThreshold}`;
   return `
     alias_hit AS (
       SELECT DISTINCT pa.product_id
@@ -123,7 +163,7 @@ export function buildAliasHitCte(
         AND $1 <> ''
         AND (
           pa.alias ILIKE '%' || $6 || '%' ESCAPE '\\'
-          ${includeFuzzy ? `OR similarity(pa.alias, $1) > ${trigramThreshold}` : ""}
+          ${includeFuzzy ? fuzzy : ""}
         )
     )`;
 }
