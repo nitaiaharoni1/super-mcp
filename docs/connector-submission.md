@@ -1,5 +1,11 @@
 # Anthropic connector submission
 
+> **Parked 2026-08-08, on plan not on readiness.** The portal for remote MCP servers lives in
+> Claude.ai organization admin settings, which need a **Team or Enterprise** plan and Owner
+> access. An individual plan gets "You don't have access to organization settings" and no
+> form. The operator chose not to upgrade. Everything below is finished and verified; it is
+> waiting on a Team org and nothing else.
+
 Everything the submission form at
 [claude.com/docs/connectors/building/submission](https://claude.com/docs/connectors/building/submission)
 asks for, in one place, so the form can be filled without re-deriving any of it.

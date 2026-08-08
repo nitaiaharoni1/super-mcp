@@ -48,10 +48,23 @@ dialog and becomes a toggle inside Claude. Submit at
 [claude.com/docs/connectors/building/submission](https://claude.com/docs/connectors/building/submission);
 the portal is always open and status is tracked in a submissions dashboard.
 
+**Blocked on plan, not on readiness. Verified 2026-08-08.** Submitting a *remote* MCP server
+happens inside Claude.ai organization admin settings, and those require a **Team or
+Enterprise** plan with Owner access. On an individual plan (Free/Pro/Max) the portal answers
+"You don't have access to organization settings" and there is no form at all. The operator
+has decided not to upgrade, so this queue is parked, not in progress.
+
+Nothing about the connector is the blocker: the requirements are met (see below). Do not
+spend time re-checking readiness. The only thing that unblocks this is a Team org.
+
 **Everything the form asks for is assembled in
 [docs/connector-submission.md](./connector-submission.md)**: identity fields, the English
 translation of the privacy policy, and reviewer test instructions verified against
-production. Fill the form from that file.
+production. Fill the form from that file the day a Team org exists.
+
+Not being in the directory does not stop anyone using SuperMCP. Claude users on paid
+individual plans can still add it by URL as a custom connector, and the MCP Registry listing
+below is the free discovery route that aggregators pull from.
 
 Satisfied as of 2026-08-08: Streamable HTTP transport, publicly reachable over HTTPS,
 hosted privacy policy at `/privacy`, support contact, branding assets, keyless access so a
