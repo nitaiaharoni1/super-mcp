@@ -38,3 +38,6 @@ apps/web/firebase-hosting/*
 
 # Local editor settings (personal, not shared)
 .vscode/
+
+# Finder droppings. These land in apps/web/public, which ships to Hosting verbatim.
+.DS_Store
