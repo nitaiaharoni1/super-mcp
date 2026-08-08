@@ -121,13 +121,14 @@ change this with it.
 >
 > **What we do keep.** One technical usage row per request: which key, which route, the
 > response code, and how long it took. It contains no item, address, or content. It exists
-> to spot faults and load.
+> to spot faults and load, and is deleted after 90 days.
 >
 > **The search dictionary.** When someone searches a phrase not seen here before, the
 > phrase itself is stored once in a shared dictionary alongside its numeric
 > representation, so the next search for the same phrase is instant. That dictionary holds
 > no address, no record of who searched, and no link between one phrase and another, so
-> nobody's list can be reassembled from it.
+> nobody's list can be reassembled from it. Every entry is deleted after 90 days, however
+> often it is searched.
 >
 > **Who else sees anything.** The OpenStreetMap Nominatim mapping service receives the
 > address itself, in order to turn it into a point, because without that there is no way
@@ -163,6 +164,7 @@ Each claim is checkable in code, which is the reason the policy is worth trustin
 | Analytics carry a pseudonymous id | `anonymousAnalyticsId` in `services/api/src/auth.ts` is an HMAC over client address + user agent, truncated to 16 hex; key holders are identified by key id instead |
 | The access email transits Resend | `notifyOperator` in `services/api/src/routes/access/index.ts` POSTs it to `api.resend.com`, fire-and-forget, and is a no-op when the env vars are unset |
 | No user text reaches an LLM at request time | Product classification runs offline in `services/ingestion` and `packages/db/src/scripts/classifyProducts.ts`; the API has no Vertex, OpenAI, or Anthropic call path |
+| Both 90-day windows are real | `purgeOldUsageEvents` / `purgeIdleQueryEmbeddings` in `packages/db/src/queries/retention.ts`, run nightly from `services/ingestion/src/index.ts` with `SUPER_MCP_USAGE_RETENTION_DAYS=90` and `SUPER_MCP_QUERY_CACHE_RETENTION_DAYS=90` set on the ingest job |
 
 That last row is the reason the policy says the list is not kept **as a list**, rather than
 the cleaner-sounding claim that nothing is kept. The first draft of this page said the
@@ -172,11 +174,6 @@ stronger claim either, because the stored vector is derived from the phrase.
 
 ## Still open before submitting
 
-- **Retention is built but not switched on.** `purgeOldUsageEvents` and
-  `purgeIdleQueryEmbeddings` run from the nightly ingest job, both gated on an env var that
-  is currently unset, so today the honest answer to "how long do you keep it" is still
-  "until you ask". Turning them on means setting the windows, re-pointing the pinned ingest
-  job at an image that has them, and then saying so on `/privacy`. See docs/DEPLOY.md.
 - **Keyless abuse ceiling.** Anonymous access is what makes review frictionless; it is
   also what a reviewer may ask about. The answer is the 300/min per-address limit plus a
   global ceiling, in `services/api/src/auth.ts`.

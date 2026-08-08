@@ -355,6 +355,12 @@ export const he = {
    *     the list is not kept AS A LIST rather than claiming nothing is kept
    * If any of those change, this page is wrong and has to change with them.
    *
+   * The two 90-day claims describe a job, not an intention: the nightly ingest runs
+   * purgeOldUsageEvents and purgeIdleQueryEmbeddings, gated on
+   * SUPER_MCP_USAGE_RETENTION_DAYS / SUPER_MCP_QUERY_CACHE_RETENTION_DAYS. Unset those
+   * env vars, or re-pin the ingest job to an image without the sweeps, and these two
+   * sentences become false. See docs/DEPLOY.md.
+   *
    * updatedOn is the date the text was last true, not the last time the file moved.
    */
   privacy: {
@@ -379,11 +385,11 @@ export const he = {
       },
       {
         heading: "מה כן נשמר",
-        body: "שורת שימוש טכנית לכל בקשה: איזה מפתח, איזה נתיב, קוד תשובה וכמה זמן זה לקח. אין בה שום פריט, כתובת או תוכן. היא קיימת כדי לזהות תקלות ועומסים.",
+        body: "שורת שימוש טכנית לכל בקשה: איזה מפתח, איזה נתיב, קוד תשובה וכמה זמן זה לקח. אין בה שום פריט, כתובת או תוכן. היא קיימת כדי לזהות תקלות ועומסים, ונמחקת אחרי 90 יום.",
       },
       {
         heading: "מילון החיפוש",
-        body: "כשמחפשים ביטוי שלא נראה כאן קודם, הביטוי עצמו נשמר פעם אחת במילון משותף יחד עם הייצוג המספרי שלו, כדי שהחיפוש הבא על אותו ביטוי יהיה מיידי. במילון הזה אין כתובת, אין מי חיפש ואין קשר בין ביטוי אחד לשני, ולכן אי אפשר להרכיב ממנו בחזרה את הרשימה של אף אחד.",
+        body: "כשמחפשים ביטוי שלא נראה כאן קודם, הביטוי עצמו נשמר פעם אחת במילון משותף יחד עם הייצוג המספרי שלו, כדי שהחיפוש הבא על אותו ביטוי יהיה מיידי. במילון הזה אין כתובת, אין מי חיפש ואין קשר בין ביטוי אחד לשני, ולכן אי אפשר להרכיב ממנו בחזרה את הרשימה של אף אחד. כל ערך נמחק אחרי 90 יום, גם אם מחפשים אותו הרבה.",
       },
       {
         heading: "מי עוד רואה משהו",
