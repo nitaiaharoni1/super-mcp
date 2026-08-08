@@ -6,6 +6,8 @@ import {
   closePool,
   healSizeUnitFamily,
   purgeExpiredPromotions,
+  purgeIdleQueryEmbeddings,
+  purgeOldUsageEvents,
   refreshProductStoreCounts,
 } from "@super-mcp/db";
 import { syncFulfillmentCatalog } from "./fulfillment/sync.js";
@@ -117,6 +119,39 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ event: "promotion_purge", ...purge }));
     } catch (err) {
       console.error("promotion_purge failed (non-fatal):", err);
+    }
+  }
+
+  // Privacy retention, on the same nightly schedule and by the same rule: off unless a
+  // window is set, so no deployment starts deleting because it picked up a new image.
+  //
+  // The query-embedding sweep is the one that matters. semantic_query_embedding stores
+  // normalized_query, the phrase a shopper typed, and nothing ages it out on its own. No
+  // row names a caller, so no list can be reassembled, but "kept forever" is not an answer
+  // a privacy page should have to give. Expiring a phrase costs one re-embed and no
+  // correctness.
+  //
+  // access_requests is deliberately absent: those rows are people who asked for access, and
+  // the policy says they are kept until deletion is requested. A timer would destroy the
+  // record rather than protect anyone.
+  for (const sweep of [
+    {
+      event: "usage_event_purge",
+      days: Number(process.env.SUPER_MCP_USAGE_RETENTION_DAYS ?? ""),
+      run: purgeOldUsageEvents,
+    },
+    {
+      event: "query_cache_purge",
+      days: Number(process.env.SUPER_MCP_QUERY_CACHE_RETENTION_DAYS ?? ""),
+      run: purgeIdleQueryEmbeddings,
+    },
+  ]) {
+    if (!Number.isFinite(sweep.days) || sweep.days <= 0) continue;
+    try {
+      const result = await sweep.run(sweep.days);
+      console.log(JSON.stringify({ event: sweep.event, ...result }));
+    } catch (err) {
+      console.error(`${sweep.event} failed (non-fatal):`, err);
     }
   }
 

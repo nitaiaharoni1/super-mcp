@@ -172,9 +172,11 @@ stronger claim either, because the stored vector is derived from the phrase.
 
 ## Still open before submitting
 
-- **Retention.** Nothing prunes `usage_event` or `access_requests` today. The policy says
-  access requests are kept until deletion is requested, which is true, but a stated
-  retention window would be better than an honest "indefinitely".
+- **Retention is built but not switched on.** `purgeOldUsageEvents` and
+  `purgeIdleQueryEmbeddings` run from the nightly ingest job, both gated on an env var that
+  is currently unset, so today the honest answer to "how long do you keep it" is still
+  "until you ask". Turning them on means setting the windows, re-pointing the pinned ingest
+  job at an image that has them, and then saying so on `/privacy`. See docs/DEPLOY.md.
 - **Keyless abuse ceiling.** Anonymous access is what makes review frictionless; it is
   also what a reviewer may ask about. The answer is the 300/min per-address limit plus a
   global ceiling, in `services/api/src/auth.ts`.

@@ -37,6 +37,11 @@ export {
   type ExpiredPromoPurgeResult,
   type UpsertPromoInput,
 } from "./promotions.js";
+export {
+  purgeIdleQueryEmbeddings,
+  purgeOldUsageEvents,
+  type RetentionSweepResult,
+} from "./retention.js";
 export { checkCatalogIntegrity, type CatalogIntegrityReport } from "./integrity.js";
 export {
   backfillCentroids,

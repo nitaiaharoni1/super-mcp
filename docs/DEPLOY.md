@@ -29,6 +29,9 @@ The **public GitHub repository** must never be able to deploy to or authenticate
 | `SUPER_MCP_SURFACES` | server (optional). Unset or `online` serves `/mcp` (+ `/mcp/online` alias). `stores` is rejected. |
 | `NOMINATIM_USER_AGENT` | **server (required)**. OSM returns 403 to the placeholder default, so address geocoding silently degrades to city centroids. See below. |
 | `SUPER_MCP_NO_CAP` | **ingest job (required, `1`)**. Without it the ingest silently covers ~1% of stores. See below. |
+| `SUPER_MCP_PROMO_RETENTION_DAYS` | ingest job (optional). Sweeps promotions that ended this long ago. Unset means no sweep. |
+| `SUPER_MCP_USAGE_RETENTION_DAYS` | ingest job (optional). Sweeps `usage_event` rows older than this. Unset means no sweep. See below. |
+| `SUPER_MCP_QUERY_CACHE_RETENTION_DAYS` | ingest job (optional). Ages cached search phrases out of `semantic_query_embedding`. Unset means no sweep. See below. |
 | `NEXT_PUBLIC_MCP_URL` | **web image build arg, not runtime env**. See below. |
 | `NEXT_PUBLIC_SITE_URL` | web image build arg. Public origin, used as `metadataBase` so `og:image` resolves absolutely. |
 | `NEXT_PUBLIC_MCP_REQUIRES_KEY` | web image build arg (optional, `1`). Install buttons default to keyless; set `1` unless the API runs with `SUPER_MCP_ALLOW_ANONYMOUS=1`. |
@@ -82,6 +85,34 @@ After any web deploy, confirm the page did not quietly localhost itself:
 ```bash
 curl -s <site>/ | grep -c '<site>/mcp'   # must be non-zero
 ```
+
+## Privacy retention is opt-in, and the privacy page depends on it
+
+Two sweeps run from the nightly ingest job, both off unless a window is set, so no
+deployment starts deleting because it picked up a new image:
+
+- `SUPER_MCP_USAGE_RETENTION_DAYS` prunes `usage_event`. Those rows carry no content
+  (`api_key_id`, `route`, `status_code`, `latency_ms`, `created_at`), but they are the one
+  per-request table that grows without bound.
+- `SUPER_MCP_QUERY_CACHE_RETENTION_DAYS` ages entries out of `semantic_query_embedding`.
+  **This is the privacy-relevant one.** That table stores `normalized_query`, the phrase a
+  shopper actually typed, and nothing expires it on its own. It ages on `embedded_at`, which
+  a cache hit does not refresh, so a phrase expires on a fixed clock however popular it is
+  and simply costs one re-embed afterwards.
+
+`access_requests` is deliberately never swept. Those rows are people who asked for access,
+and the privacy page says they are kept until deletion is requested.
+
+Two things make this easy to get wrong:
+
+1. **The ingest job does not track `:latest`.** It is pinned to an explicit digest tag, so
+   setting the env vars alone changes nothing until the job is re-pointed at an image that
+   contains the sweep.
+2. **The privacy page must not claim a window that is not running.** `/privacy` currently
+   promises deletion on request and states no retention period, which is true with the
+   sweeps off. If you enable them, say so on the page, and if you later disable them, take
+   it back off. A policy that describes a job nobody runs is the same failure as a policy
+   that says the shopping list is not stored.
 
 ## The Firebase Hosting front door
 

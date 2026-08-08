@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { getPool, withTransaction } from "../client/index.js";
+import { deleteInBatches } from "./batchedDelete.js";
 import { sqlNormalizeGtin } from "../schema/gtinSql.js";
 
 export interface UpsertPromoInput {
@@ -124,21 +125,6 @@ const DEFAULT_PROMO_RETENTION_DAYS = 14;
  * hook logs it, and the sweep makes no progress on that night or any other:
  * a permanently failing job whose error nobody reads.
  */
-const PURGE_BATCH_MAX = 20_000;
-const PURGE_BATCH_MIN = 500;
-/** Postgres `query_canceled`, which is what statement_timeout raises. */
-const STATEMENT_TIMEOUT = "57014";
-/** Enough attempts to clear ~800k at the smallest batch, plus room to back off. */
-const MAX_BATCHES = 2_000;
-
-function isStatementTimeout(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    (err as { code?: unknown }).code === STATEMENT_TIMEOUT
-  );
-}
-
 /**
  * Delete promotions that ended more than `retentionDays` ago.
  *
@@ -155,36 +141,18 @@ function isStatementTimeout(err: unknown): boolean {
 export async function purgeExpiredPromotions(
   retentionDays: number = DEFAULT_PROMO_RETENTION_DAYS,
 ): Promise<ExpiredPromoPurgeResult> {
-  let promotionsDeleted = 0;
-  let batches = 0;
-  let batchSize = PURGE_BATCH_MAX;
-  for (; batches < MAX_BATCHES; batches += 1) {
-    let removed: number;
-    try {
-      const res = await getPool().query(
-        `WITH doomed AS (
-           SELECT id FROM promotion
-            WHERE end_ts < now() - ($1 || ' days')::interval
-            ORDER BY end_ts
-            LIMIT $2
-         )
-         DELETE FROM promotion p USING doomed d WHERE p.id = d.id`,
-        [String(retentionDays), batchSize],
-      );
-      removed = res.rowCount ?? 0;
-    } catch (err) {
-      // Anything but the timeout is a real fault and belongs to the caller. At
-      // the floor, so is the timeout: a batch of 500 that cannot finish in
-      // thirty seconds means something is wrong with the database, not with
-      // the batch size, and quietly grinding on would hide it.
-      if (!isStatementTimeout(err) || batchSize <= PURGE_BATCH_MIN) throw err;
-      batchSize = Math.max(PURGE_BATCH_MIN, Math.floor(batchSize / 4));
-      continue;
-    }
-    promotionsDeleted += removed;
-    if (removed === 0) {
-      return { promotionsDeleted, batches, batchSize, retentionDays, capped: false };
-    }
-  }
-  return { promotionsDeleted, batches, batchSize, retentionDays, capped: true };
+  const { deleted, batches, batchSize, capped } = await deleteInBatches(async (limit) => {
+    const res = await getPool().query(
+      `WITH doomed AS (
+         SELECT id FROM promotion
+          WHERE end_ts < now() - ($1 || ' days')::interval
+          ORDER BY end_ts
+          LIMIT $2
+       )
+       DELETE FROM promotion p USING doomed d WHERE p.id = d.id`,
+      [String(retentionDays), limit],
+    );
+    return res.rowCount ?? 0;
+  });
+  return { promotionsDeleted: deleted, batches, batchSize, retentionDays, capped };
 }
